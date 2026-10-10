@@ -1,8 +1,16 @@
+Lexis+ &
+wdlexis+ — l'atelier du langage Lexis+<br/>
+© 2026 Jean‑Marc "jihem"Quéré, sonaliwan.fr<br/>
+SIRET 130333198000013<br/>
+Distribué sous licence CC BY‑NC‑SA 4.0.<br/>
+
+Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
+Pour obtenir une autorisation d'utilisation commerciale,<br/>
+contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
+
 # Lexis+ et l'atelier wdlexis+
 
 **Lexis+ — Développez naturellement vos applications métier**
-
-Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr — SIRET 130333198000013 — metalab (at) sonaliwan.fr
 
 Ce document décrit le langage Lexis+ tel qu'il s'utilise sur le poste de travail
 avec l'atelier **wdlexis+** et le runtime **wdlexisrt** : le langage, la base de
