@@ -8,13 +8,11 @@ sql "create table if not exists contacts(id integer primary key default nextval(
 
 fen = ui.fenetre{titre = "Carnet", largeur = 720, hauteur = 460, disposition = "bordure"}
 menu = fen:ajouter(ui.barremenu())
-menu:ancrage("haut")
 menu:ajouter("Fichier", "Ajouter un contact")
 menu:ajouter("Fichier", "Exporter en CSV…")
 menu:ajouter("Fichier", "Quitter")
 
 grille = fen:ajouter(ui.grille{multi = faux})
-&&grille.ancrage = "centre"
 grille:ajoutercolonne{nom = "id", titre = "#", genre = "nombre", largeur = 50, decimales = 0}
 grille:ajoutercolonne{nom = "nom", titre = "Nom", largeur = 220}
 grille:ajoutercolonne{nom = "courriel", titre = "Courriel", largeur = 260}
