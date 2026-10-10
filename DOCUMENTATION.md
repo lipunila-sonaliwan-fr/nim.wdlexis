@@ -431,7 +431,7 @@ procedure CONVERTIR(ev)
     ui.alerte("Montant invalide", "attention")
     retourner
   finsi
-  resultat.libelle = chaine(euros * 1.08, 1, 2) + " $"
+  resultat.valeur = chaine(euros * 1.08, 1, 2) + " $"
 retourner
 ```
 
