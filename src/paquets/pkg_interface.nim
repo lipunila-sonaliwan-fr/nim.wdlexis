@@ -1,0 +1,1251 @@
+# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+#   wdlexis+ - paquet interface : wdgui depuis Lexis+
+#
+#   ui = paquet("interface")
+#   fen = ui.fenetre{titre = "Bonjour", largeur = 420, hauteur = 220}
+#   lbl = fen:ajouter(ui.etiquette("Cliquez le bouton", "centre"))
+#   btn = fen:ajouter(ui.bouton("OK", {defaut = vrai}))
+#   btn.surclic = @CLIC
+#   ui.executer()
+#
+#   procedure CLIC(ev)
+#     lbl.libelle = "Cliqué en " + ev.x + ", " + ev.y
+#   retourner
+#
+# Chaque contrôle est un objet :
+#   - propriétés lues et écrites comme dans wdgui (valeur, num, libelle, visible,
+#     etat, infobulle, nom, x, y, largeur, hauteur, couleur, fond, ancrage,
+#     poids, largeurfixe, hauteurfixe, etirer, marge, espacement, min, max...) ;
+#   - gestionnaires sur<événement> : surclic, surchangement, surselection,
+#     surdoubleclic, surclicdroit, surtouchebas, sursaisie, surfocus,
+#     surfermeture... et surevenement pour tous ; ev:arreter() arrête la
+#     propagation ; un gestionnaire est une référence de procédure (@NOM) ;
+#   - méthodes selon la famille : liste:ajouter, tableau:ajouterligne,
+#     arbre:ajouter, grille:ajoutercolonne, graphe:ajouterdonnee, onglets:ajouterpage...
+#
+# Les gestionnaires s'exécutent sur les fils de wdgui ; l'interpréteur les
+# sérialise avec son verrou global. ui.executer() attend la fermeture des
+# fenêtres (dans l'atelier) ou lance la boucle de wdgui (runtime autonome).
+# Les valeurs nommées (dispositions, ancrages, icônes...) s'écrivent en
+# français ; les noms anglais de wdgui sont aussi acceptés.
+
+import std/[strutils, tables, os, locks, options]
+import ../wdgui
+import ../lexis/api
+import ../ide/compat
+
+type
+  UiCtl* = ref object of LUser
+    rawId: ControlId     # identifiant fixe (colonnes de grille), sinon lu sur ctl / win.
+    ctl*: Control
+    win*: Window
+    family*: string
+    handlers*: LTable
+    closed*: bool
+
+  UiState* = ref object of RootObj
+    ctls*: seq[UiCtl]
+    windows*: seq[UiCtl]
+    loopRunning*: bool
+    trace*: bool          # ui.tracer(vrai) : affiche chaque événement reçu.
+
+proc id*(c: UiCtl): ControlId =
+  # Identifiant courant. wdgui n'attribue l'identifiant d'un contrôle qu'au
+  # moment où il est rattaché à l'arbre d'une fenêtre : on le relit à chaque fois.
+  if not c.ctl.isNil: result = c.ctl.id
+  elif not c.win.isNil: result = c.win.id
+  else: result = c.rawId
+
+var uiLock: Lock
+var uiInterps: seq[Interp]     # interpréteurs ayant ouvert le paquet (un par programme).
+initLock(uiLock)
+
+var ctlMeta: LTable
+
+proc uiState*(L: Interp): UiState =
+  let r = L.ext.getOrDefault("ui")
+  if r.isNil:
+    result = UiState()
+    L.ext["ui"] = result
+  else:
+    result = UiState(r)
+
+proc findCtl(st: UiState, cid: ControlId): UiCtl =
+  var target: Control = nil
+  when compiles(control(cid)):
+    try: target = control(cid)
+    except CatchableError: target = nil
+  if not target.isNil:
+    for c in st.ctls:
+      if not c.ctl.isNil and c.ctl == target: return c
+  for c in st.ctls:
+    if c.id == cid: return c
+  nil
+
+proc idText(cid: ControlId): string =
+  when compiles($cid): result = $cid
+  elif compiles(int(cid)): result = $int(cid)
+  else: result = "?"
+
+proc openWindows*(L: Interp): int =
+  ## Nombre de fenêtres du programme encore ouvertes.
+  let r = L.ext.getOrDefault("ui")
+  if r.isNil: return 0
+  for w in UiState(r).windows:
+    if not w.closed: inc result
+
+proc closeAllWindows*(L: Interp) =
+  let r = L.ext.getOrDefault("ui")
+  if r.isNil: return
+  for w in UiState(r).windows:
+    if not w.closed:
+      w.closed = true
+      closeWindow(w.id)
+
+proc loopNeeded*(L: Interp): bool =
+  ## Runtime autonome : faut-il lancer la boucle wdgui après le programme ?
+  let r = L.ext.getOrDefault("ui")
+  not r.isNil and not UiState(r).loopRunning and L.openWindows() > 0
+
+#
+# Valeurs nommées (français, ou anglais de wdgui)
+#
+
+proc layoutOf(s: string): typeof(lkVertical) =
+  case s.toLowerAscii
+  of "horizontal", "h", "rangee", "ligne", "row": lkHorizontal
+  of "grille", "grid": lkGrid
+  of "flux", "flow": lkFlow
+  of "bordure", "border": lkBorder
+  of "pile", "stack": lkStack
+  of "absolue", "absolu", "absolute": lkAbsolute
+  else: lkVertical
+
+proc dockOf(s: string): typeof(dkTop) =
+  case s.toLowerAscii
+  of "haut", "top": dkTop
+  of "bas", "bottom": dkBottom
+  of "gauche", "left": dkLeft
+  of "droite", "right": dkRight
+  else: dkCenter
+
+proc alignOf(s: string): typeof(alCenter) =
+  case s.toLowerAscii
+  of "centre", "center": result = alCenter
+  of "droite", "right": result = alRight
+  else:
+    when declared(alLeft): result = alLeft
+    else: result = alCenter
+
+proc iconOf(s: string): typeof(iconStop) =
+  case s.toLowerAscii
+  of "stop", "erreur", "error": iconStop
+  of "attention", "exclamation", "warning": iconExclamation
+  of "question": iconQuestion
+  of "aucune", "none": iconNone
+  else: iconInformation
+
+proc themeOf(name: string, dark: bool): Theme =
+  case name.toLowerAscii
+  of "windows", "windows11", "natif", "native": result = themeNative(dark = dark)
+  of "macos", "mac": result = themeMacOS(dark = dark)
+  of "linux", "gnome", "adwaita": result = themeLinux(dark = dark)
+  else: result = themeFor(dark)
+
+proc chartKindOf(s: string): typeof(ckColumn) =
+  case s.toLowerAscii
+  of "lignes", "courbe", "line": ckLine
+  of "aires", "aire", "area": ckArea
+  of "secteurs", "camembert", "pie": ckPie
+  else: ckColumn
+
+proc gridKindOf(s: string): typeof(gcText) =
+  case s.toLowerAscii
+  of "nombre", "number": gcNumber
+  of "date": gcDate
+  of "image": gcImage
+  of "bouton", "button": gcButton
+  of "combo": gcCombo
+  of "case", "coche", "check", "checkbox": gcCheck
+  else: gcText
+
+proc footerOf(s: string): typeof(fkSum) =
+  case s.toLowerAscii
+  of "moyenne", "average", "avg": fkAverage
+  of "min": fkMin
+  of "max": fkMax
+  of "nombre", "count": fkCount
+  else: fkSum
+
+proc editModeOf(s: string): typeof(emInherit) =
+  case s.toLowerAscii
+  of "lecture", "lectureseule", "readonly": emReadOnly
+  of "modifiable", "editable": emEditable
+  else: emInherit
+
+proc fillModeOf(s: string): typeof(fmProgrammed) =
+  case s.toLowerAscii
+  of "manuel", "manual": fmManual
+  of "automatique", "automatic": fmAutomatic
+  else: fmProgrammed
+
+proc compareOf(s: string): typeof(coEquals) =
+  case s.toLowerAscii
+  of "=", "==", "egal", "equals": coEquals
+  of "<>", "!=", "~=", "different", "notequals": coNotEquals
+  of "<": coLess
+  of "<=": coLessOrEqual
+  of ">": coGreater
+  of ">=": coGreaterOrEqual
+  of "contient", "contains": coContains
+  of "vide", "empty": coEmpty
+  else: coNotEmpty
+
+proc stateName(id: ControlId): string =
+  when compiles(id.state):
+    let s = id.state
+    if s == csGrayed: result = "grise"
+    elif s == csReadOnly: result = "lecture"
+    else: result = "actif"
+  else: result = ""
+
+proc stateOf(s: string): typeof(csActive) =
+  case s.toLowerAscii
+  of "grise", "inactif", "grayed", "disabled": csGrayed
+  of "lecture", "lectureseule", "readonly": csReadOnly
+  else: csActive
+
+# ---------------------------------------------------------------------------
+# Accès aux propriétés (getters/setters de l'API par identifiant)
+# ---------------------------------------------------------------------------
+
+template defGetter(pname, field, conv: untyped) =
+  proc pname(id: ControlId): Value =
+    when compiles(id.field): result = conv(id.field)
+    else: result = nilV
+
+defGetter(gValue, value, strV)
+defGetter(gNum, valueNum, numV)
+defGetter(gCaption, caption, strV)
+defGetter(gVisible, visible, boolV)
+defGetter(gTooltip, tooltip, strV)
+defGetter(gX, x, numV)
+defGetter(gY, y, numV)
+defGetter(gWidth, width, numV)
+defGetter(gHeight, height, numV)
+defGetter(gMin, minBound, numV)
+defGetter(gMax, maxBound, numV)
+
+proc gName(id: ControlId): Value =
+  when compiles(name(id)): result = strV(name(id))
+  else: result = nilV
+
+proc colorOf(v: Value): Color =
+  if v.kind != vkStr: rtError("couleur attendue sous la forme \"#RRGGBB\"")
+  hex(v.s)
+
+proc numOf(v: Value, what: string): float =
+  var ok: bool
+  result = toFloat(v, ok)
+  if not ok: rtError(what & " : nombre attendu")
+
+proc unsupported(what: string) {.noreturn.} =
+  rtError("propriété « " & what & " » non prise en charge par cette version de wdgui")
+
+template setNum(lhs: untyped, v: float, what = "") =
+  when compiles(lhs = v): lhs = v
+  elif compiles(lhs = typeof(lhs)(v)): lhs = typeof(lhs)(v)
+  else: unsupported(what)
+
+template setAny(lhs: untyped, v: untyped, what: string) =
+  when compiles(lhs = v): lhs = v
+  else: unsupported(what)
+
+template setVia(c: UiCtl, idExpr, objField: untyped, v: untyped, what: string) =
+  # Affectation par identifiant (API de wdgui) ; à défaut, sur l'objet Control sous le verrou de wdgui.
+  when compiles(idExpr = v):
+    idExpr = v
+  else:
+    if c.ctl.isNil: unsupported(what)
+    withControl(c.id, Control, obj):
+      when compiles(obj.objField = v): obj.objField = v
+      else: unsupported(what)
+    requestRedraw(c.id)
+
+template doCall(call: untyped) =
+  when typeof(call) is void: call
+  else: discard call
+
+proc anyV(x: bool): Value = boolV(x)
+proc anyV(x: int): Value = intV(x)
+proc anyV(x: float): Value = numV(x)
+proc anyV(x: string): Value = strV(x)
+
+proc typeNameOf(id: ControlId, family: string): Value =
+  when compiles(controlType(id)): result = strV(controlType(id))
+  else: result = strV(family)
+
+proc ctlOf(v: Value, what = "contrôle"): UiCtl =
+  if v.kind != vkUser or not (v.u of UiCtl): rtError(what & " attendu")
+  UiCtl(v.u)
+
+const captionFamilies = ["etiquette", "bouton", "fenetre", "page", "cadre"]
+
+proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
+  let id = c.id
+  case key
+  of "valeur", "texte":
+    let txt = L.tostr(v)
+    if c.family in captionFamilies and key == "texte":
+      setVia(c, id.caption, caption, txt, key)
+    else:
+      when compiles(id.value = txt): id.value = txt
+      else:
+        if c.ctl.isNil: unsupported(key)
+        withControl(c.id, Control, obj): obj.setValueText(txt)
+        requestRedraw(c.id)
+  of "num": setNum(id.valueNum, numOf(v, "num"), key)
+  of "libelle", "titre":
+    let txt = L.tostr(v)
+    setVia(c, id.caption, caption, txt, key)
+  of "visible":
+    let b = truthy(v)
+    setVia(c, id.visible, visible, b, key)
+  of "etat":
+    let st = stateOf(L.tostr(v))
+    setVia(c, id.state, state, st, key)
+  of "actif":
+    let st = if truthy(v): csActive else: csGrayed
+    setVia(c, id.state, state, st, key)
+  of "infobulle":
+    let txt = L.tostr(v)
+    setVia(c, id.tooltip, tooltip, txt, key)
+  of "nom":
+    let txt = L.tostr(v)
+    setAny(id.name, txt, key)
+  of "x": setNum(id.x, numOf(v, "x"), key)
+  of "y": setNum(id.y, numOf(v, "y"), key)
+  of "largeur": setNum(id.width, numOf(v, "largeur"), key)
+  of "hauteur": setNum(id.height, numOf(v, "hauteur"), key)
+  of "couleur", "couleurtexte":
+    let col = colorOf(v)
+    when compiles(id.color = col): id.color = col
+    else:
+      if c.ctl.isNil: unsupported(key)
+      c.ctl.style.text = some(col)
+      requestRedraw(id)
+  of "fond":
+    let col = colorOf(v)
+    when compiles(id.backgroundColor = col): id.backgroundColor = col
+    else:
+      if c.ctl.isNil: unsupported(key)
+      c.ctl.style.background = some(col)
+      requestRedraw(id)
+  of "bordure":
+    let col = colorOf(v)
+    setAny(id.borderColor, col, key)
+  of "accent":
+    let col = colorOf(v)
+    setAny(id.accentColor, col, key)
+  of "rayon": setNum(id.radius, numOf(v, "rayon"), key)
+  of "coche":
+    let txt = if truthy(v): "1" else: "0"
+    setAny(id.value, txt, key)
+  of "min": setNum(id.minBound, numOf(v, "min"), key)
+  of "max": setNum(id.maxBound, numOf(v, "max"), key)
+  of "theme":
+    if c.family == "fenetre":
+      let th = themeOf(L.tostr(v), false)
+      setAny(id.theme, th, key)
+  of "ancrage", "poids", "largeurfixe", "hauteurfixe", "etirer", "marge", "espacement", "colonnes":
+    let o = c.ctl
+    if o.isNil: rtError("propriété « " & key & " » indisponible pour une fenêtre")
+    case key
+    of "ancrage":
+      let dk = dockOf(L.tostr(v))
+      setAny(o.dock, dk, key)
+    of "poids": setNum(o.weight, numOf(v, "poids"), key)
+    of "largeurfixe": setNum(o.fixedWidth, numOf(v, "largeurfixe"), key)
+    of "hauteurfixe": setNum(o.fixedHeight, numOf(v, "hauteurfixe"), key)
+    of "etirer":
+      let b = truthy(v)
+      setAny(o.stretch, b, key)
+    of "marge": setNum(Container(o).margin, numOf(v, "marge"), key)
+    of "espacement": setNum(Container(o).spacing, numOf(v, "espacement"), key)
+    else: setNum(Container(o).columns, numOf(v, "colonnes"), key)
+    requestRedraw(id)
+  else:
+    if key.startsWith("sur"):
+      if v.kind != vkNil and not L.callable(v):
+        rtError("le gestionnaire « " & key & " » doit être une procédure (@NOM)")
+      c.handlers.rawSet(key, v)
+    else:
+      rtError("propriété inconnue « " & key & " » (" & c.family & ")")
+
+proc getProp(L: Interp, c: UiCtl, key: string): Value =
+  let id = c.id
+  case key
+  of "valeur", "texte":
+    if key == "texte" and c.family in captionFamilies: gCaption(id)
+    else: gValue(id)
+  of "num": gNum(id)
+  of "libelle", "titre": gCaption(id)
+  of "visible": gVisible(id)
+  of "etat": strV(stateName(id))
+  of "actif": boolV(stateName(id) == "actif")
+  of "infobulle": gTooltip(id)
+  of "nom": gName(id)
+  of "x": gX(id)
+  of "y": gY(id)
+  of "largeur": gWidth(id)
+  of "hauteur": gHeight(id)
+  of "coche": boolV(id.value == "1")
+  of "min": gMin(id)
+  of "max": gMax(id)
+  of "famille": strV(c.family)
+  of "genre": typeNameOf(id, c.family)
+  else:
+    if key.startsWith("sur"): c.handlers.rawGet(key) else: nilV
+
+#
+# Événements
+#
+
+proc buttonName(b: typeof(mbLeft)): string =
+  if b == mbRight: "droit" elif b == mbMiddle: "milieu" else: "gauche"
+
+template evNum(t: LTable, ev: Event, field: untyped, key: string) =
+  when compiles(float(ev.field)): t.set key, numV(float(ev.field))
+
+template evInt(t: LTable, ev: Event, field: untyped, key: string) =
+  when compiles(int(ev.field)): t.set key, intV(int(ev.field))
+
+proc frenchEvent(k: string): string =
+  ## Nom français d'un événement wdgui (« click » -> « clic »).
+  case k
+  of "click": "clic"
+  of "doubleclick": "doubleclic"
+  of "rightclick": "clicdroit"
+  of "middleclick": "clicmilieu"
+  of "rightdoubleclick": "doubleclicdroit"
+  of "buttondown": "boutonbas"
+  of "buttonup": "boutonhaut"
+  of "mouseenter": "entree"
+  of "mouseleave": "sortie"
+  of "mousemove": "deplacement"
+  of "wheel", "mousewheel": "molette"
+  of "keydown": "touchebas"
+  of "keyup": "touchehaut"
+  of "textinput": "saisie"
+  of "focusgained": "focus"
+  of "focuslost": "finfocus"
+  of "change": "changement"
+  of "selection": "selection"
+  of "expand": "deploiement"
+  of "collapse": "repli"
+  of "validate": "validation"
+  of "windowopen": "ouverture"
+  of "windowclose": "fermeture"
+  of "windowresize": "redimension"
+  of "windowactivate": "activation"
+  of "windowdeactivate": "desactivation"
+  else: k
+
+proc buildEvent(L: Interp, st: UiState, ev: Event, kindName: string): LTable =
+  let t = newLTable()
+  t.set "genre", strV(kindName)
+  let target = st.findCtl(ev.id)
+  let current = st.findCtl(ev.current)
+  if not target.isNil: t.set "id", userV(target)
+  if not current.isNil: t.set "courant", userV(current)
+  evNum(t, ev, x, "x")
+  evNum(t, ev, y, "y")
+  evNum(t, ev, dx, "dx")
+  evNum(t, ev, dy, "dy")
+  evInt(t, ev, key, "touche")
+  evInt(t, ev, modifiers, "modificateurs")
+  evInt(t, ev, index, "index")
+  evInt(t, ev, column, "colonne")
+  when compiles(ev.button == mbLeft): t.set "bouton", strV(buttonName(ev.button))
+  when compiles(ev.isRepeat): t.set "repetition", boolV(ev.isRepeat)
+  t.set "texte", strV(ev.text)
+  if ev.text.contains(TreeSep):
+    let path = newLTable()
+    for p in ev.text.split(TreeSep): path.arr.add strV(p)
+    t.set "chemin", tableV(path)
+  t.set "arreter", fnV("arreter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    if arg(a, 1).kind == vkTable: a[0].t.set("arrete", boolV(true)))
+  t
+
+proc eventName(ev: Event): string =
+  # Selon les versions de wdgui, $ev.kind vaut « evClick » ou « Click ».
+  var k = $ev.kind
+  if k.len > 2 and k.startsWith("ev") and k[2] in {'A'..'Z'}: k = k[2 .. ^1]
+  frenchEvent(k.toLowerAscii)
+
+proc scriptHandler(ev: var Event) {.nimcall, gcsafe.} =
+  # Gestionnaire de toutes les fenêtres du programme. wdgui l'appelle pour la
+  # cible puis pour chacun de ses parents (ev.current) ; on exécute à chaque
+  # niveau le gestionnaire sur<événement> de l'objet correspondant.
+  {.cast(gcsafe).}:
+    var L: Interp = nil
+    withLock uiLock:
+      for cand in uiInterps:
+        let r = cand.ext.getOrDefault("ui")
+        if r.isNil: continue
+        for w in UiState(r).windows:
+          if w.id == ev.window:
+            L = cand
+            break
+        if not L.isNil: break
+    if L.isNil or L.stopRequested(): return
+    let kindName = eventName(ev)
+    L.enter()
+    try:
+      curCtx = Ctx()
+      let st = L.uiState
+      let cur = st.findCtl(ev.current)
+      if st.trace and kindName notin ["deplacement", "entree", "sortie"]:
+        L.output("[interface] " & kindName & " id=" & idText(ev.id) & " courant=" & idText(ev.current) &
+                 " objet=" & (if cur.isNil: "aucun" else: cur.family) &
+                 (if cur.isNil: "" else: " gestionnaire=" &
+                    (if cur.handlers.rawGet("sur" & kindName).kind == vkNil: "non" else: "oui")) & "\n")
+      if not cur.isNil:
+        if ev.kind == evWindowClose and cur.family == "fenetre": cur.closed = true
+        let h = cur.handlers.rawGet("sur" & kindName)
+        let g = cur.handlers.rawGet("surevenement")
+        if h.kind != vkNil or g.kind != vkNil:
+          let evT = L.buildEvent(st, ev, kindName)
+          if h.kind != vkNil: discard L.call(h, @[tableV(evT)])
+          if g.kind != vkNil: discard L.call(g, @[tableV(evT)])
+          if truthy(evT.get("arrete")): ev.stopPropagation()
+    except LexisStop:
+      discard
+    except LexisError as e:
+      L.onError(e.msg & "\n" & e.traceback)
+    except Exception as e:
+      # y compris les Defect de Nim, qui sinon tueraient le fil en silence
+      L.onError("erreur interne dans le gestionnaire d'interface (" & kindName & ") : " & e.msg)
+    finally:
+      L.leave()
+
+#
+# Objets contrôles
+#
+
+var familyMethods: Table[string, LTable]
+
+proc register(L: Interp, c: UiCtl): Value =
+  c.handlers = newLTable()
+  c.tname = "interface." & c.family
+  c.meta = ctlMeta
+  L.uiState.ctls.add c
+  if c.family == "fenetre": L.uiState.windows.add c
+  userV(c)
+
+proc newCtl(L: Interp, ctl: Control, family: string): Value =
+  L.register(UiCtl(rawId: ctl.id, ctl: ctl, family: family))
+
+proc mfn(family, name: string, p: NativeProc) =
+  if not familyMethods.hasKey(family): familyMethods[family] = newLTable()
+  familyMethods[family].fn name, p
+
+proc self(L: Interp, a: seq[Value], fname: string): UiCtl =
+  let v = arg(a, 1)
+  if v.kind != vkUser or not (v.u of UiCtl): rtError("« " & fname & " » : appelez-la avec « : » (objet:" & fname & "(...))")
+  UiCtl(v.u)
+
+proc strs(L: Interp, a: seq[Value], start: int, fname: string): seq[string] =
+  # Arguments chaînes à partir de `start`, ou une liste de chaînes.
+  if arg(a, start).kind == vkTable:
+    let t = a[start - 1].t
+    for i in 1 .. t.rawLen: result.add L.tostr(t.rawGet(intV(i)))
+  else:
+    for i in start .. a.len: result.add L.tostr(a[i - 1])
+
+proc pathOf(L: Interp, a: seq[Value], start: int, fname: string): string =
+  # Chemin d'arbre / de menu : "A", "B" ou {"A", "B"} ou "A/B".
+  var parts = L.strs(a, start, fname)
+  if parts.len == 1 and TreeSep notin parts[0] and '/' in parts[0]:
+    parts = parts[0].split('/')
+  parts.join($TreeSep)
+
+template colArg(v: Value, body: untyped) =
+  # Colonne de grille par nom ou par index.
+  if v.kind == vkStr:
+    let col {.inject.} = v.s
+    body
+  else:
+    var okc: bool
+    let col {.inject.} = int(toInteger(v, okc))
+    if not okc: rtError("colonne attendue (nom ou index)")
+    body
+
+proc ctlIndex(L: Interp, a: seq[Value]): seq[Value] =
+  let c = UiCtl(a[0].u)
+  let key = arg(a, 2)
+  if key.kind != vkStr: return @[nilV]
+  if familyMethods.hasKey(c.family):
+    let m = familyMethods[c.family].rawGet(key.s)
+    if m.kind != vkNil: return @[m]
+  let common = familyMethods.getOrDefault("*")
+  if not common.isNil:
+    let m = common.rawGet(key.s)
+    if m.kind != vkNil: return @[m]
+  @[L.getProp(c, key.s.toLowerAscii)]
+
+proc ctlNewIndex(L: Interp, a: seq[Value]): seq[Value] =
+  let c = UiCtl(a[0].u)
+  let key = arg(a, 2)
+  if key.kind != vkStr: rtError("nom de propriété attendu")
+  L.setProp(c, key.s.toLowerAscii, arg(a, 3))
+
+proc addChildTo(L: Interp, parent: UiCtl, child: UiCtl) =
+  if child.ctl.isNil: rtError("une fenêtre ne peut pas être ajoutée à un conteneur")
+  if parent.family == "fenetre":
+    discard parent.win.addChild(child.ctl)
+  elif parent.ctl of Container:
+    discard Container(parent.ctl).addChild(child.ctl)
+  else:
+    rtError("« " & parent.family & " » n'est pas un conteneur")
+
+proc defineMethods() =
+  # communs
+  mfn "*", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let p = L.self(a, "ajouter")
+    for i in 2 .. a.len:
+      L.addChildTo(p, ctlOf(a[i - 1], "contrôle à ajouter"))
+    @[arg(a, 2)]
+  mfn "*", "focus", proc (L: Interp, a: seq[Value]): seq[Value] =
+    setFocus(L.self(a, "focus").id)
+  mfn "*", "menucontextuel", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "menucontextuel")
+    openContextMenu(c.id, L.strs(a, 2, "menucontextuel"))
+  mfn "*", "redessiner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    requestRedraw(L.self(a, "redessiner").id)
+
+  # fenêtre
+  mfn "fenetre", "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let w = L.self(a, "fermer")
+    if not w.closed:
+      w.closed = true
+      closeWindow(w.id)
+  mfn "fenetre", "fixertheme", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let w = L.self(a, "fixertheme")
+    let th = themeOf(L.optStr(a, 2, "fixertheme", "natif"), optBool(a, 3, false))
+    setAny(w.id.theme, th, "theme")
+
+  # onglets
+  mfn "onglets", "ajouterpage", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = L.self(a, "ajouterpage")
+    let page = typeof(newTab())(t.ctl).addPage(L.checkStr(a, 2, "ajouterpage"),
+                                               layoutOf(L.optStr(a, 3, "ajouterpage", "vertical")))
+    @[L.newCtl(page, "page")]
+
+  # listes et combos
+  for fam in ["liste", "combo"]:
+    mfn fam, "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+      let c = L.self(a, "ajouter")
+      var last = 0
+      for s in L.strs(a, 2, "ajouter"): last = listAdd(c.id, s)
+      @[intV(last)]
+    mfn fam, "inserer", proc (L: Interp, a: seq[Value]): seq[Value] =
+      let c = L.self(a, "inserer")
+      let idx = int(L.checkInt(a, 2, "inserer"))
+      let item = L.checkStr(a, 3, "inserer")
+      listInsert(c.id, item, idx)
+    mfn fam, "supprimer", proc (L: Interp, a: seq[Value]): seq[Value] =
+      listDelete(L.self(a, "supprimer").id, int(L.checkInt(a, 2, "supprimer")))
+    mfn fam, "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+      listDeleteAll(L.self(a, "vider").id)
+    mfn fam, "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+      listSelectPlus(L.self(a, "selectionner").id, int(L.checkInt(a, 2, "selectionner")))
+    mfn fam, "deselectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+      listSelectMinus(L.self(a, "deselectionner").id, int(L.checkInt(a, 2, "deselectionner")))
+    mfn fam, "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+      let v = L.self(a, "selection").id.value
+      try: @[intV(parseInt(v))] except ValueError: @[intV(0)]
+    mfn fam, "nombre", proc (L: Interp, a: seq[Value]): seq[Value] =
+      @[intV(listCount(L.self(a, "nombre").id))]
+    mfn fam, "element", proc (L: Interp, a: seq[Value]): seq[Value] =
+      @[strV(listItem(L.self(a, "element").id, int(L.checkInt(a, 2, "element"))))]
+    mfn fam, "modifier", proc (L: Interp, a: seq[Value]): seq[Value] =
+      listModify(L.self(a, "modifier").id, L.checkStr(a, 3, "modifier"), int(L.checkInt(a, 2, "modifier")))
+    mfn fam, "chercher", proc (L: Interp, a: seq[Value]): seq[Value] =
+      @[intV(listSeek(L.self(a, "chercher").id, L.checkStr(a, 2, "chercher")))]
+
+  # tableau simple
+  mfn "tableau", "ajoutercolonne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "ajoutercolonne")
+    let title = L.checkStr(a, 2, "ajoutercolonne")
+    let w = L.optNum(a, 3, "ajoutercolonne", 120)
+    let al = alignOf(L.optStr(a, 4, "ajoutercolonne", "gauche"))
+    tableAddColumn(c.id, title, w, al)
+  mfn "tableau", "ajouterligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(tableAddLine(L.self(a, "ajouterligne").id, L.strs(a, 2, "ajouterligne")))]
+  mfn "tableau", "insererligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    tableInsertLine(L.self(a, "insererligne").id, int(L.checkInt(a, 2, "insererligne")), L.strs(a, 3, "insererligne"))
+  mfn "tableau", "supprimer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    tableDelete(L.self(a, "supprimer").id, int(L.checkInt(a, 2, "supprimer")))
+  mfn "tableau", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    tableDeleteAll(L.self(a, "vider").id)
+  mfn "tableau", "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(tableSelect(L.self(a, "selection").id))]
+  mfn "tableau", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    tableSelectPlus(L.self(a, "selectionner").id, int(L.checkInt(a, 2, "selectionner")))
+  mfn "tableau", "nombre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(tableCount(L.self(a, "nombre").id))]
+  mfn "tableau", "cellule", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[strV(tableCell(L.self(a, "cellule").id, int(L.checkInt(a, 2, "cellule")), int(L.checkInt(a, 3, "cellule"))))]
+  mfn "tableau", "fixercellule", proc (L: Interp, a: seq[Value]): seq[Value] =
+    tableSetCell(L.self(a, "fixercellule").id, int(L.checkInt(a, 2, "fixercellule")),
+                 int(L.checkInt(a, 3, "fixercellule")), L.checkStr(a, 4, "fixercellule"))
+  mfn "tableau", "ligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[toV(tableLine(L.self(a, "ligne").id, int(L.checkInt(a, 2, "ligne"))))]
+  mfn "tableau", "trier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    tableSort(L.self(a, "trier").id, int(L.checkInt(a, 2, "trier")), ascending = optBool(a, 3, true))
+
+  # arbre
+  mfn "arbre", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    treeAdd(L.self(a, "ajouter").id, L.pathOf(a, 2, "ajouter"))
+  mfn "arbre", "supprimer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    treeDelete(L.self(a, "supprimer").id, L.pathOf(a, 2, "supprimer"))
+  mfn "arbre", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    treeDeleteAll(L.self(a, "vider").id)
+  mfn "arbre", "deplier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    treeExpand(L.self(a, "deplier").id, L.pathOf(a, 2, "deplier"))
+  mfn "arbre", "replier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    treeCollapse(L.self(a, "replier").id, L.pathOf(a, 2, "replier"))
+  mfn "arbre", "estdeplie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[boolV(treeIsExpanded(L.self(a, "estdeplie").id, L.pathOf(a, 2, "estdeplie")))]
+  mfn "arbre", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "selectionner")
+    when compiles(treeSelectPlus(c.id, "")): treeSelectPlus(c.id, L.pathOf(a, 2, "selectionner"))
+  mfn "arbre", "nombre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "nombre")
+    when compiles(treeCount(c.id)): result = @[intV(treeCount(c.id))]
+
+  # menu
+  mfn "barremenu", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    menuAdd(L.self(a, "ajouter").id, L.pathOf(a, 2, "ajouter"))
+
+  # cases à cocher, boutons radio
+  mfn "cases", "coche", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let v = checkBoxValue(L.self(a, "coche").id, int(L.optInt(a, 2, "coche", 1)))
+    when v is bool: result = @[boolV(v)]
+    elif v is string: result = @[boolV(v == "1")]
+    else: result = @[boolV(v != 0)]
+  mfn "cases", "cocher", proc (L: Interp, a: seq[Value]): seq[Value] =
+    checkBoxSet(L.self(a, "cocher").id, int(L.checkInt(a, 2, "cocher")), optBool(a, 3, true))
+  mfn "cases", "ajouteroption", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "ajouteroption")
+    doCall(checkBoxAdd(c.id, L.checkStr(a, 2, "ajouteroption")))
+  mfn "radio", "ajouteroption", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "ajouteroption")
+    doCall(radioAdd(c.id, L.checkStr(a, 2, "ajouteroption")))
+
+  # graphe, calendrier, planning
+  mfn "graphe", "ajouterdonnee", proc (L: Interp, a: seq[Value]): seq[Value] =
+    grAddData(L.self(a, "ajouterdonnee").id, int(L.checkInt(a, 2, "ajouterdonnee")),
+              int(L.checkInt(a, 3, "ajouterdonnee")), L.checkNum(a, 4, "ajouterdonnee"))
+  mfn "graphe", "libellecategorie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    grCategoryLabel(L.self(a, "libellecategorie").id, int(L.checkInt(a, 2, "libellecategorie")),
+                    L.checkStr(a, 3, "libellecategorie"))
+  mfn "graphe", "libelleserie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    grSeriesLabel(L.self(a, "libelleserie").id, int(L.checkInt(a, 2, "libelleserie")), L.checkStr(a, 3, "libelleserie"))
+  mfn "graphe", "fixergenre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    grType(L.self(a, "fixergenre").id, chartKindOf(L.checkStr(a, 2, "fixergenre")))
+  mfn "calendrier", "afficher", proc (L: Interp, a: seq[Value]): seq[Value] =
+    calendarShow(L.self(a, "afficher").id, int(L.checkInt(a, 2, "afficher")), int(L.checkInt(a, 3, "afficher")))
+  mfn "kanban", "ajouterliste", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(kanbanAddList(L.self(a, "ajouterliste").id, L.checkStr(a, 2, "ajouterliste")))]
+  mfn "kanban", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(kanbanAdd(L.self(a, "ajouter").id, int(L.checkInt(a, 2, "ajouter")), L.checkStr(a, 3, "ajouter")))]
+  mfn "mosaique", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "ajouter")
+    let lbl = L.checkStr(a, 2, "ajouter")
+    let v = L.checkNum(a, 3, "ajouter")
+    treeMapAdd(c.id, lbl, v)
+  mfn "gantt", "ajoutertache", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(ganttAddTask(L.self(a, "ajoutertache").id, L.checkStr(a, 2, "ajoutertache"),
+                        start = L.checkNum(a, 3, "ajoutertache"), duration = L.checkNum(a, 4, "ajoutertache"),
+                        progress = L.optNum(a, 5, "ajoutertache", 0)))]
+  mfn "gantt", "fixeravancement", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ganttSetProgress(L.self(a, "fixeravancement").id, int(L.checkInt(a, 2, "fixeravancement")),
+                     L.checkNum(a, 3, "fixeravancement"))
+
+  # panneau défilant
+  mfn "panneau", "defilera", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "defilera")
+    let x = L.checkNum(a, 2, "defilera")
+    let y = L.checkNum(a, 3, "defilera")
+    panelScrollTo(c.id, x, y)
+  mfn "panneau", "defilerde", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "defilerde")
+    let x = L.checkNum(a, 2, "defilerde")
+    let y = L.checkNum(a, 3, "defilerde")
+    panelScrollBy(c.id, x, y)
+  mfn "panneau", "rendrevisible", proc (L: Interp, a: seq[Value]): seq[Value] =
+    panelEnsureVisible(L.self(a, "rendrevisible").id, ctlOf(arg(a, 2)).id)
+
+  # grille
+  mfn "grille", "ajoutercolonne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "ajoutercolonne")
+    var name, title, kind: string
+    var width = 120.0
+    var choices: seq[string]
+    var decimals = -1
+    if arg(a, 2).kind == vkTable:
+      let o = a[1].t
+      name = optField(o, "nom", "")
+      title = optField(o, "titre", name)
+      kind = optField(o, "genre", "texte")
+      width = optField(o, "largeur", 120.0)
+      decimals = optField(o, "decimales", -1)
+      let ch = o.field("choix")
+      if ch.kind == vkTable:
+        for i in 1 .. ch.t.rawLen: choices.add L.tostr(ch.t.rawGet(intV(i)))
+    else:
+      name = L.checkStr(a, 2, "ajoutercolonne")
+      title = L.optStr(a, 3, "ajoutercolonne", name)
+      kind = L.optStr(a, 4, "ajoutercolonne", "texte")
+      width = L.optNum(a, 5, "ajoutercolonne", 120)
+    var colId: ControlId
+    let gk = gridKindOf(kind)
+    when compiles(gridAddColumn(g.id, name, title, gk, width, choices = choices, decimals = decimals)):
+      colId = gridAddColumn(g.id, name, title, gk, width, choices = choices, decimals = decimals)
+    else:
+      colId = gridAddColumn(g.id, name, title, gk, width)
+      if choices.len > 0: gridSetChoices(g.id, name, choices)
+      if decimals >= 0: gridSetDecimals(g.id, name, decimals)
+    @[L.register(UiCtl(rawId: colId, family: "colonnegrille"))]
+  mfn "grille", "ajouterligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(gridAddLine(L.self(a, "ajouterligne").id, L.strs(a, 2, "ajouterligne")))]
+  mfn "grille", "insererligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridInsertLine(L.self(a, "insererligne").id, int(L.checkInt(a, 2, "insererligne")), L.strs(a, 3, "insererligne"))
+  mfn "grille", "modifierligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridModifyLine(L.self(a, "modifierligne").id, int(L.checkInt(a, 2, "modifierligne")), L.strs(a, 3, "modifierligne"))
+  mfn "grille", "supprimerligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridDeleteLine(L.self(a, "supprimerligne").id, int(L.checkInt(a, 2, "supprimerligne")))
+  mfn "grille", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridDeleteAll(L.self(a, "vider").id)
+  mfn "grille", "cellule", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "cellule")
+    let row = int(L.checkInt(a, 2, "cellule"))
+    colArg(arg(a, 3)):
+      result = @[strV(gridCell(g.id, row, col))]
+  mfn "grille", "fixercellule", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "fixercellule")
+    let row = int(L.checkInt(a, 2, "fixercellule"))
+    let v = L.tostr(arg(a, 4))
+    colArg(arg(a, 3)):
+      gridSetCell(g.id, row, col, v)
+  mfn "grille", "ligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[toV(gridLine(L.self(a, "ligne").id, int(L.checkInt(a, 2, "ligne"))))]
+  mfn "grille", "nombre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(gridCount(L.self(a, "nombre").id))]
+  mfn "grille", "nombrecolonnes", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(gridColumnCount(L.self(a, "nombrecolonnes").id))]
+  mfn "grille", "colonne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "colonne")
+    var cid: ControlId
+    colArg(arg(a, 2)):
+      cid = gridColumn(g.id, col)
+    let existing = L.uiState.findCtl(cid)
+    if not existing.isNil: return @[userV(existing)]
+    @[L.register(UiCtl(rawId: cid, family: "colonnegrille"))]
+  mfn "grille", "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(gridSelect(L.self(a, "selection").id, int(L.optInt(a, 2, "selection", 1))))]
+  mfn "grille", "nombreselection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(gridSelectCount(L.self(a, "nombreselection").id))]
+  mfn "grille", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridSelectPlus(L.self(a, "selectionner").id, int(L.checkInt(a, 2, "selectionner")))
+  mfn "grille", "deselectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridSelectMinus(L.self(a, "deselectionner").id, int(L.checkInt(a, 2, "deselectionner")))
+  mfn "grille", "toutselectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridSelectAll(L.self(a, "toutselectionner").id)
+  mfn "grille", "trier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "trier")
+    let asc = optBool(a, 3, true)
+    colArg(arg(a, 2)):
+      gridSort(g.id, col, ascending = asc)
+  mfn "grille", "chercher", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "chercher")
+    let value = L.checkStr(a, 3, "chercher")
+    let exact = optBool(a, 4, true)
+    let start = int(L.optInt(a, 5, "chercher", 1))
+    colArg(arg(a, 2)):
+      result = @[intV(gridSeek(g.id, col, value, exact = exact, start = start))]
+  mfn "grille", "trouver", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let f = gridFind(L.self(a, "trouver").id, L.checkStr(a, 2, "trouver"))
+    @[record({"ligne": intV(f.row), "colonne": intV(f.column)})]
+  mfn "grille", "fixerpied", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "fixerpied")
+    let k = footerOf(L.optStr(a, 3, "fixerpied", "somme"))
+    colArg(arg(a, 2)):
+      gridSetFooter(g.id, col, k)
+  mfn "grille", "valeurpied", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "valeurpied")
+    let kv = arg(a, 3)
+    colArg(arg(a, 2)):
+      if kv.kind == vkNil: result = @[strV($gridFooterValue(g.id, col))]
+      else: result = @[strV($gridFooterValue(g.id, col, footerOf(L.tostr(kv))))]
+  mfn "grille", "ajouterformat", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "ajouterformat")
+    let op = compareOf(L.checkStr(a, 3, "ajouterformat"))
+    let value = L.optStr(a, 4, "ajouterformat", "")
+    let o = if arg(a, 5).kind == vkTable: a[4].t else: nil
+    let bg = optField(o, "fond", "")
+    let fg = optField(o, "texte", "")
+    let whole = optField(o, "ligneentiere", false)
+    let bgc = if bg.len > 0: hex(bg) else: Transparent
+    let fgc = if fg.len > 0: hex(fg) else: Transparent
+    colArg(arg(a, 2)):
+      when compiles(gridAddFormat(g.id, col, op, value, background = bgc, text = fgc, wholeRow = whole)):
+        gridAddFormat(g.id, col, op, value, background = bgc, text = fgc, wholeRow = whole)
+      elif compiles(gridAddFormat(g.id, col, op, value, bgc, fgc, whole)):
+        gridAddFormat(g.id, col, op, value, bgc, fgc, whole)
+      else:
+        rtError("grille:ajouterformat : signature de gridAddFormat non reconnue")
+  mfn "grille", "effacerformats", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridClearFormats(L.self(a, "effacerformats").id)
+  mfn "grille", "fixerrupture", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "fixerrupture")
+    if arg(a, 2).kind == vkNil: gridSetBreak(g.id, "")
+    else:
+      colArg(arg(a, 2)):
+        gridSetBreak(g.id, col)
+  mfn "grille", "fixermodifiable", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridSetEditable(L.self(a, "fixermodifiable").id, optBool(a, 2, true))
+  mfn "grille", "fixermodecolonne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "fixermodecolonne")
+    let m = editModeOf(L.checkStr(a, 3, "fixermodecolonne"))
+    colArg(arg(a, 2)):
+      gridSetColumnEdit(g.id, col, m)
+  mfn "grille", "fixermodeligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridSetLineEdit(L.self(a, "fixermodeligne").id, int(L.checkInt(a, 2, "fixermodeligne")),
+                    editModeOf(L.checkStr(a, 3, "fixermodeligne")))
+  mfn "grille", "fixerremplissage", proc (L: Interp, a: seq[Value]): seq[Value] =
+    gridSetFillMode(L.self(a, "fixerremplissage").id, fillModeOf(L.checkStr(a, 2, "fixerremplissage")))
+  mfn "grille", "fixerlibellebouton", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "fixerlibellebouton")
+    let cap = L.checkStr(a, 3, "fixerlibellebouton")
+    colArg(arg(a, 2)):
+      gridSetButtonCaption(g.id, col, cap)
+  mfn "grille", "modifiercellule", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let g = L.self(a, "modifiercellule")
+    let row = int(L.checkInt(a, 2, "modifiercellule"))
+    colArg(arg(a, 3)):
+      gridStartEdit(g.id, row, col)
+  mfn "grille", "verscsv", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let sep = L.optStr(a, 2, "verscsv", ",")
+    @[strV(gridToCsv(L.self(a, "verscsv").id, sep = sep[0], header = optBool(a, 3, true)))]
+  mfn "grille", "decsv", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(gridFromCsv(L.self(a, "decsv").id, L.checkStr(a, 2, "decsv"), append = optBool(a, 3, false)))]
+  mfn "grille", "chargercsv", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let sep = L.optStr(a, 3, "chargercsv", ",")
+    @[anyV(gridLoadCsv(L.self(a, "chargercsv").id, L.checkStr(a, 2, "chargercsv"), sep = sep[0]))]
+  mfn "grille", "enregistrercsv", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let sep = L.optStr(a, 3, "enregistrercsv", ",")
+    @[anyV(gridSaveCsv(L.self(a, "enregistrercsv").id, L.checkStr(a, 2, "enregistrercsv"), sep = sep[0]))]
+  mfn "grille", "versjson", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[strV(gridToJson(L.self(a, "versjson").id, pretty = optBool(a, 2, true)))]
+  mfn "grille", "chargerjson", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(gridLoadJson(L.self(a, "chargerjson").id, L.checkStr(a, 2, "chargerjson")))]
+  mfn "grille", "enregistrerjson", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(gridSaveJson(L.self(a, "enregistrerjson").id, L.checkStr(a, 2, "enregistrerjson")))]
+
+  # visionneuse PDF
+  mfn "pdf", "ouvrir", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(pdfOpen(L.self(a, "ouvrir").id, L.checkStr(a, 2, "ouvrir"), L.optStr(a, 3, "ouvrir", "")))]
+  mfn "pdf", "nouveau", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "nouveau")
+    let w = L.optNum(a, 2, "nouveau", 595)
+    let h = L.optNum(a, 3, "nouveau", 842)
+    @[boolV(pdfNew(c.id, w, h))]
+  mfn "pdf", "enregistrer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(pdfSave(L.self(a, "enregistrer").id, L.optStr(a, 2, "enregistrer", "")))]
+  mfn "pdf", "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    doCall(pdfClose(L.self(a, "fermer").id))
+  mfn "pdf", "nombrepages", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(pdfPageCount(L.self(a, "nombrepages").id))]
+  mfn "pdf", "page", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[anyV(pdfCurrentPage(L.self(a, "page").id))]
+  mfn "pdf", "allera", proc (L: Interp, a: seq[Value]): seq[Value] =
+    doCall(pdfGoto(L.self(a, "allera").id, int(L.checkInt(a, 2, "allera"))))
+  mfn "pdf", "zoom", proc (L: Interp, a: seq[Value]): seq[Value] =
+    doCall(pdfSetZoom(L.self(a, "zoom").id, L.checkNum(a, 2, "zoom")))
+  mfn "pdf", "ajoutertexte", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = L.self(a, "ajoutertexte")
+    let pg = int(L.checkInt(a, 2, "ajoutertexte"))
+    let x = L.checkNum(a, 3, "ajoutertexte")
+    let y = L.checkNum(a, 4, "ajoutertexte")
+    let txt = L.checkStr(a, 5, "ajoutertexte")
+    let size = L.optNum(a, 6, "ajoutertexte", 14)
+    pdfAddText(c.id, pg, x, y, txt, size)
+  mfn "pdf", "importerpages", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let err = pdfImportPages(L.self(a, "importerpages").id, L.checkStr(a, 2, "importerpages"),
+                             L.optStr(a, 3, "importerpages", ""), int(L.optInt(a, 4, "importerpages", 1)))
+    if err.len > 0: fail(err) else: @[boolV(true)]
+
+proc optsArg(a: seq[Value], i: int): LTable =
+  if arg(a, i).kind == vkTable: a[i - 1].t else: nil
+
+proc openInterface(L: Interp): Value =
+  if familyMethods.len == 0: defineMethods()
+  ctlMeta = newLTable()
+  ctlMeta.set "__index", fnV("interface.index", ctlIndex)
+  ctlMeta.set "__newindex", fnV("interface.newindex", ctlNewIndex)
+  ctlMeta.set "__name", strV("interface.controle")
+  ctlMeta.set "__eq", fnV("interface.eq", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[boolV(UiCtl(a[0].u).id == UiCtl(a[1].u).id)])
+  withLock uiLock: uiInterps.add L
+  L.closers.add proc () =
+    {.cast(gcsafe).}:
+      withLock uiLock:
+        let i = uiInterps.find(L)
+        if i >= 0: uiInterps.delete(i)
+
+  let m = newLib()
+  m.set "sep", strV($TreeSep)
+
+  template ctor(name, family: string, body: untyped) {.dirty.} =
+    m.fn name, proc (L: Interp, a: seq[Value]): seq[Value] =
+      let made: Control = body
+      @[L.newCtl(made, family)]
+
+  m.fn "fenetre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    let title = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "titre", "wdlexis+")
+    let w = newWindow(title, optField(o, "largeur", 640), optField(o, "hauteur", 480), scriptHandler,
+                      layout = layoutOf(optField(o, "disposition", "vertical")),
+                      theme = themeOf(optField(o, "theme", "natif"), optField(o, "sombre", false)))
+    @[L.register(UiCtl(rawId: w.id, win: w, family: "fenetre"))]
+  ctor("etiquette", "etiquette"):
+    newLabel(L.optStr(a, 1, "etiquette", ""), alignOf(L.optStr(a, 2, "etiquette", "gauche")))
+  m.fn "bouton", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 2)
+    let b = newButton(L.optStr(a, 1, "bouton", "OK"), isDefault = optField(o, "defaut", false),
+                      isCancel = optField(o, "annuler", false))
+    @[L.newCtl(b, "bouton")]
+  m.fn "saisie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    let txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
+    var e: Control
+    if optField(o, "multiligne", false): e = newMultilineEdit(txt)
+    elif optField(o, "indication", "").len > 0: e = newEdit(placeholder = optField(o, "indication", ""))
+    else: e = newEdit(txt)
+    @[L.newCtl(e, "saisie")]
+  ctor("cases", "cases"):
+    newCheckBox(L.strs(a, 1, "cases"))
+  ctor("radio", "radio"):
+    newRadioButtonCompat(L.strs(a, 1, "radio"))
+  ctor("liste", "liste"):
+    newListBox(multiSelection = optBool(a, 1, false))
+  ctor("combo", "combo"):
+    newComboBox(L.strs(a, 1, "combo"))
+  ctor("tableau", "tableau"):
+    newTable(multiSelection = false)
+  ctor("arbre", "arbre"):
+    newTreeView()
+  m.fn "grille", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    let g = newGrid(multiSelection = optField(o, "multi", false),
+                    fillMode = fillModeOf(optField(o, "remplissage", "programme")))
+    @[L.newCtl(g, "grille")]
+  ctor("jauge", "jauge"):
+    newProgressBar()
+  ctor("curseur", "curseur"):
+    newControlCompat("slider")
+  ctor("plage", "plage"):
+    newControlCompat("rangeslider")
+  ctor("ascenseur", "ascenseur"):
+    newControlCompat("scrollbar")
+  ctor("compteur", "compteur"):
+    newControlCompat("spin")
+  ctor("notation", "notation"):
+    newControlCompat("rating")
+  ctor("image", "image"):
+    newImageCompat(L.optStr(a, 1, "image", ""))
+  ctor("codebarre", "codebarre"):
+    newBarCodeCompat(L.optStr(a, 1, "codebarre", ""))
+  ctor("graphe", "graphe"):
+    newChart(chartKindOf(L.optStr(a, 1, "graphe", "colonnes")), L.optStr(a, 2, "graphe", ""))
+  ctor("calendrier", "calendrier"):
+    newCalendar(L.optStr(a, 1, "calendrier", ""))
+  ctor("kanban", "kanban"):
+    newControlCompat("kanban")
+  ctor("mosaique", "mosaique"):
+    newControlCompat("treemap")
+  ctor("gantt", "gantt"):
+    newControlCompat("gantt")
+  ctor("barremenu", "barremenu"):
+    newMenuBar()
+  ctor("onglets", "onglets"):
+    newTab()
+  m.fn "separateur", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    let sp = newSplitter(vertical = optField(o, "vertical", true), position = optField(o, "position", 0.5))
+    @[L.newCtl(sp, "separateur")]
+  ctor("conteneur", "conteneur"):
+    newContainer(layoutOf(L.optStr(a, 1, "conteneur", "vertical")), columns = int(L.optInt(a, 2, "conteneur", 2)))
+  ctor("colonne", "conteneur"):
+    newContainer(lkVertical)
+  ctor("rangee", "conteneur"):
+    newContainer(lkHorizontal)
+  ctor("superconteneur", "conteneur"):
+    newSupercontrol(layoutOf(L.optStr(a, 1, "superconteneur", "vertical")))
+  ctor("cadre", "cadre"):
+    newCell(layoutOf(L.optStr(a, 2, "cadre", "vertical")), L.optStr(a, 1, "cadre", ""))
+  m.fn "panneau", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    var sb = smAlways
+    case optField(o, "defilement", "toujours").toLowerAscii
+    of "automatique", "automatic": sb = smAutomatic
+    of "masque", "cache", "hidden": sb = smHidden
+    else: discard
+    let lk = layoutOf(optField(o, "disposition", "vertical"))
+    var pn: Control
+    when compiles(newPanel(lk, scrollbars = sb, columns = 2)):
+      pn = newPanel(lk, scrollbars = sb, columns = optField(o, "colonnes", 2))
+    else:
+      pn = newPanel(lk, scrollbars = sb)
+    @[L.newCtl(pn, "panneau")]
+  ctor("pdf", "pdf"):
+    newPdfViewer()
+
+  # boucle et dialogues
+  m.fn "executer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let st = L.uiState
+    if L.hosted:
+      L.blocking:
+        while L.openWindows() > 0 and not L.stopRequested(): sleep(30)
+    elif not st.loopRunning:
+      st.loopRunning = true
+      L.blocking: runApplication()
+    L.checkStop()
+  m.fn "quitter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    if L.hosted: L.closeAllWindows() else: quitApplication()
+  m.fn "fenetres", proc (L: Interp, a: seq[Value]): seq[Value] = @[intV(L.openWindows())]
+  m.fn "tracer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.uiState.trace = optBool(a, 1, true)
+  m.fn "alerte", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let msg = L.tostr(arg(a, 1))
+    let icon = iconOf(L.optStr(a, 2, "alerte", "information"))
+    let title = L.optStr(a, 3, "alerte", "")
+    L.blocking:
+      if title.len > 0: alert(icon, msg, title = title) else: alert(icon, msg)
+  m.fn "confirmer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let msg = L.tostr(arg(a, 1))
+    let icon = iconOf(L.optStr(a, 2, "confirmer", "question"))
+    var ok = false
+    L.blocking: ok = confirm(icon, msg) == drOk
+    @[boolV(ok)]
+  m.fn "demander", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let msg = L.tostr(arg(a, 1))
+    let def = L.optStr(a, 2, "demander", "")
+    var r = ""
+    L.blocking: r = prompt(iconQuestion, msg, def)
+    @[strV(r)]
+  m.fn "ouvrirfichier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    var p = ""
+    L.blocking:
+      p = openFileDialog(title = optField(o, "titre", "Ouvrir"), folder = optField(o, "dossier", ""),
+                         filter = optField(o, "filtre", "Tous les fichiers|*"))
+    @[(if p.len > 0: strV(p) else: nilV)]
+  m.fn "enregistrerfichier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    var p = ""
+    L.blocking:
+      p = saveFileDialog(defaultName = optField(o, "nom", ""),
+                         filter = optField(o, "filtre", "Tous les fichiers|*"))
+    @[(if p.len > 0: strV(p) else: nilV)]
+  m.fn "couleur", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var c = hex(L.optStr(a, 1, "couleur", "#005FB8"))
+    var ok = false
+    L.blocking: ok = colorDialog(c) == drOk
+    @[(if ok: strV(hexOf(c)) else: nilV)]
+  m.fn "police", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var f = FontChoice(family: L.optStr(a, 1, "police", "DejaVuSans"))
+    setNum(f.size, L.optNum(a, 2, "police", 14))
+    var ok = false
+    L.blocking: ok = fontDialog(f) == drOk
+    if not ok: return @[nilV]
+    let t = newLTable()
+    t.set "famille", strV(f.family)
+    t.set "taille", numV(float(f.size))
+    when compiles(f.bold): t.set "gras", boolV(f.bold)
+    when compiles(f.italic): t.set "italique", boolV(f.italic)
+    when compiles(f.path): t.set "chemin", strV(f.path)
+    @[tableV(t)]
+  tableV(m)
+
+const uiDocs = [
+  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif.",
+  "interface.executer()", "Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime).",
+  "interface.quitter()", "Ferme toutes les fenêtres du programme.",
+  "interface.fenetres()", "Nombre de fenêtres ouvertes.",
+  "interface.tracer([actif])", "Affiche dans la console chaque événement reçu (diagnostic).",
+  "interface.etiquette(texte, [alignement])", "Libellé (alignement : gauche, centre, droite).",
+  "interface.bouton(libelle, [{defaut=, annuler=}])", "Bouton.",
+  "interface.saisie(texte | {texte=, indication=, multiligne=})", "Champ de saisie.",
+  "interface.cases(option, ...)", "Cases à cocher ; valeur = masque de bits.",
+  "interface.radio(option, ...)", "Boutons radio ; valeur = index choisi.",
+  "interface.liste([multi])", "Liste.", "interface.combo(element, ...)", "Liste déroulante.",
+  "interface.tableau()", "Tableau simple.", "interface.arbre()", "Arbre.",
+  "interface.grille{multi=, remplissage=\"programme|manuel|automatique\"}", "Grille de saisie.",
+  "interface.jauge()", "Jauge.", "interface.curseur()", "Potentiomètre.", "interface.plage()", "Potentiomètre de plage.",
+  "interface.ascenseur()", "Ascenseur.", "interface.compteur()", "Compteur à flèches.", "interface.notation()", "Notation.",
+  "interface.image(chemin)", "Image.", "interface.codebarre(texte)", "Code-barres.",
+  "interface.graphe([genre], [titre])", "Graphe : colonnes, lignes, aires, secteurs.",
+  "interface.calendrier([\"AAAAMMJJ\"])", "Calendrier.", "interface.kanban()", "Kanban.",
+  "interface.mosaique()", "Mosaïque proportionnelle (treemap).", "interface.gantt()", "Gantt.",
+  "interface.barremenu()", "Barre de menus.", "interface.onglets()", "Onglets.",
+  "interface.separateur{vertical=, position=}", "Séparateur (deux enfants).",
+  "interface.conteneur([disposition], [colonnes])", "Conteneur.", "interface.colonne()", "Conteneur vertical.",
+  "interface.rangee()", "Conteneur horizontal.",
+  "interface.superconteneur([disposition])", "Conteneur sans marge.", "interface.cadre(titre, [disposition])", "Cadre de groupe.",
+  "interface.panneau{disposition=, defilement=, colonnes=}", "Conteneur défilant (defilement : toujours, automatique, masque).",
+  "interface.pdf()", "Visionneuse PDF (PDFium).",
+  "interface.alerte(message, [icone], [titre])", "Message (icone : information, question, attention, stop, aucune).",
+  "interface.confirmer(message, [icone])", "OK / Annuler ; renvoie un logique.",
+  "interface.demander(message, [defaut])", "Saisie d'un texte.",
+  "interface.ouvrirfichier{titre=, filtre=, dossier=}", "Choix d'un fichier à ouvrir ; nul si annulé.",
+  "interface.enregistrerfichier{nom=, filtre=}", "Choix d'un fichier à enregistrer ; nul si annulé.",
+  "interface.couleur([\"#RRGGBB\"])", "Sélecteur de couleur.",
+  "interface.police([famille], [taille])", "Sélecteur de police : {famille, taille, gras, italique}.",
+  "interface.sep", "Séparateur des chemins d'arbre et de menu.",
+  "c:ajouter(enfant, ...)", "Ajoute des contrôles à un conteneur ou une fenêtre ; renvoie le premier.",
+  "c:focus()", "Donne le focus.", "c:menucontextuel(element, ...)", "Menu contextuel ; le choix arrive dans surselection.",
+  "c:redessiner()", "Redessine le contrôle.",
+  "fen:fermer()", "Ferme la fenêtre.", "fen:fixertheme(nom, [sombre])", "Change le thème.",
+  "onglets:ajouterpage(titre, [disposition])", "Ajoute une page ; renvoie son conteneur.",
+  "liste:ajouter(element, ...)", "Ajoute (listes et combos).", "liste:inserer(i, element)", "Insère.",
+  "liste:supprimer(i)", "Supprime.", "liste:vider()", "Vide.", "liste:selectionner(i)", "Sélectionne.",
+  "liste:selection()", "Index sélectionné.", "liste:nombre()", "Nombre d'éléments.",
+  "liste:element(i)", "Texte d'un élément.", "liste:modifier(i, texte)", "Modifie.", "liste:chercher(texte)", "Recherche.",
+  "tableau:ajoutercolonne(titre, [largeur], [alignement])", "Ajoute une colonne.",
+  "tableau:ajouterligne(cellule, ...)", "Ajoute une ligne.",
+  "tableau:cellule(ligne, colonne)", "Texte d'une cellule.", "tableau:fixercellule(ligne, colonne, texte)", "Modifie une cellule.",
+  "tableau:selection()", "Ligne sélectionnée.", "tableau:trier(colonne, [croissant])", "Trie.",
+  "arbre:ajouter(chemin...)", "Ajoute un nœud (\"A\", \"B\" ou \"A/B\").", "arbre:deplier(chemin...)", "Déplie.",
+  "arbre:replier(chemin...)", "Replie.", "arbre:supprimer(chemin...)", "Supprime.", "arbre:vider()", "Vide.",
+  "barremenu:ajouter(chemin...)", "Ajoute un élément de menu (\"Fichier\", \"Ouvrir\") ; le choix arrive dans surselection (ev.chemin).",
+  "cases:coche([i])", "État d'une case.", "cases:cocher(i, [b])", "Coche une case.",
+  "graphe:ajouterdonnee(serie, categorie, valeur)", "Ajoute une donnée.",
+  "graphe:libellecategorie(i, texte)", "Libellé de catégorie.",
+  "graphe:libelleserie(i, texte)", "Libellé de série.", "graphe:fixergenre(genre)", "Genre de graphe.",
+  "grille:ajoutercolonne{nom=, titre=, genre=, largeur=, choix=, decimales=}", "Ajoute une colonne (genre : texte, nombre, date, image, bouton, combo, case) ; renvoie la colonne.",
+  "grille:ajouterligne(cellule, ...)", "Ajoute une ligne.", "grille:cellule(ligne, colonne)", "Valeur d'une cellule (colonne = nom ou index).",
+  "grille:fixercellule(ligne, colonne, valeur)", "Modifie une cellule.", "grille:nombre()", "Nombre de lignes.",
+  "grille:trier(colonne, [croissant])", "Trie.", "grille:chercher(colonne, valeur, [exact], [debut])", "Cherche une ligne.",
+  "grille:fixerpied(colonne, genre)", "Pied de colonne : somme, moyenne, min, max, nombre.",
+  "grille:ajouterformat(colonne, operateur, valeur, {fond=, texte=, ligneentiere=})", "Mise en forme conditionnelle.",
+  "grille:fixermodifiable([b])", "Mode saisie.", "grille:verscsv([sep])", "Export CSV.",
+  "grille:chargercsv(chemin, [sep])", "Import CSV.",
+  "grille:versjson()", "Export JSON.", "grille:chargerjson(chemin)", "Import JSON.",
+  "panneau:defilera(x, y)", "Fait défiler.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre."]
+
+registerPackage PackageDef(name: "interface", open: openInterface,
+  description: "Interface graphique wdgui", docs: docs("interface", uiDocs))
