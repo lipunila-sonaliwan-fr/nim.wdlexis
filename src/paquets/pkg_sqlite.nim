@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - paquet sqlite (la base native de Lexis+ est DuckDB : voir sql, utiliser...)
 #
 # Liaison directe à la bibliothèque SQLite 3, chargée à l'exécution

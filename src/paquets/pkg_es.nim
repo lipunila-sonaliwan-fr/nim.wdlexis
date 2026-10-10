@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - paquet es : entrées / sorties (global)
 #
 #   es.ecrire(...)              écrit sur la sortie (console de l'atelier ou terminal)

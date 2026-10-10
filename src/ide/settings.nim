@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - atelier : préférences persistantes (JSON dans le dossier de configuration)
 
 import std/[json, os]

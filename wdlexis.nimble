@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 version       = "1.0.0"
 author        = "Jean-Marc QUÉRÉ, sonaliwan.fr"
 description   = "wdlexis+ : atelier et runtime du langage Lexis+"

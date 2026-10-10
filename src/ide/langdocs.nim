@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - documentation du langage pour l'atelier
 #
 # Source unique : les paquets enregistrés (lexis/api.nim). La coloration, la

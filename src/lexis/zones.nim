@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - base de données DuckDB et zones de travail (façon dBase)
 #
 # La base du programme est ouverte à la première requête : par défaut le

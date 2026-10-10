@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - atelier : diagnostics, structure et index des symboles
 #
 # Les erreurs de syntaxe viennent du vrai analyseur de l'interpréteur

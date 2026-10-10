@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - atelier : jetons de coloration au format de l'éditeur de wdnim
 #
 # L'éditeur (codeeditor.nim) est un portage de celui de wdnim, qui attend

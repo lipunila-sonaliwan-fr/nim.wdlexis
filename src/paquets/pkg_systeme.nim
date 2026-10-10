@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - paquet systeme (global)
 #
 #   systeme.temps([date]) systeme.horloge() systeme.date([format], [t]) systeme.ecart(a, b)

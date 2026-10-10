@@ -1,4 +1,4 @@
-# Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 #   wdlexis+ - API pour écrire des paquets en Nim
 #
 # Un paquet est un module Nim qui s'enregistre à l'initialisation :

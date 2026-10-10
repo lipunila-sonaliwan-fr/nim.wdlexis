@@ -1053,4 +1053,17 @@ interceptable) et `L.blocking:` pour libérer l'interpréteur pendant une attent
 
 ---
 
-Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr — SIRET 130333198000013 — metalab (at) sonaliwan.fr
+## 13. Mentions légales
+
+**Lexis+** - *Développez naturellement vos applications métier*
+
+© 2026 Jean‑Marc QUÉRÉ, sonaliwan.fr<br/>
+SIRET : 130333198000013<br/>
+<br/>
+Distribué sous licence CC BY‑NC‑SA 4.0
+<br/>
+Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
+Pour obtenir une autorisation d'utilisation commerciale,<br/>
+contactez l'auteur.<br/>
+<br/>
+Contact : metalab (at) sonaliwan.fr<br/>
