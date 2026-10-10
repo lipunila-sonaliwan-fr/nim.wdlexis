@@ -45,7 +45,7 @@ ui.executer()
 
 procedure COMPTER(ev)
   nb += 1
-  lbl.libelle = "Clics : " + nb
+  lbl.valeur = "Clics : " + nb
   si nb = 5
     ? "cinq clics !"
   finsi
