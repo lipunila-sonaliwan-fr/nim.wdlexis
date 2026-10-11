@@ -8,6 +8,8 @@ Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
 Pour obtenir une autorisation d'utilisation commerciale,<br/>
 contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
 
+[![](wdlexis.png)]()
+
 # wdlexis+ — l'atelier du langage Lexis+
 
 **Lexis+ — Développez naturellement vos applications métier**
