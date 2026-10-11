@@ -16,7 +16,7 @@
     saisie, référence des fonctions intégrées et des paquets.
 
   Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
-  SIRET 130333198000013 — metalab (at) sonaliwan.fr
+  SIRET 13033319800013 — metalab (at) sonaliwan.fr
 
 ]#
 
@@ -777,7 +777,7 @@ proc onMenu(path: string) =
       "wdlexis+ [S]tudio 1.0 — atelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr\n" &
-      "SIRET 130333198000013 — metalab (at) sonaliwan.fr\n\n" &
+      "SIRET 13033319800013 — metalab (at) sonaliwan.fr\n\n" &
       "Paquets : " & names.join(", ") & "\n" & $apiEntries().len & " fonctions documentées.",
       title = "À propos")
   else: discard
