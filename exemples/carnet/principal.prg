@@ -1,4 +1,4 @@
-&& Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && Carnet d'adresses : grille wdgui + base DuckDB + menus
 ui = paquet("interface")
 

@@ -1,0 +1,11 @@
+f 18 grad 4 -2 8 forme 3
+produit 19 22 43 50 somme -16
+softmax 0.50
+erreur lineaire : formes incompatibles {2, 2} · {1, 3}ᵀ (w : {sorties, entrées})
+regression 2.00 -1.00 300
+tokeniseur 274 4 le chat dort. vrai
+dessin 10 255 0 0 255
+svg 8 8 255
+audio 8000 2 440 vingt et un
+gguf 34 vrai 4.5
+echantillonnage 0.2 40 0

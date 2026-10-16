@@ -18,7 +18,7 @@ from lexis/lexer import SyntaxError
 from lexis/parser import parseChunk
 
 proc usage() =
-  echo "wdlexis+ [RT] 1.0 — Lexis+ : développez naturellement vos applications métier"
+  echo "wdlexis+ [RT] 1.5 — Lexis+ : développez naturellement vos applications métier"
   echo "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr — metalab (at) sonaliwan.fr"
   echo "  wdlexisrt programme.prg [arguments...]"
   echo "  wdlexisrt --verifier programme.prg"

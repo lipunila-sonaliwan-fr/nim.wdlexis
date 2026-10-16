@@ -1,4 +1,4 @@
-&& Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && Application métier en console : stock d'articles dans une base DuckDB,
 && mise à jour façon dBase (utiliser, chercher, remplacer, parcourir).
 ouvrirbase(":memoire:")      && retirez cette ligne pour garder les données (donnees.duckdb)

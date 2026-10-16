@@ -1,4 +1,4 @@
-&& Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && Fenêtre, bouton, compteur : le minimum avec le paquet interface
 ui = paquet("interface")
 && ui.tracer(vrai)   && décommentez pour afficher chaque événement reçu dans la console

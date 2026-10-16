@@ -28,7 +28,13 @@ par enregistrement à la manière de dBase. On y trouve :
   d'appels, zone de base de données courante), console avec saisie ;
 - des **paquets** écrits en Nim, aux noms français : entrées / sorties, système,
   fichiers, binaire, CSV, JSON, réseau (TCP/UDP, HTTP/HTTPS, FTP, SSH/SFTP),
-  SQLite, tâches, fils d'exécution et **l'interface graphique wdgui**.
+  SQLite, **Firebird**, tâches, fils d'exécution et **l'interface graphique wdgui** ;
+- des paquets d'**intelligence artificielle** construits sur la bibliothèque
+  **nimllm** (100 % Nim, intégrée) : modèles de langage GGUF (Llama 3, Mistral,
+  Qwen) avec dialogue, pièces jointes, réponses JSON / image / audio (`llm`),
+  fichiers GGUF et quantification (`gguf`), images et SVG (`dessin`), synthèse
+  vocale (`audio`), tenseurs à gradients (`tenseur`) et création ou
+  spécialisation de modèles (`entrainement`).
 
 Les programmes du serveur wdGestion V s'exécutent tels quels (sauf les
 instructions propres aux pages web : `envoyer`, `rediriger`, `statut`, `entete`,
@@ -65,10 +71,17 @@ wdlexis/
     duck.nim             liaison DuckDB chargée à l'exécution
     crypto.nim           SHA-256 et PBKDF2 (mots de passe)
     api.nim              API pour écrire des paquets en Nim
+  nimllm/, nimllm.nim    bibliothèque LLM (inférence GGUF, dialogue, entraînement)
   paquets/               paquets fournis (tous.nim les enregistre tous)
+    pkg_firebird.nim     client Firebird (bibliothèque fbclient chargée à l'exécution)
+    pkg_llm.nim ...      llm, gguf, dessin, audio, tenseur, entrainement
+                         (llm_commun.nim, llm_objets.nim : objets partagés)
   ide/                   éditeur, coloration, analyse, session de débogage
   exemples/              programmes d'exemple (un dossier par projet)
-  tests/                 tests du langage (sans interface graphique)
+    llm/                 20 exemples d'IA (01_bonjour ... 20_reprise_entrainement)
+    firebird/            base Firebird
+  tests/                 tests du langage (sans interface graphique) ;
+                         tests/firebird : liaison Firebird testée avec un client simulé
 ```
 
 ## Compilation
@@ -95,6 +108,13 @@ Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 | SDL3, SDL3_ttf | wdgui | comme pour wdgui |
 | OpenSSL | HTTPS, TLS | bibliothèque du système |
 | SQLite 3 | paquet `sqlite` | bibliothèque du système |
+| Client Firebird (`libfbclient.so`, `.dylib`, `fbclient.dll`) | paquet `firebird` | client Firebird installé, dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme, ou chemin dans `WDLEXIS_FIREBIRD` |
+
+Les paquets d'IA (`llm`, `gguf`, `dessin`, `audio`, `tenseur`, `entrainement`)
+n'utilisent aucune bibliothèque externe ; il suffit d'un modèle au format GGUF
+(par exemple Llama-3.2-1B-Instruct-Q4_K_M.gguf, ou celui que crée
+`exemples/llm/17_creer_modele`). Pour une compilation destinée à la seule
+machine locale, `--passC:-march=native` accélère encore les calculs.
 
 SSH et SFTP utilisent le client OpenSSH installé.
 

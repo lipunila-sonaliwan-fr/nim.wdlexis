@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.0,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.5,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -355,8 +355,11 @@ proc closeDoc(uid: int) =
 
 proc newFileInProject() =
   let r = root()
-  var name = prompt(iconQuestion, "Nom du nouveau fichier :", "module.prg")
-  if name.strip().len == 0: return
+  var name = "module.prg"
+  # Annuler (ou fermeture de la boîte) : aucun fichier n'est créé.
+  if not promptOk(iconQuestion, "Nom du nouveau fichier :", name): return
+  name = name.strip()
+  if name.len == 0: return
   if name.splitFile.ext.len == 0: name.add ".prg"
   if r.len == 0:
     discard editorNew(edId, name)
@@ -377,8 +380,11 @@ proc newFileInProject() =
   discard openFile(path)
 
 proc newProject() =
-  let dir = prompt(iconQuestion, "Dossier du nouveau projet :", getHomeDir() / "projet_lexis")
-  if dir.strip().len == 0: return
+  var dir = getHomeDir() / "projet_lexis"
+  # Annuler : aucun dossier ni fichier n'est créé.
+  if not promptOk(iconQuestion, "Dossier du nouveau projet :", dir): return
+  dir = dir.strip()
+  if dir.len == 0: return
   try:
     createDir(dir)
     if not fileExists(dir / MainName): writeFile(dir / MainName, NewMain)
@@ -697,8 +703,8 @@ proc onMenu(path: string) =
                            filter = "Programmes Lexis+|*.prg\nTous les fichiers|*")
     if f.len > 0: openProject(f.parentDir)
   of "Ouvrir un dossier par son chemin…":
-    let d = prompt(iconQuestion, "Chemin du dossier :", (if root().len > 0: root() else: getHomeDir()))
-    if d.strip().len > 0: openProject(d.strip())
+    var d = (if root().len > 0: root() else: getHomeDir())
+    if promptOk(iconQuestion, "Chemin du dossier :", d) and d.strip().len > 0: openProject(d.strip())
   of "Nouveau fichier…": newFileInProject()
   of "Ouvrir un fichier…":
     let f = openFileDialog(title = "Ouvrir", filter = "Programmes Lexis+|*.prg\nTous les fichiers|*")
@@ -774,7 +780,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.0 — atelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.5 - atelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr\n" &
       "SIRET 13033319800013 — metalab (at) sonaliwan.fr\n\n" &

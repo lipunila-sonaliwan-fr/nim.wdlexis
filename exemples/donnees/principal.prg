@@ -1,4 +1,4 @@
-&& Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && Fichiers, CSV, JSON, base DuckDB en mémoire et données binaires
 locale chemin = fichier.joindre(fichier.dossiertemp(), "ventes.csv")
 fichier.ecrire(chemin, "region,mois,montant" + car(10) + "Nord,1,1200" + car(10) + "Sud,1,950" + car(10) + "Nord,2,1430" + car(10))

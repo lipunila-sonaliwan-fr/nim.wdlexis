@@ -10,6 +10,7 @@
 # * alert(icon, message)                 → OK
 # * confirm(icon, message): DialogResult → drOk / drCancel
 # * prompt(icon, message, default): string → typed text on OK, `default` on Cancel
+# * promptOk(icon, message, var value): bool → true on OK (value = typed text), false on Cancel
 # * openFileDialog / saveFileDialog      → chosen path ("" when cancelled)
 # * printDialog / pageSetupDialog        → drOk / drCancel, settings updated on OK
 # * colorDialog / fontDialog             → drOk / drCancel, value updated on OK
@@ -277,8 +278,28 @@ proc confirm*(icon: IconId, message: string, title = "Confirmation"): DialogResu
   result = runModal(st)
   if result != drOk: result = drCancel
 
+proc promptOk*(icon: IconId, message: string, value: var string, title = "Input"): bool =
+  # Shows a message and an Edit initialised with `value`. Returns true on OK (and
+  # `value` receives the typed text); returns false on Cancel / close (`value` unchanged).
+  # Use it when Cancel must be told apart from OK on the proposed default.
+  if not canBlock(): return false
+  let st = DialogState()
+  let t = dialogTheme()
+  let sz = messageSize(t, message, t.controlHeight + t.spacing)
+  var edit: Edit
+  guarded:
+    let win = newDialogWindow(st, title, sz.w, sz.h)
+    discard st.addButtonRow(win, [("Annuler", drCancel), ("OK", drOk)])
+    let col = messageBody(win, icon, message)
+    edit = col.addChild(newEdit(value))
+    edit.anchor = 0                    # whole text selected
+    initialFocus(win, edit)
+  result = runModal(st) == drOk
+  if result: value = edit.id.value
+
 proc prompt*(icon: IconId, message: string, defaultValue = "", title = "Input"): string =
   # Shows a message and an Edit; returns the typed text on OK, `defaultValue` on Cancel.
+  # (see promptOk to know whether the user cancelled)
   if not canBlock(): return defaultValue
   let st = DialogState()
   let t = dialogTheme()

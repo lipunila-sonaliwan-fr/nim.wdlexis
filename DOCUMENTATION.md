@@ -18,7 +18,8 @@ Ce document décrit le langage Lexis+ tel qu'il s'utilise sur le poste de travai
 avec l'atelier **wdlexis+** et le runtime **wdlexisrt** : le langage, la base de
 données, l'interface graphique, le multitâche, l'atelier, puis la référence
 complète des fonctions intégrées et des paquets. Les exemples de ce document ont
-été exécutés tels qu'ils sont écrits (sauf ceux qui ouvrent des fenêtres).
+été exécutés tels qu'ils sont écrits (sauf ceux qui ouvrent des fenêtres ou qui
+demandent un serveur Firebird ou un modèle de langage).
 
 ---
 
@@ -410,6 +411,32 @@ fermer cli
 Dans une zone ouverte, un nom de champ se lit comme une variable ; `m->nom`
 désigne explicitement la variable.
 
+### 4.3 Autres bases : SQLite et Firebird
+
+Les paquets `sqlite` et `firebird` donnent accès à d'autres bases, avec les
+mêmes méthodes : `executer`, `requete`, `premier`, `lignes`, `transaction`,
+`fermer` (paramètres `?`, lignes rendues comme des tables aux colonnes en
+majuscules). La bibliothèque cliente est chargée à l'exécution, seulement si le
+programme s'en sert.
+
+```lexis
+db = firebird.connecter("localhost:/data/gestion.fdb", "SYSDBA", "masterkey")
+db:executer("insert into client(nom, ville) values (?, ?)", "Dupont", "Brest")
+r = db:premier("insert into client(nom) values (?) returning id", "Durand")
+? "nouvel identifiant :", r.id
+pour chaque c dans db:requete("select id, nom, credit from client where credit > ?", 100)
+  ? c.id, c.nom, c.credit                 && NUMERIC -> nombre, DATE -> "AAAA-MM-JJ"
+suivant
+db:transaction(@VIREMENT)                 && validée, ou annulée en cas d'erreur
+db:fermer()
+```
+
+Firebird : sans transaction explicite, chaque instruction est validée
+automatiquement ; `db:debut()` ... `db:valider()` / `db:annuler()` ou
+`db:transaction(@proc)` regroupent plusieurs instructions. Les dates se passent
+en texte (`"2024-03-12"`), les BLOB texte se lisent et s'écrivent comme des
+chaînes. Exemple complet : `exemples/firebird`.
+
 ---
 
 ## 5. Interface graphique
@@ -533,6 +560,57 @@ locale lignes = csv.analyser("nom,age" + car(10) + "Ada,36", {entete = vrai})
 
 Les objets des paquets (fichiers, sockets, contrôles...) ont des méthodes qui
 s'appellent avec `:` : `f:lire()`, `s:envoyer(donnees)`, `liste:ajouter("x")`.
+
+### 7.1 Intelligence artificielle : modèles de langage
+
+Six paquets, construits sur la bibliothèque **nimllm** (100 % Nim, intégrée à
+l'atelier et au runtime, aucune bibliothèque externe), donnent accès aux grands
+modèles de langage au format **GGUF** (celui de llama.cpp, Ollama et LM Studio :
+Llama 3.x, Mistral, Qwen 2/3...), calculés sur le processeur :
+
+| Paquet | Rôle |
+| --- | --- |
+| `llm` | charger un modèle, conversations, pièces jointes, réponses texte / JSON / image / audio / fichier, tokens, logits, embeddings |
+| `gguf` | inspecter un fichier GGUF, quantifier un modèle, fusionner un adaptateur LoRA |
+| `dessin` | images BMP / PPM / PNG, rendu SVG, dessin sur une toile |
+| `audio` | synthèse vocale (français, anglais), mélodies, fichiers WAV |
+| `tenseur` | tenseurs à différentiation automatique, optimiseurs (bases de l'apprentissage) |
+| `entrainement` | tokeniseur BPE, création d'un modèle, pré-entraînement, dialogue, LoRA, export GGUF |
+
+```lexis
+m = llm.charger("Llama-3.2-1B-Instruct-Q4_K_M.gguf")
+c = m:conversation({systeme = "Tu es un assistant concis.", maxtokens = 300})
+? c:demander("Quelle est la capitale du Japon ?")          && la réponse s'affiche comme son texte
+r = c:demander("Quel produit rapporte le plus ?", {pieces = {"ventes.csv"}, flux = @AFFICHER})
+? r.tokensgeneres, "tokens,", entier(r.vitesse), "tokens/s"
+fiche = c:demanderjson("Extrais le nom et la ville : Julie Martin, Nantes", [[{"nom": str, "ville": str}]])
+? fiche.nom, fiche.ville
+
+fonction AFFICHER(morceau)
+  es.ecrire(morceau)                       && texte au fil de l'eau
+retourner vrai                             && faux interrompt la réponse
+```
+
+- Une réponse est une fiche : `texte`, `brut`, `fichiers`, `json`,
+  `tokensprompt`, `tokensgeneres`, `arret`, `secondes`, `vitesse` ; elle
+  s'affiche et se concatène comme son texte.
+- Options de `demander` : `pieces` (objets `llm.joindre(...)` ou chemins),
+  `format` (`"texte"`, `"markdown"`, `"json"`, `"image"`, `"audio"`, `"fichier"`),
+  `sortie` (fichier produit), `schema` (structure JSON attendue), `maxtokens`,
+  `flux` (procédure appelée à chaque morceau de texte).
+- Les réglages de la conversation sont des propriétés : `c.systeme`,
+  `c.maxtokens`, `c.echantillonnage = {temperature = 0.2}`, `c.arrets`...
+- Pendant un calcul, l'interpréteur est libéré : l'atelier et les fenêtres
+  restent réactifs, et le bouton **Arrêter** interrompt la génération ou
+  l'entraînement.
+- Vingt exemples, des plus simples aux plus avancés (dialogue, flux, pièces
+  jointes, JSON, image, audio, RAG, agents, autograd, tokeniseur, création d'un
+  modèle de A à Z, LoRA, quantification, reprise d'entraînement) sont dans
+  `exemples/llm`. Le modèle est indiqué en argument ou dans la variable
+  `NIMLLM_MODEL` ; l'exemple 17 crée un petit modèle sans rien télécharger.
+- Compilez toujours avec `-d:release` (10 à 30 fois plus rapide) ; pour un
+  usage local, `--passC:-march=native` active en plus les instructions SIMD du
+  processeur.
 
 ---
 
@@ -892,6 +970,33 @@ Bases SQLite — disponible par son nom (`sqlite.…`) ou par `paquet("sqlite")`
 | `db:transaction(@proc)` | Appelle proc(db) dans une transaction (annulée en cas d'erreur). |
 | `db:fermer()` | Ferme la base. |
 
+### Paquet `firebird`
+
+Bases Firebird (client natif fbclient) — disponible par son nom (`firebird.…`) ou par `paquet("firebird")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `firebird.connecter(base, utilisateur, motdepasse[, options])` | Connexion : "serveur:/chemin/base.fdb", "serveur/3050:alias" ou fichier local. Accepte aussi une table {base=, hote=, port=, utilisateur=, motdepasse=, role=, jeu="UTF8", isolation=, attente=}. |
+| `firebird.creer(base, utilisateur, motdepasse[, {taillepage=8192, jeu="UTF8"}])` | Crée une base puis s'y connecte. |
+| `firebird.version()` | Version de la bibliothèque cliente. |
+| `firebird.disponible()` | Vrai si la bibliothèque cliente est trouvée. |
+| `db:executer(sql, ...)` | Exécute une instruction avec paramètres « ? » ; renvoie le nombre de lignes modifiées. Sans paramètre, accepte un script d'instructions séparées par « ; » (hors blocs PSQL). |
+| `db:requete(sql, ...)` | Liste des lignes ; chaque ligne est une table colonne (majuscules) -> valeur. Accepte INSERT ... RETURNING et EXECUTE PROCEDURE. |
+| `db:premier(sql, ...)` | Première ligne ou nul. |
+| `db:valeur(sql, ...)` | Première colonne de la première ligne ou nul. |
+| `db:lignes(sql, ...)` | Itérateur sur les lignes : pour chaque r dans db:lignes(sql) ... suivant. |
+| `db:modifications()` | Lignes modifiées par le dernier executer(). |
+| `db:sequence(nom[, pas=1])` | Valeur suivante d'une séquence (générateur). |
+| `db:transaction(@proc[, options])` | Appelle proc(db) dans une transaction (validée, ou annulée en cas d'erreur). |
+| `db:debut([{isolation="lecturevalidee"\|"instantane"\|"serialisable", lecture=faux, attente=vrai\|faux\|secondes}])` | Commence une transaction explicite. |
+| `db:valider()` | Valide la transaction explicite. |
+| `db:annuler()` | Annule la transaction explicite. |
+| `db:entransaction()` | Vrai si une transaction explicite est en cours. |
+| `db:tables()` | Tables de l'utilisateur. |
+| `db:colonnes(table)` | Colonnes d'une table : {nom=, type=, longueur=, echelle=, obligatoire=}. |
+| `db:serveur()` | Version du serveur. |
+| `db:fermer()` | Ferme la connexion (une transaction explicite non validée est annulée). |
+
 ### Paquet `tache`
 
 Tâches coopératives — disponible par son nom (`tache.…`) ou par `paquet("tache")`.
@@ -927,6 +1032,222 @@ Fils d'exécution du système (interpréteurs séparés, messages) — disponibl
 | `f:actif()` | Vrai tant que le fil s'exécute. |
 | `f:joindre()` | Attend la fin du fil ; son erreur éventuelle est relevée. |
 | `f:arreter()` | Demande l'arrêt du fil. |
+
+### Paquet `llm`
+
+Modèles de langage GGUF (Llama 3, Mistral, Qwen) : dialogue, pièces jointes, JSON, image, audio — disponible par son nom (`llm.…`) ou par `paquet("llm")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `llm.charger(chemin, {fils=0, verbeux=faux})` | Charge un modèle GGUF (fichier « mappé » : quasi instantané) ; renvoie un modèle. |
+| `llm.version()` | Version de la bibliothèque nimllm. |
+| `llm.fils([n])` | Nombre de fils de calcul (0 = tous les cœurs) ; renvoie le nombre utilisé. |
+| `llm.echantillonnage([table])` | Réglages d'échantillonnage par défaut (complétés par la table) : temperature, topk, topp, minp, repetition, fenetre, presence, frequence, graine, biais. |
+| `llm.glouton([table])` | Réglages du décodage glouton (déterministe). |
+| `llm.echantillonneur([reglages])` | Échantillonneur manuel : s:tirer(logits), s:accepter(id). |
+| `llm.joindre(chemin)` | Pièce jointe lue sur le disque (texte, CSV, JSON, PDF, PNG/BMP, WAV...). |
+| `llm.joindretexte(nom, contenu)` | Pièce jointe construite en mémoire. |
+| `llm.joindredonnees(nom, octets)` | Pièce jointe à partir d'octets (le type est déduit du nom et du contenu). |
+| `llm.extrairejson(texte)` | Premier objet JSON trouvé dans un texte (table) ou nul. |
+| `llm.sansbalises(texte)` | Retire les balises ``` d'un bloc de code. |
+| `llm.similarite(v1, v2)` | Similarité cosinus de deux vecteurs (m:vecteur). |
+| `llm.prompt(gabarit, messages[, suite=vrai])` | Texte d'un dialogue {{role=, contenu=}...} mis en forme (llama3, chatml, mistral, llama2, gemma, phi3). |
+| `llm.gabarits()` | Liste des gabarits de conversation. |
+| `llm.tokeniseur(chemin)` | Tokeniseur seul lu dans un fichier GGUF. |
+| `llm.predecouper(texte[, mode])` | Pré-découpage avant BPE (llama3, qwen2, gpt2). |
+| `m:conversation({systeme=, contexte=4096, maxtokens=512, echantillonnage=, gabarit="auto", langue="fr", arrets=})` | Nouvelle conversation (le texte seul est accepté comme prompt système). |
+| `m:contexte([taille])` | Contexte brut (cache KV) : evaluer, completer, generer. |
+| `m:decrire()` | Résumé du modèle. |
+| `m:vecteur(texte)` | Vecteur (embedding) d'un texte. |
+| `m:perplexite(texte)` | Perplexité d'un texte (plus elle est basse, plus le texte est attendu). |
+| `m:appliquerlora(chemin)` | Applique un adaptateur LoRA (.lora.gguf) à la volée. |
+| `m:retirerlora()` | Retire l'adaptateur LoRA. |
+| `m:fermer()` | Libère le modèle. |
+| `m.tokeniseur` | Tokeniseur du modèle (propriétés : nom, architecture, couches, dimension, vocabulaire, contexte_max, parametres, gabarit). |
+| `c:demander(question[, options \| @flux])` | Réponse (fiche texte, brut, fichiers, json, tokensprompt, tokensgeneres, arret, secondes, vitesse ; s'affiche comme son texte). Options : pieces, format (texte, markdown, json, image, audio, fichier), sortie, schema, maxtokens, flux=@proc(morceau) qui renvoie faux pour interrompre. |
+| `c:demanderjson(question[, schema])` | Réponse JSON convertie en table (clefs en majuscules). |
+| `c:regenerer([@flux])` | Nouveau tirage de la dernière réponse. |
+| `c:prolonger([maxtokens, @flux])` | Prolonge la dernière réponse. |
+| `c:generer([options \| @flux])` | Réponse de l'assistant à l'historique actuel (après c:ajouter). |
+| `c:ajouter(role, texte)` | Ajoute un message (systeme, utilisateur, assistant) : exemples « few-shot », résultats d'outils. |
+| `c:annuler()` | Retire le dernier échange. |
+| `c:reinitialiser()` | Oublie l'historique (garde le prompt système). |
+| `c:enregistrer(chemin)` | Enregistre la conversation (JSON). |
+| `c:charger(chemin)` | Recharge une conversation ; renvoie le nombre de messages. |
+| `c:etat()` | État du contexte (tokens, messages, vitesse). |
+| `c:prompt([question])` | Texte exact envoyé au modèle. |
+| `c:tokensprompt()` | Tokens de l'historique mis en forme. |
+| `c.systeme` | Propriétés : systeme, maxtokens, arrets, echantillonnage, tailleimage, voix, essaisjson, langue, sansreflexion, gabarit ; lecture seule : historique, messages, tokens, contexte, memoire. |
+| `x:evaluer(ids)` | Ajoute des tokens au contexte et renvoie les logits du dernier. |
+| `x:completer(texte[, options \| @flux])` | Complétion brute (sans gabarit de conversation). |
+| `x:generer(ids[, options \| @flux])` | Génère une suite à partir de tokens. |
+| `x:reinitialiser()` | Vide le contexte. |
+| `x:tronquer(n)` | Ne garde que les n premiers tokens. |
+| `l:meilleurs([n])` | Les n tokens les plus probables : {{id=, proba=}...}. |
+| `l:valeur(id)` | Logit d'un token. |
+| `l:argmax()` | Token le plus probable. |
+| `s:tirer(logits)` | Tire un token selon les réglages. |
+| `s:accepter(id)` | Mémorise un token (pénalités de répétition). |
+| `t:encoder(texte[, bos=faux, speciaux=vrai])` | Liste des identifiants de tokens. |
+| `t:decoder(ids[, speciaux=faux])` | Texte d'une liste de tokens. |
+| `t:morceau(id[, special=faux])` | Texte d'un token. |
+| `t:id(texte)` | Identifiant d'un token (nul s'il n'existe pas). |
+| `t:estspecial(id)` | Vrai pour un token spécial. |
+| `t:enregistrer(chemin)` | Enregistre le tokeniseur dans un fichier GGUF. |
+| `t.taille` | Propriétés : taille, bos, eos, pad, inconnu, fins, fusions, type, gabarit, ajoutebos. |
+| `p:texte([max])` | Texte inséré dans le message (propriétés : nom, type, mime, contenu, taille, largeur, hauteur, image). |
+
+### Paquet `gguf`
+
+Fichiers GGUF : métadonnées, tenseurs, quantification, fusion LoRA — disponible par son nom (`gguf.…`) ou par `paquet("gguf")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `gguf.ouvrir(chemin)` | Ouvre un fichier GGUF (lecture seule, mappé en mémoire). |
+| `gguf.quantifiermodele(entree, sortie[, type="q4_k", garder_sortie=vrai])` | Re-quantifie un modèle (f32, f16, bf16, q8_0, q6_k, q5_k, q5_0, q5_1, q4_k, q4_0, q4_1...). |
+| `gguf.fusionnerlora(base, adaptateur, sortie[, type="q8_0"])` | Fusionne un adaptateur LoRA dans un nouveau modèle autonome. |
+| `gguf.types()` | Types de poids utilisables pour la quantification. |
+| `gguf.bitsparpoids(type)` | Nombre moyen de bits par poids d'un type. |
+| `gguf.quantifier(type, valeurs)` | Quantifie puis relit une liste : {octets=, valeurs=, erreur=}. |
+| `g:decrire([max_tenseurs])` | Résumé du fichier. |
+| `g:existe(cle)` | Vrai si la métadonnée existe. |
+| `g:valeur(cle)` | Valeur d'une métadonnée (nombre, texte, logique ou liste). |
+| `g:texte(cle[, defaut])` | Métadonnée texte. |
+| `g:entier(cle[, defaut])` | Métadonnée entière. |
+| `g:reel(cle[, defaut])` | Métadonnée réelle. |
+| `g:cles()` | Liste des clefs de métadonnées. |
+| `g:tenseurs()` | Liste des tenseurs : {nom=, type=, dims=, elements=, octets=}. |
+| `g:tenseur(nom[, max])` | Valeurs d'un tenseur (déquantifiées). |
+| `g:fermer()` | Ferme le fichier (propriétés : version, chemin, alignement, architecture). |
+
+### Paquet `dessin`
+
+Images BMP/PPM/PNG, rendu SVG et dessin vectoriel — disponible par son nom (`dessin.…`) ou par `paquet("dessin")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `dessin.svg(code[, largeur, hauteur, fond])` | Rastérise un dessin SVG ; renvoie une image. |
+| `dessin.image(largeur, hauteur[, fond])` | Image unie. |
+| `dessin.toile(largeur, hauteur[, fond, lissage=3])` | Surface de dessin anticrénelée. |
+| `dessin.lire(chemin)` | Lit une image BMP, PPM ou PNG. |
+| `dessin.extrairesvg(texte)` | Code SVG contenu dans un texte (réponse d'un modèle) ou nul. |
+| `dessin.taillesvg(code)` | Dimensions déclarées d'un SVG : {largeur=, hauteur=}. |
+| `dessin.couleur(texte \| r, g, b[, a])` | Couleur sous forme de table {r=, g=, b=, a=}. |
+| `t:rectangle(x, y, largeur, hauteur, couleur)` | Rectangle plein. |
+| `t:cercle(cx, cy, rayon, couleur)` | Disque. |
+| `t:ellipse(cx, cy, rx, ry, couleur)` | Ellipse pleine. |
+| `t:polygone(points, couleur)` | Polygone plein ; points : {{x, y}, ...}. |
+| `t:ligne(x0, y0, x1, y1, epaisseur, couleur)` | Segment. |
+| `t:polyligne(points, epaisseur, couleur[, fermee])` | Ligne brisée. |
+| `t:terminer()` | Termine le dessin et renvoie l'image. |
+| `img:enregistrer(chemin)` | Enregistre selon l'extension (.bmp ou .ppm). |
+| `img:enregistrerbmp(chemin)` | Enregistre en BMP. |
+| `img:enregistrerppm(chemin)` | Enregistre en PPM. |
+| `img:pixel(x, y)` | Couleur d'un pixel : {r=, g=, b=}. |
+| `img:fixerpixel(x, y, couleur)` | Colore un pixel. |
+| `img:decrire([largeur])` | Description textuelle (couleurs, aperçu en caractères) ; propriétés largeur, hauteur. |
+
+### Paquet `audio`
+
+Synthèse vocale, mélodies et fichiers WAV — disponible par son nom (`audio.…`) ou par `paquet("audio")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `audio.parler(texte[, {langue="fr", hauteur=115, vitesse=1, frequence=16000}])` | Synthèse vocale (fr ou en) ; renvoie un son. |
+| `audio.melodie(notation[, bpm=120])` | Mélodie : « C4 E4 G4:2 R » (note+octave[:temps], R = silence). |
+| `audio.nouveau([frequence])` | Son vide. |
+| `audio.lire(chemin)` | Lit un fichier WAV PCM 16 bits. |
+| `audio.infos(chemin)` | En-tête d'un WAV : {frequence=, canaux=, bits=, duree=}. |
+| `audio.phonemes(texte[, langue])` | Transcription phonétique utilisée par la synthèse. |
+| `audio.enlettres(n[, langue])` | Nombre écrit en toutes lettres. |
+| `audio.frequencenote(note)` | Fréquence d'une note (« A4 » = 440). |
+| `s:enregistrer(chemin)` | Écrit un fichier WAV (16 bits mono). |
+| `s:silence(secondes)` | Ajoute un silence. |
+| `s:ajouter(autre)` | Ajoute un autre son à la suite (rééchantillonné si besoin). |
+| `s:normaliser([crete=0.9])` | Ajuste le volume. |
+| `s:copier()` | Copie du son (propriétés : duree, frequence, echantillons). |
+
+### Paquet `tenseur`
+
+Tenseurs à différentiation automatique et optimiseurs (apprentissage) — disponible par son nom (`tenseur.…`) ou par `paquet("tenseur")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `tenseur.depuis(valeurs[, forme, gradient=faux, nom])` | Tenseur à partir d'une liste ; forme {lignes, colonnes}. |
+| `tenseur.plein(forme[, valeur=0, gradient=faux, nom])` | Tenseur rempli d'une valeur. |
+| `tenseur.zeros(forme[, gradient=faux, nom])` | Tenseur nul. |
+| `tenseur.scalaire(v[, gradient=faux])` | Tenseur d'une seule valeur. |
+| `tenseur.aleatoire(forme[, ecart=1, gradient=vrai, nom])` | Valeurs gaussiennes N(0, écart²). |
+| `tenseur.parametre(forme[, ecart=0.1, nom])` | Paramètre entraînable initialisé au hasard. |
+| `tenseur.graine(n)` | Fixe la graine du générateur aléatoire du paquet. |
+| `tenseur.hasard([max \| "gauss"])` | Nombre aléatoire du générateur du paquet. |
+| `tenseur.lineaire(x, w[, b])` | x · wᵀ + b (x : {n, entrées}, w : {sorties, entrées}). |
+| `tenseur.produit(a, b)` | Produit matriciel {n, k} · {k, m}. |
+| `tenseur.echelle(t, s)` | Multiplie par un nombre (aussi : t * s). |
+| `tenseur.somme(t)` | Somme des éléments. |
+| `tenseur.moyenne(t)` | Moyenne des éléments. |
+| `tenseur.relu(t)` | max(0, x). |
+| `tenseur.silu(t)` | x · sigmoïde(x). |
+| `tenseur.sigmoide(t)` | 1 / (1 + e^-x). |
+| `tenseur.tanh(t)` | Tangente hyperbolique. |
+| `tenseur.gelu(t)` | GELU. |
+| `tenseur.softmax(t)` | Softmax par ligne. |
+| `tenseur.mse(prediction, cible)` | Erreur quadratique moyenne. |
+| `tenseur.entropiecroisee(logits, classes)` | Entropie croisée (classes : liste d'entiers à partir de 0 ; -1 = ignorée). |
+| `tenseur.concatener(a, b)` | Concaténation des colonnes. |
+| `tenseur.decrochage(t, p)` | Dropout (entraînement). |
+| `tenseur.sansgradient(@proc, ...)` | Appelle proc sans construire de graphe (inférence). |
+| `tenseur.verifiergradient(@proc, t[, eps, echantillons])` | Écart relatif entre gradient calculé et différence finie. |
+| `tenseur.operation(parents, valeurs, forme, @retro)` | Opération personnalisée ; retro(resultat, parents) appelle p:ajoutergradient(). |
+| `tenseur.gradientrequis(t, ...)` | Vrai si l'un des tenseurs demande un gradient. |
+| `tenseur.adamw(parametres[, {lr=3e-4, beta1=0.9, beta2=0.95, decroissance=0.1}])` | Optimiseur AdamW. |
+| `tenseur.sgd(parametres[, {lr=0.01, moment=0.9, decroissance=0}])` | Descente de gradient avec moment. |
+| `tenseur.lrcosinus(etape, echauffement, total, lrmax[, lrmin])` | Taux d'apprentissage (échauffement + cosinus). |
+| `tenseur.normegradient(parametres)` | Norme globale des gradients. |
+| `t:retropropager()` | Calcule les gradients de tout le graphe (t scalaire). |
+| `t:valeur([i=1])` | Valeur d'un élément. |
+| `t:donnees()` | Liste des valeurs. |
+| `t:gradient()` | Liste du gradient (nul s'il n'a pas été calculé). |
+| `t:forme()` | Forme (liste des dimensions). |
+| `t:taille()` | Nombre d'éléments. |
+| `t:zerograd()` | Remet le gradient à zéro. |
+| `t:detacher()` | Copie sans gradient. |
+| `t:remodeler(forme)` | Même données, autre forme. |
+| `t:ajoutergradient(valeurs)` | Ajoute au gradient (opérations personnalisées) ; propriétés : nom, gradientrequis. |
+| `o:zerograd()` | Remet à zéro les gradients des paramètres. |
+| `o:etape()` | Met à jour les paramètres. |
+| `o:ecreter(norme_max)` | Limite la norme des gradients ; renvoie la norme d'origine. |
+| `o:enregistrer(chemin)` | Enregistre l'état (moments) de l'optimiseur. |
+| `o:charger(chemin)` | Recharge l'état ; propriétés : pas, lr (modifiable), type. |
+
+### Paquet `entrainement`
+
+Créer et entraîner des modèles de langage : tokeniseur, Transformer, LoRA, GGUF — disponible par son nom (`entrainement.…`) ou par `paquet("entrainement")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `entrainement.tokeniseur(textes[, {taille=2048, speciaux=, frequencemin=2, mode="llama3"}])` | Apprend un tokeniseur BPE niveau octet (compatible llama.cpp). |
+| `entrainement.tokeniseuroctets([speciaux])` | Tokeniseur minimal (256 octets + spéciaux). |
+| `entrainement.nouveau(tok, {dimension=256, couches=4, tetes=4, tetes_kv=, cache=, contexte=256, nom=, graine=42})` | Nouveau modèle Transformer (architecture Llama). |
+| `entrainement.charger(chemin[, {mode="lora", rang=8, alpha=16, cibles={"q","k","v","o"}}])` | Charge un GGUF à spécialiser : LoRA (poids gelés) ou complet. |
+| `entrainement.textes(tok, texte[, {graine=, bos=vrai}])` | Données de pré-entraînement (texte continu). |
+| `entrainement.fichiers(tok, chemins)` | Données de pré-entraînement lues dans des fichiers. |
+| `entrainement.dialogues(tok, gabarit, dialogues[, {systeme=}])` | Données de dialogue (seules les réponses sont apprises). |
+| `entrainement.jsonl(chemin, tok[, gabarit="auto", systeme])` | Dialogues lus dans un fichier JSONL. |
+| `entrainement.gabarit(tok)` | Gabarit de conversation adapté au tokeniseur. |
+| `entrainement.configuration()` | Réglages d'entraînement par défaut. |
+| `m:entrainer(donnees[, {etapes, lot, sequence, accumulation, lr, lrmin, echauffement, decroissance, ecretage, evaluation, lotsevaluation, journal, sauvegarde, chemin, echantillon, amorce, graine, validation, optimiseur, rappel}])` | Entraîne le modèle ; renvoie l'optimiseur (pour reprendre). rappel=@proc(journal) reçoit {etape, perte, validation, lr, norme, vitesse, duree}. |
+| `m:parametres()` | Liste des tenseurs entraînables. |
+| `m:nombreparametres([tous=faux])` | Nombre de paramètres. |
+| `m:optimiseur([{lr=, decroissance=}])` | AdamW sur les paramètres du modèle. |
+| `m:enregistrer(chemin[, type="f32"])` | Exporte un vrai fichier GGUF (llm.charger, llama.cpp, Ollama). |
+| `m:enregistrerlora(chemin)` | Enregistre l'adaptateur LoRA. |
+| `m:sauvegarder(optimiseur, prefixe)` | Point de sauvegarde (modèle ou adaptateur + optimiseur). |
+| `m:evaluer(donnees[, lots=4, lot=8, sequence=64])` | Perte moyenne (exp(perte) = perplexité). |
+| `m:generer(amorce[, {maxtokens=50, temperature=0.8}])` | Génère un texte (surveillance de l'entraînement) ; propriétés : tokeniseur, mode, config, gabarit. |
+| `d:separer([fraction=0.1])` | Sépare en {entrainement, validation}. |
+| `d:taille()` | Nombre de tokens (texte) ou de dialogues. |
+| `d:pluslong()` | Longueur du plus long dialogue (tokens). |
 
 ### Paquet `interface`
 

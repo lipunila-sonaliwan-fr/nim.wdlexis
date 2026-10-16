@@ -1,0 +1,5 @@
+# Acknowledgements
+
+Sincere thanks for the invaluable assistance and support received during the conceptualization and development of the French versions of wdGui, Lexix+, wdLexis+, wdGestion V, and, more generally, the entire wdXxx family of software. Special thanks go to the developers and organizations [listed at the very beginning of the alphabet but still under NDA] France (I swear to hold my tongue 😜), CodeMirror V (wdGestion!), CY Cergy Paris University (free up time), DuckDB (duQuack!), Firebird (wdLexis+ FB), Gleam, Harvard University (wdReka and wdReka+ Finance[1]), JetBrains, NielsenIQ (to ensure a well-stocked fridge and social security coverage: I swear fidelity and loyalty.), Nim (wdNim and many others), Mensa France (🫶), Obsidian (wdNotes, and yes... why not? It's done!), PDFium (wdGui!), PUC-Rio (wdLua\[1]), SDL (wdGui!), Triple Nine Society (✊), Zed, and to all the other individual contributors who have helped along the way.
+
+\[1]*Gold software products not yet publicly released. Stay tuned!*
