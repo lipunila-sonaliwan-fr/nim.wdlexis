@@ -16,7 +16,7 @@
 &&   /stats              état du contexte
 &&   /quitter
 
-locale chemin = systeme.args[1] ou systeme.env("NIMLLM_MODEL") ou "models/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+locale chemin = systeme.env("NIMLLM_MODEL") ou "./models/llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
 ? "Chargement de", chemin, "..."
 locale modele = llm.charger(chemin, {verbeux = vrai})

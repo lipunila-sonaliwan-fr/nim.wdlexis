@@ -1,0 +1,25 @@
+# Fenêtre 1 : appels JavaScript simulés (window.__lexis est le canal de window.lexis)
+js __lexis ["pret","mock://page"]
+js total [2,3]
+js double [21]
+js double ["x"]
+js echec []
+js __lexis ["appel","ENREGISTRER",[{"nom":"Ada","age":36}]]
+js __lexis ["appel","SECRET",[]]
+js __lexis ["message",{"texte":"coucou"}]
+js __lexis ["journal","log","bonjour de la console"]
+js __lexis ["journal","error","x is not defined"]
+js __lexis ["resultat",1,true,{"vu":true}]
+js __lexis ["resultat",2,false,"ReferenceError: document is not defined"]
+js __lexis ["appel","FERMER",[]]
+js total [100,1]
+---
+# Fenêtre 2 : la procédure TOTAL est liée par son nom ; fermeture par l'utilisateur
+js total [40,2]
+js __lexis ["appel","TOTAL",[1,1]]
+fermer
+js total [0,0]
+---
+# Fenêtre 3 : systeme.quitter(3) depuis une procédure appelée par JavaScript
+js quitter [3]
+js quitter [4]

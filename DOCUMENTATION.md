@@ -490,6 +490,105 @@ retourner
 
 L'exemple `exemples/carnet` montre une grille, une barre de menus et une base.
 
+### 5.1 Pages web dans une fenêtre : le paquet `webview`
+
+Le paquet `webview` affiche une page **HTML / CSS / JavaScript** dans une fenêtre
+native, avec le moteur web du système (WebView2 sous Windows, WKWebView sous
+macOS, WebKitGTK sous Linux), et relie la page au programme dans les deux sens.
+
+```lexis-interface
+f = webview.fenetre{titre = "Factures", largeur = 800, hauteur = 600, fichier = "page.htm"}
+f:lier("calculerTTC", @CALCULER_TTC)      && JavaScript -> Lexis+
+f.surpret = @PRET                         && page chargée
+f:executer()                              && jusqu'à la fermeture de la fenêtre
+
+procedure PRET(ev)
+  f:appeler("afficher", "Bonjour depuis Lexis+")     && Lexis+ -> JavaScript
+  f:appeler("calculerTotal", {12.5, 30}, @TOTAL)     && avec résultat
+retourner
+
+fonction CALCULER_TTC(ht)
+retourner arrondi(ht * 1.2, 2)
+
+procedure TOTAL(valeur, erreur)
+  ? "total calculé par la page :", valeur
+retourner
+```
+
+```html
+<script>
+  function afficher(message) { document.body.textContent = message; }
+  function calculerTotal(montants) { return montants.reduce((a, b) => a + b, 0); }
+  async function demo() {
+    const ttc = await calculerTTC(100);           // appelle CALCULER_TTC, renvoie 120
+  }
+</script>
+```
+
+**Lexis+ → JavaScript**
+
+| Appel | Effet |
+| --- | --- |
+| `f:appeler("fonction", arg..., [@rappel])` | appelle `window.fonction(arg...)` ; un chemin `"app.maj"` est accepté |
+| `f:evaluer("code", [@rappel])` | évalue du code JavaScript |
+| `f:emettre("nom", donnees)` | déclenche les écouteurs `lexis.sur("nom", fn)` de la page |
+
+Le **rappel** reçoit `(valeur, erreur)` : `erreur` vaut `nul` en cas de succès,
+sinon le message de l'erreur JavaScript. La réponse arrive de façon **asynchrone**
+(la page peut renvoyer une `Promise`) : on ne l'attend pas dans la procédure qui
+appelle, on la traite dans le rappel. Les appels faits avant le chargement de la
+page sont mis en attente et envoyés dès qu'elle est prête (`f.surpret`).
+
+**JavaScript → Lexis+**
+
+| Côté Lexis+ | Côté JavaScript |
+| --- | --- |
+| `f:lier("nomjs", @PROC)` | `await nomjs(a, b)` : renvoie le retour de `PROC(a, b)` |
+| `f:lier("nomjs")` | idem, procédure du même nom (`NOMJS`) |
+| `f:autoriser("PROC", ...)` (`"*"` : toutes) | `await lexis.appeler("PROC", a, b)` |
+| `f.surmessage = @PROC` | `lexis.envoyer(donnees)` (sans réponse) |
+| console de l'atelier ou du runtime | `console.log(...)`, `lexis.journal(...)`, erreurs JavaScript |
+
+Une erreur levée par la procédure (`erreur "..."`) **rejette** la `Promise`
+JavaScript (à intercepter par `try { ... } catch (e) { ... }`) et s'affiche aussi
+dans la console Lexis+. Seules les procédures liées ou autorisées sont
+accessibles depuis la page.
+
+- **Valeurs** : elles passent en JSON. Nombres, chaînes, logiques et `nul`
+  sont conservés ; une liste devient un tableau, une fiche un objet. Les noms
+  Lexis+ (`NOM`) deviennent `nom` en JavaScript ; une table vide devient `[]`.
+  Dans l'autre sens, les clefs JavaScript deviennent des noms Lexis+ (`d.texte`).
+- **Événements** : `f.surpret` (page chargée, `ev.url`), `f.surmessage`,
+  `f.surfermeture` (après la fermeture). Propriétés : `f.titre`, `f.prete`,
+  `f.ouverte`.
+- **Boucle** : `f:executer()` affiche la fenêtre et rend la main à sa fermeture
+  (ou après `f:fermer()`). Pendant ce temps, les procédures appelées par la page
+  s'exécutent normalement ; une procédure longue fige la page tant qu'elle
+  n'a pas répondu. Le bouton **Arrêter** de l'atelier et `systeme.quitter()`
+  ferment la fenêtre.
+- **Outils de développement** : `webview.fenetre{debogage = vrai}` (clic droit
+  *Inspecter*).
+- **Bibliothèque** : `webview.dll` (Windows), `webview.dylib` (macOS) ou
+  `webview.so` (Linux, qui demande WebKitGTK 4.1 : paquet `libwebkit2gtk-4.1-0`)
+  dans le dossier `winOS/`, `macOS/` ou `linOS/` à côté de l'exécutable ou du
+  programme, ou chemin complet dans `WDLEXIS_WEBVIEW`. Elle n'est chargée que
+  si le programme ouvre une fenêtre web ; `webview.disponible()` et
+  `webview.erreur()` permettent de le vérifier.
+- **macOS** : la fenêtre doit appartenir au fil principal du processus ;
+  lancez ces programmes avec le runtime (`wdlexisrt programme.prg`). Dans
+  l'atelier, `webview.fenetre` le signale par une erreur explicite. Sous
+  Windows et Linux, l'atelier et le runtime conviennent tous deux.
+- `f:executer()` ne traite que la fenêtre web : mélanger dans un même
+  programme une fenêtre `webview` et des fenêtres du paquet `interface` n'est
+  pas prévu (chacune a sa propre boucle d'événements). Plusieurs fenêtres web
+  s'ouvrent l'une après l'autre (une nouvelle `webview.fenetre` après la
+  fermeture de la précédente).
+
+Quatre exemples sont dans `exemples/webview` : `01_bonjour` (le minimum),
+`02_lexis_vers_js` (appels, évaluation, événements, rappels),
+`03_js_vers_lexis` (fonctions liées, procédures autorisées, erreurs) et
+`04_application` (une liste de tâches dont les données sont gérées par Lexis+).
+
 ---
 
 ## 6. Multitâche
@@ -1353,6 +1452,46 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `panneau:defilera(x, y)` | Fait défiler. |
 | `pdf:ouvrir(chemin)` | Ouvre un PDF. |
 | `pdf:enregistrer([chemin])` | Enregistre. |
+
+### Paquet `webview`
+
+Pages HTML / CSS / JavaScript dans une fenêtre native (bibliothèque webview chargée à l'exécution) — disponible par son nom (`webview.…`) ou par `paquet("webview")`. Voir le chapitre 5.1.
+
+| Appel | Rôle |
+| --- | --- |
+| `webview.fenetre{titre=, largeur=, hauteur=, taille=, fichier=, url=, html=, debogage=, console=}` | Crée une fenêtre web. taille : normale, min, max, fixe ; fichier : page locale (relative au programme) ; debogage = vrai : outils de développement ; console = faux : ne pas renvoyer console.log vers la console Lexis+. |
+| `webview.disponible()` | Vrai si la bibliothèque webview est chargée (sinon voir webview.erreur()). |
+| `webview.erreur()` | Raison de l'échec du chargement de la bibliothèque (nul si aucune). |
+| `webview.version()` | Version de la bibliothèque webview. |
+| `webview.bibliotheque()` | Chemin de la bibliothèque chargée. |
+| `webview.url(chemin)` | URL file:// d'un fichier local (relatif au dossier du programme). |
+| `webview.js(valeur)` | Littéral JavaScript (JSON) d'une valeur Lexis+ ; les clefs deviennent minuscules, une table vide devient []. |
+| `fen:html(code)` | Affiche du HTML. |
+| `fen:naviguer(url)` | Charge une URL (https://, file://, data:...). |
+| `fen:ouvrir(chemin)` | Charge un fichier HTML local (relatif au dossier du programme). |
+| `fen:initialiser(js)` | Ajoute un script exécuté avant chaque page. |
+| `fen:evaluer(code, [@rappel])` | Lexis+ -> JavaScript : évalue du code ; rappel(valeur, erreur) reçoit le résultat. |
+| `fen:appeler(fonction, arg..., [@rappel])` | Lexis+ -> JavaScript : appelle window.fonction(arg...) (chemin "app.maj" accepté) ; rappel(valeur, erreur). |
+| `fen:emettre(nom, [donnees])` | Lexis+ -> JavaScript : déclenche les écouteurs lexis.sur(nom, fn). |
+| `fen:lier(nomjs, [@procedure])` | JavaScript -> Lexis+ : crée window.nomjs(...) (Promise) qui appelle la procédure (par défaut celle du même nom). |
+| `fen:delier(nomjs)` | Retire une liaison. |
+| `fen:autoriser(nom, ...)` | JavaScript -> Lexis+ : procédures appelables par lexis.appeler(nom, ...) ; "*" les autorise toutes. |
+| `fen:taille(largeur, hauteur, [genre])` | Taille de la fenêtre (genre : normale, min, max, fixe). |
+| `fen:executer()` | Affiche la fenêtre et traite ses événements jusqu'à sa fermeture. |
+| `fen:fermer()` | Ferme la fenêtre (termine fen:executer()). |
+| `fen.titre`, `fen.prete`, `fen.ouverte` | Titre (lecture et écriture), page chargée, fenêtre encore ouverte. |
+| `fen.surpret`, `fen.surmessage`, `fen.surfermeture` | Procédures : page chargée (ev.url), lexis.envoyer(donnees), après la fermeture. |
+
+Côté JavaScript (script injecté avant chaque page) :
+
+| Appel | Rôle |
+| --- | --- |
+| `nomjs(arg...)` | Fonction liée par fen:lier ; renvoie une Promise. |
+| `lexis.appeler(nom, arg...)` | Procédure autorisée par fen:autoriser ; renvoie une Promise. |
+| `lexis.envoyer(donnees)` | Message reçu par fen.surmessage. |
+| `lexis.journal(...)` | Écrit dans la console Lexis+ (comme console.log). |
+| `lexis.sur(nom, fn)`, `lexis.retirer(nom, fn)` | Écouteurs des événements envoyés par fen:emettre. |
+| `lexis.pret` | Vrai une fois la page chargée. |
 
 
 ---

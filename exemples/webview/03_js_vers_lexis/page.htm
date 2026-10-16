@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>JavaScript vers Lexis+</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f5f3ef; color: #1f2328; }
+  main { max-width: 640px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 19px; margin: 4px 0 16px; }
+  form, .carte { background: #fff; border: 1px solid #e5e1d8; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .ligne { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  label { display: block; font-size: 13px; color: #57606a; margin-bottom: 4px; }
+  input, select { font: inherit; width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d0d7de; border-radius: 6px; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; }
+  button.principal { background: #1f6f4a; border-color: #1f6f4a; color: #fff; }
+  #calcul { font-variant-numeric: tabular-nums; margin-top: 12px; min-height: 1.3em; }
+  .erreur { color: #b42318; }
+  .ok { color: #1f6f4a; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td, th { padding: 5px 4px; border-bottom: 1px solid #eee; text-align: left; }
+  td.n, th.n { text-align: right; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Appels JavaScript → Lexis+</h1>
+
+  <form id="facture">
+    <div class="ligne">
+      <div><label for="client">Client</label><input id="client" placeholder="Nom du client"></div>
+      <div><label for="ht">Montant HT (€)</label><input id="ht" type="number" step="0.01" value="100"></div>
+      <div><label for="genre">Taux de TVA</label><select id="genre"></select></div>
+    </div>
+    <div id="calcul"></div>
+    <div class="actions">
+      <button type="submit" class="principal">Enregistrer la facture</button>
+      <button type="button" id="mauvais">Taux inconnu (erreur Lexis+)</button>
+    </div>
+  </form>
+
+  <div class="carte">
+    <strong>Factures enregistrées (procédure HISTORIQUE)</strong>
+    <table>
+      <thead><tr><th>N°</th><th>Client</th><th class="n">HT</th><th class="n">TVA</th><th class="n">TTC</th><th>Heure</th></tr></thead>
+      <tbody id="historique"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const euros = v => Number(v).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // 1. Fonction liée par f:lier("taux") : appelle la procédure Lexis+ TAUX.
+  //    Les clefs Lexis+ (NORMAL, REDUIT...) arrivent en minuscules.
+  async function chargerTaux() {
+    const t = await taux();
+    for (const [genre, valeur] of Object.entries(t)) {
+      const o = document.createElement('option');
+      o.value = genre;
+      o.textContent = genre + ' (' + valeur + ' %)';
+      $('genre').appendChild(o);
+    }
+  }
+
+  // 2. Fonction liée par f:lier("calculerTTC", @CALCULER_TTC), appelée à chaque saisie.
+  async function recalculer() {
+    try {
+      const r = await calculerTTC(Number($('ht').value), $('genre').value);
+      $('calcul').className = '';
+      $('calcul').textContent = `HT ${euros(r.ht)} € + TVA ${r.taux} % (${euros(r.tva)} €) = ${euros(r.ttc)} € TTC`;
+    } catch (e) {
+      // une erreur levée par Lexis+ (erreur "...") rejette la Promise
+      $('calcul').className = 'erreur';
+      $('calcul').textContent = 'Lexis+ : ' + e;
+    }
+  }
+
+  // 3. lexis.appeler("PROC", ...) : procédure autorisée par f:autoriser(...).
+  async function afficherHistorique() {
+    const liste = await lexis.appeler('HISTORIQUE');
+    $('historique').innerHTML = '';
+    for (const f of liste) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td></td><td></td><td class="n"></td><td class="n"></td><td class="n"></td><td></td>';
+      [f.numero, f.client, euros(f.ht), euros(f.tva), euros(f.ttc), f.heure]
+        .forEach((v, i) => tr.children[i].textContent = v);
+      $('historique').appendChild(tr);
+    }
+  }
+
+  $('facture').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fiche = { client: $('client').value.trim(), ht: Number($('ht').value), genre: $('genre').value };
+    const r = await lexis.appeler('ENREGISTRER', fiche);
+    $('calcul').className = r.ok ? 'ok' : 'erreur';
+    $('calcul').textContent = r.message;
+    if (r.ok) {
+      // 4. lexis.envoyer : message sans réponse, reçu par f.surmessage
+      lexis.envoyer({ genre: 'info', texte: 'facture ' + r.numero + ' affichée' });
+      afficherHistorique();
+    }
+  });
+
+  $('mauvais').addEventListener('click', async () => {
+    try { await calculerTTC(100, 'super-reduit'); }
+    catch (e) { $('calcul').className = 'erreur'; $('calcul').textContent = 'Erreur renvoyée par Lexis+ : ' + e; }
+  });
+
+  $('ht').addEventListener('input', recalculer);
+  $('genre').addEventListener('change', recalculer);
+
+  // 5. Une procédure non autorisée est refusée par Lexis+.
+  lexis.appeler('SYSTEME_EXECUTER', 'rm -rf /').catch(e => lexis.journal('refus attendu :', e));
+
+  chargerTaux().then(recalculer).then(afficherHistorique);
+</script>
+</body>
+</html>

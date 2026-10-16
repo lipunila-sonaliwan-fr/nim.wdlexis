@@ -28,7 +28,8 @@ par enregistrement à la manière de dBase. On y trouve :
   d'appels, zone de base de données courante), console avec saisie ;
 - des **paquets** écrits en Nim, aux noms français : entrées / sorties, système,
   fichiers, binaire, CSV, JSON, réseau (TCP/UDP, HTTP/HTTPS, FTP, SSH/SFTP),
-  SQLite, **Firebird**, tâches, fils d'exécution et **l'interface graphique wdgui** ;
+  SQLite, **Firebird**, tâches, fils d'exécution, **l'interface graphique wdgui** et
+  des **pages web** (HTML / JavaScript) dans une fenêtre native avec `webview` ;
 - des paquets d'**intelligence artificielle** construits sur la bibliothèque
   **nimllm** (100 % Nim, intégrée) : modèles de langage GGUF (Llama 3, Mistral,
   Qwen) avec dialogue, pièces jointes, réponses JSON / image / audio (`llm`),
@@ -74,14 +75,19 @@ wdlexis/
   nimllm/, nimllm.nim    bibliothèque LLM (inférence GGUF, dialogue, entraînement)
   paquets/               paquets fournis (tous.nim les enregistre tous)
     pkg_firebird.nim     client Firebird (bibliothèque fbclient chargée à l'exécution)
+    pkg_webview.nim      pages HTML / JavaScript dans une fenêtre native (bibliothèque webview
+                         chargée à l'exécution), pont JavaScript <-> Lexis+
     pkg_llm.nim ...      llm, gguf, dessin, audio, tenseur, entrainement
                          (llm_commun.nim, llm_objets.nim : objets partagés)
   ide/                   éditeur, coloration, analyse, session de débogage
   exemples/              programmes d'exemple (un dossier par projet)
     llm/                 20 exemples d'IA (01_bonjour ... 20_reprise_entrainement)
     firebird/            base Firebird
+    webview/             pages web : bonjour, Lexis+ -> JS, JS -> Lexis+, application
   tests/                 tests du langage (sans interface graphique) ;
-                         tests/firebird : liaison Firebird testée avec un client simulé
+                         tests/firebird : liaison Firebird testée avec un client simulé ;
+                         tests/webview : pont webview testé avec une bibliothèque simulée
+  linOS/, macOS/, winOS/ bibliothèques webview (webview.so, .dylib, .dll)
 ```
 
 ## Compilation
@@ -91,6 +97,7 @@ cd apps/wdlexis
 nimble atelier            # ou : nim c -d:release -o:wdlexis+ wdlexis.nim
 nimble runtime            # ou : nim c -d:release wdlexisrt.nim
 nimble test               # tests du langage, sans interface graphique
+nimble testwebview        # pont webview, avec une bibliothèque simulée (gcc)
 ./wdlexis+ exemples/gestion
 ./wdlexisrt exemples/gestion/principal.prg
 ```
@@ -109,6 +116,7 @@ Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 | OpenSSL | HTTPS, TLS | bibliothèque du système |
 | SQLite 3 | paquet `sqlite` | bibliothèque du système |
 | Client Firebird (`libfbclient.so`, `.dylib`, `fbclient.dll`) | paquet `firebird` | client Firebird installé, dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme, ou chemin dans `WDLEXIS_FIREBIRD` |
+| webview (`webview.so`, `webview.dylib`, `webview.dll`) | paquet `webview` | dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme (fournies), ou chemin dans `WDLEXIS_WEBVIEW` ; moteur web du système : WebView2 (Windows 10/11), WKWebView (macOS), WebKitGTK 4.1 (Linux : `libwebkit2gtk-4.1-0`) |
 
 Les paquets d'IA (`llm`, `gguf`, `dessin`, `audio`, `tenseur`, `entrainement`)
 n'utilisent aucune bibliothèque externe ; il suffit d'un modèle au format GGUF

@@ -14,3 +14,6 @@ task runtime, "Compile le runtime autonome (wdlexisrt)":
 
 task test, "Tests du langage Lexis+ (sans interface graphique)":
   exec "nim c -r -d:release tests/t_langage.nim"
+
+task testwebview, "Test du paquet webview (bibliothèque webview simulée, sans affichage)":
+  exec "nim c -r -d:release tests/t_webview.nim"

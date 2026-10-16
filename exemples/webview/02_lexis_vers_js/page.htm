@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Lexis+ vers JavaScript</title>
+<style>
+  :root { --fond: #f6f7f9; --carte: #fff; --texte: #1d2430; --doux: #667085; --accent: #2f5d8a; --bord: #e3e6eb; }
+  body.sombre { --fond: #14181f; --carte: #1d232c; --texte: #e8ebf0; --doux: #98a2b3; --accent: #7fb0e0; --bord: #2c3440; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--fond); color: var(--texte); }
+  header { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 24px 6px; }
+  h1 { font-size: 19px; margin: 0; }
+  #horloge { color: var(--doux); font-variant-numeric: tabular-nums; }
+  section { background: var(--carte); margin: 12px 24px; padding: 14px 18px; border-radius: 10px; border: 1px solid var(--bord); }
+  #message { color: var(--accent); min-height: 1.3em; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--bord); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.alerte td { color: #c2410c; }
+  #total { font-weight: 600; text-align: right; padding-top: 8px; }
+  .boutons { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--bord);
+           background: var(--carte); color: var(--texte); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  small { color: var(--doux); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Appels Lexis+ → JavaScript</h1>
+  <span id="horloge">--:--:--</span>
+</header>
+
+<section><div id="message">En attente de Lexis+…</div></section>
+
+<section>
+  <table>
+    <thead><tr><th>Produit</th><th class="n">Prix</th><th class="n">Stock</th><th class="n">Valeur</th></tr></thead>
+    <tbody id="produits"></tbody>
+  </table>
+  <div id="total"></div>
+</section>
+
+<section>
+  <div class="boutons">
+    <!-- lexis.envoyer() déclenche f.surmessage côté Lexis+, qui rappelle la page -->
+    <button onclick="lexis.envoyer({action: 'theme', valeur: 'sombre'})">Thème sombre</button>
+    <button onclick="lexis.envoyer({action: 'theme', valeur: 'clair'})">Thème clair</button>
+    <button onclick="lexis.envoyer({action: 'horloge'})">Heure de Lexis+</button>
+    <button onclick="lexis.envoyer({action: 'remise'})">Remise 10 % (calculée par Lexis+)</button>
+  </div>
+  <p><small>Chaque bouton envoie un message à Lexis+ ; c'est Lexis+ qui met ensuite la page à jour
+  avec <code>f:appeler</code> et <code>f:emettre</code>.</small></p>
+</section>
+
+<script>
+  const euros = v => v.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+
+  // --- fonctions appelées par Lexis+ avec f:appeler("nom", ...) -------------------
+
+  function afficher(message) {
+    document.getElementById('message').textContent = message;
+  }
+
+  function viderLignes() {
+    document.getElementById('produits').innerHTML = '';
+  }
+
+  // p est une table Lexis+ {nom, prix, stock} reçue comme objet JavaScript.
+  function ajouterLigne(p) {
+    const tr = document.createElement('tr');
+    if (p.stock < 5) tr.className = 'alerte';
+    tr.innerHTML = '<td></td><td class="n"></td><td class="n"></td><td class="n"></td>';
+    tr.children[0].textContent = p.nom;
+    tr.children[1].textContent = euros(p.prix);
+    tr.children[2].textContent = p.stock;
+    tr.children[3].textContent = euros(p.prix * p.stock);
+    document.getElementById('produits').appendChild(tr);
+    return true;
+  }
+
+  // Une fonction peut être asynchrone : Lexis+ reçoit la valeur de la Promise.
+  async function calculer(produits) {
+    await new Promise(r => setTimeout(r, 300));          // calcul « long »
+    let total = 0, articles = 0;
+    for (const p of produits) { total += p.prix * p.stock; articles += p.stock; }
+    total = Math.round(total * 100) / 100;
+    document.getElementById('total').textContent = 'Total : ' + euros(total);
+    return { total, articles };                            // devient une table Lexis+
+  }
+
+  // Un objet de la page : Lexis+ l'atteint par son chemin, f:appeler("app.theme", ...).
+  window.app = {
+    theme(nom) {
+      document.body.classList.toggle('sombre', nom === 'sombre');
+      return nom;
+    }
+  };
+
+  // --- événements émis par Lexis+ avec f:emettre("horloge", {...}) ----------------
+  lexis.sur('horloge', d => {
+    document.getElementById('horloge').textContent = d.date + ' ' + d.heure;
+  });
+
+  console.log('page.htm chargée');                         // visible dans la console Lexis+
+</script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Tâches</title>
+<style>
+  :root { --fond: #eef0ec; --carte: #fff; --texte: #1e2320; --doux: #6b736d; --accent: #3d6b4f; --haute: #b5482f; --bord: #dfe3dc; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--fond); color: var(--texte); }
+  main { max-width: 520px; margin: 0 auto; padding: 22px 18px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  #stats { color: var(--doux); font-size: 13px; margin-bottom: 14px; }
+  form { display: flex; gap: 8px; margin-bottom: 8px; }
+  input[type=text] { flex: 1; font: inherit; padding: 9px 11px; border: 1px solid var(--bord); border-radius: 8px; background: var(--carte); }
+  button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--bord); background: var(--carte); cursor: pointer; }
+  button.principal { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label.prio { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--doux); }
+  #erreur { color: var(--haute); font-size: 13px; min-height: 1.2em; margin-bottom: 8px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 10px; background: var(--carte); border: 1px solid var(--bord);
+       border-radius: 8px; padding: 9px 11px; margin-bottom: 6px; }
+  li.haute { border-left: 4px solid var(--haute); }
+  li.faite .texte { text-decoration: line-through; color: var(--doux); }
+  li .texte { flex: 1; overflow-wrap: anywhere; }
+  li button { border: 0; background: none; color: var(--doux); padding: 2px 6px; }
+  li button:hover { color: var(--haute); }
+  .pied { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+  .vide { color: var(--doux); text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tâches</h1>
+  <div id="stats">…</div>
+  <form id="ajout">
+    <input type="text" id="texte" placeholder="Nouvelle tâche" maxlength="200" autofocus>
+    <label class="prio"><input type="checkbox" id="haute"> urgente</label>
+    <button class="principal">Ajouter</button>
+  </form>
+  <div id="erreur"></div>
+  <ul id="liste"></ul>
+  <div class="pied">
+    <small id="info"></small>
+    <button id="vider">Retirer les tâches faites</button>
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // Appel d'une procédure Lexis+ autorisée, avec affichage des erreurs Lexis+.
+  async function lx(nom, ...args) {
+    try {
+      $('erreur').textContent = '';
+      return await lexis.appeler(nom, ...args);
+    } catch (e) {
+      $('erreur').textContent = String(e);
+      throw e;
+    }
+  }
+
+  function afficher(taches) {
+    const ul = $('liste');
+    ul.innerHTML = '';
+    if (!taches.length) {
+      ul.innerHTML = '<li class="vide">Rien à faire. 🎉</li>';
+    }
+    for (const t of taches) {
+      const li = document.createElement('li');
+      li.className = (t.faite ? 'faite ' : '') + (t.priorite === 'haute' ? 'haute' : '');
+      const coche = document.createElement('input');
+      coche.type = 'checkbox';
+      coche.checked = t.faite;
+      coche.addEventListener('change', () => lx('BASCULER', t.id).catch(() => {}));
+      const texte = document.createElement('span');
+      texte.className = 'texte';
+      texte.textContent = t.texte;
+      texte.title = 'créée le ' + t.creee;
+      const suppr = document.createElement('button');
+      suppr.textContent = '✕';
+      suppr.title = 'Supprimer';
+      suppr.addEventListener('click', () => lx('SUPPRIMER', t.id).catch(() => {}));
+      li.append(coche, texte, suppr);
+      ul.appendChild(li);
+    }
+    majStats();
+  }
+
+  async function majStats() {
+    const s = await lx('STATISTIQUES');
+    $('stats').textContent = `${s.total} tâche(s), ${s.faites} faite(s), ${s.hautes} urgente(s) en cours`;
+  }
+
+  // Lexis+ envoie la liste à jour après chaque modification : f:emettre("taches", taches).
+  lexis.sur('taches', afficher);
+
+  $('ajout').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const t = await lx('AJOUTER', $('texte').value, $('haute').checked ? 'haute' : 'normale');
+      $('texte').value = '';
+      $('haute').checked = false;
+      $('info').textContent = 'Ajoutée : n°' + t.id;
+    } catch (e) { /* message déjà affiché */ }
+  });
+
+  $('vider').addEventListener('click', async () => {
+    const n = await lx('VIDER_FAITES');
+    $('info').textContent = n + ' tâche(s) retirée(s)';
+  });
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@
 # l'ajouter ci-dessous ; il apparaît alors dans paquet(), la complétion et l'aide.
 
 import ../lexis/fonctions
-import pkg_es, pkg_systeme, pkg_donnees, pkg_reseau, pkg_sqlite, pkg_firebird, pkg_taches, pkg_interface
+import pkg_es, pkg_systeme, pkg_donnees, pkg_reseau, pkg_sqlite, pkg_firebird, pkg_taches, pkg_interface, pkg_webview
 import pkg_llm, pkg_gguf, pkg_dessin, pkg_audio, pkg_tenseur, pkg_entrainement
 
 export newFullInterp, LexisExit, openWindows, closeAllWindows, loopNeeded, uiState, UiState

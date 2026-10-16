@@ -1,0 +1,95 @@
+disponible : vrai
+version : 0.12.0-factice
+js : {"nom":"Ada","age":36,"langages":["Lexis+","JS"]}
+url : w/page%20avec%20espace.htm
+[mock] create debug=0
+[mock] init : script window.lexis
+[mock] lier : __lexis
+[mock] titre : Test
+[mock] taille : 640 x 480 (indice 1)
+[mock] html : <h1>Bonjour</h1>
+titre : Test prête : faux
+[mock] lier : total
+[mock] lier : double
+[mock] lier : echec
+[mock] run
+[mock] js __lexis(["pret","mock://page"]) id=m1
+[mock] eval : window.lexis._evaluer("1 + 1",0);
+PRET mock://page
+[mock] titre : Page prête
+[mock] eval : window.lexis._appeler("afficher",["Bonjour depuis Lexis+",{"n":3}],1);
+[mock] eval : window.lexis._evaluer("document.title",2);
+[mock] eval : window.lexis._appeler("app.maj",[1,2],0);
+[mock] eval : window.lexis._emettre("horloge",{"heure":"12:00"});
+[mock] retour m1 ok : null
+[mock] js total([2,3]) id=m2
+[mock] retour m2 ok : 5
+[mock] js double([21]) id=m3
+[mock] retour m3 ok : {"valeur":42,"texte":"double de 21"}
+[mock] js double(["x"]) id=m4
+[erreur] principal.prg:58: opération « * » : nombre attendu, chaine "x" reçu
+[mock] retour m4 ERREUR : "opération « * » : nombre attendu, chaine \"x\" reçu"
+[mock] js echec([]) id=m5
+[erreur] principal.prg:61: échec volontaire
+[mock] retour m5 ERREUR : "échec volontaire"
+[mock] js __lexis(["appel","ENREGISTRER",[{"nom":"Ada","age":36}]]) id=m6
+ENREGISTRER Ada 36
+[mock] retour m6 ok : {"ok":true,"id":7}
+[mock] js __lexis(["appel","SECRET",[]]) id=m7
+[mock] retour m7 ERREUR : "procédure Lexis+ non autorisée : SECRET (voir f:autoriser)"
+[mock] js __lexis(["message",{"texte":"coucou"}]) id=m8
+MESSAGE coucou
+[mock] retour m8 ok : null
+[mock] js __lexis(["journal","log","bonjour de la console"]) id=m9
+[js] bonjour de la console
+[mock] retour m9 ok : null
+[mock] js __lexis(["journal","error","x is not defined"]) id=m10
+[js:erreur] x is not defined
+[mock] retour m10 ok : null
+[mock] js __lexis(["resultat",1,true,{"vu":true}]) id=m11
+RESULTAT {"VU":true}
+[mock] retour m11 ok : null
+[mock] js __lexis(["resultat",2,false,"ReferenceError: document is not defined"]) id=m12
+RESULTAT en erreur : ReferenceError: document is not defined
+[mock] retour m12 ok : null
+[mock] js __lexis(["appel","FERMER",[]]) id=m13
+FERMER demandé par la page
+[mock] terminate
+[mock] retour m13 ok : null
+[mock] fin de la boucle
+[mock] destroy
+FERME faux
+après executer, ouverte : faux
+erreur attendue : la fenêtre webview est fermée
+[mock] create debug=0
+[mock] init : script window.lexis
+[mock] lier : __lexis
+[mock] titre : Deuxième
+[mock] taille : 800 x 600 (indice 0)
+[mock] lier : total
+[mock] html : <!doctype html><html><head><meta charset="utf-8"></head><bod
+[mock] run
+[mock] js total([40,2]) id=m1
+[mock] retour m1 ok : 42
+[mock] js __lexis(["appel","TOTAL",[1,1]]) id=m2
+[mock] retour m2 ERREUR : "procédure Lexis+ non autorisée : TOTAL (voir f:autoriser)"
+[mock] fenêtre fermée par l'utilisateur
+[mock] fin de la boucle
+[mock] destroy
+[mock] create debug=0
+[mock] init : script window.lexis
+[mock] lier : __lexis
+[mock] titre : Troisième
+[mock] taille : 800 x 600 (indice 0)
+[mock] lier : quitter
+avant la troisième fenêtre
+[mock] html : <!doctype html><html><head><meta charset="utf-8"></head><bod
+[mock] run
+[mock] js quitter([3]) id=m1
+QUITTER 3
+[mock] terminate
+[mock] retour m1 ERREUR : "programme arrêté"
+[mock] fin de la boucle
+[mock] destroy
+systeme.quitter(3)
+code de sortie 3
