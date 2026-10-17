@@ -643,9 +643,15 @@ proc posFromPoint(ed: CodeEditor, x, y: float): tuple[line, col: int] =
 # control: text rendering
 
 proc ensureFont(ed: CodeEditor, d: Drawing) =
+  # (Re)charge la police ; fontReady = false après un changement de taille.
   if ed.fontReady: return
   ed.fontReady = true
   when defined(sdlttf):
+    for v in ed.cache.values: SDL_DestroyTexture(v.tex)
+    ed.cache.clear()
+    if ed.font != nil:
+      TTF_CloseFont(ed.font)
+      ed.font = nil
     for p in monoFonts:
       if fileExists(p):
         ed.font = TTF_OpenFont(p.cstring, ed.fontSize.cfloat)
@@ -1275,6 +1281,11 @@ method onKey*(ed: CodeEditor, e: KeyEvent): bool =
       of ord('n'): shortcut = "cmd:new"
       of ord('o'): shortcut = "cmd:open"
       of ord('k'): shortcut = "cmd:replace"
+      # taille de police : Ctrl/Cmd + « + », « = » (AZERTY/QWERTY) ou pavé numérique ;
+      # Ctrl/Cmd + « - » ; Ctrl/Cmd + 0 (« à » en AZERTY) pour revenir à la taille par défaut.
+      of ord('+'), ord('='), KKpPlus: shortcut = "cmd:fontbigger"
+      of ord('-'), KKpMinus: shortcut = "cmd:fontsmaller"
+      of ord('0'), 0xE0, KKp0: shortcut = "cmd:fontreset"
       of ord('b'):
         ed.runCommand("toggleComment")
         return true
@@ -1688,6 +1699,13 @@ proc editorReplaceAll*(id: ControlId, req: FindRequest): int =
 proc editorSetOptions*(id: ControlId, minimap, dark: bool) =
   ## Les couleurs suivent le thème de la fenêtre ; `dark` est ignoré ici.
   withControl(id, CodeEditor, ed): ed.showMinimap = minimap
+
+proc editorSetFontSize*(id: ControlId, size: float) =
+  ## Taille de la police de l'éditeur (points) ; rechargée au prochain rendu (thread UI).
+  withControl(id, CodeEditor, ed):
+    if size != ed.fontSize:
+      ed.fontSize = size
+      ed.fontReady = false
 
 proc editorSetProjectNames*(id: ControlId, names: seq[string]) =
   withControl(id, CodeEditor, ed): ed.projectNames = names

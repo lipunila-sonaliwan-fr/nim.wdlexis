@@ -357,7 +357,7 @@ proc debugLine(L: Interp, fr: Frame, s: Stmt) =
       of smInto, smPause: pause = true
       of smOver: pause = bp or depth <= d.depth
       of smOut: pause = bp or depth < d.depth
-  if not pause: return
+  if not pause or L.stopRequested(): return     # arrêt demandé : ne plus se mettre en pause.
   if not d.onPause.isNil: d.onPause(L, c)
   withLock d.lock:
     d.resumed = false

@@ -8,7 +8,7 @@
 # Toutes ces hypothèses sont regroupées ici et protégées par `when compiles`
 # pour qu'une différence de signature se corrige à un seul endroit.
 
-import std/[locks, times]
+import std/[locks, times, math]
 import ../wdgui
 import ../sdl3
 
@@ -41,7 +41,10 @@ const
   KLeft*      = 0x40000050
   KDown*      = 0x40000051
   KUp*        = 0x40000052
+  KKpMinus*   = 0x40000056
+  KKpPlus*    = 0x40000057
   KKpEnter*   = 0x40000058
+  KKp0*       = 0x40000062
 
 proc currentMods*(): int =
   when compiles(SDL_GetModState()):
@@ -202,6 +205,18 @@ proc themeFor*(dark: bool): Theme =
   # elif defined(linux): result = themeLinux(dark = dark)
   # else: result = themeNative(dark = dark)
   result = themeMacOS(dark = dark)
+
+proc themeFor*(dark: bool, fontDelta: int): Theme =
+  # Thème avec une police agrandie ou réduite de `fontDelta` points (menu Affichage) :
+  # hauteurs des contrôles et des lignes suivent la même proportion.
+  result = themeFor(dark)
+  if fontDelta == 0: return
+  let base = result.fontSize
+  result.fontSize = max(7.0, base + float(fontDelta))
+  let k = result.fontSize / base
+  result.controlHeight = round(result.controlHeight * k)
+  result.lineHeight = round(result.lineHeight * k)
+  result.checkSize = round(result.checkSize * k)
 
 # Constructeurs dont le tutoriel ne donne que le nom (aide-mémoire WD)
 

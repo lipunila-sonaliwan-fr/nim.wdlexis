@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.5,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.5.2,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -56,7 +56,7 @@ Ctrl+X/C/V couper, copier, coller        Ctrl+Z/Y annuler, rétablir
 Ctrl+F rechercher, Ctrl+H / F3 suivant   Ctrl+L aller à la ligne
 Ctrl+W/E début / fin de ligne            Ctrl+D dupliquer la ligne
 Tab / Maj+Tab indenter, désindenter      Ctrl+B commenter / décommenter (&&)
-Ctrl+Espace complétion
+Ctrl+Espace complétion                   Ctrl+ + / - / 0 taille de la police
 F12 ou Ctrl+clic aller à la définition   Ctrl+Tab document suivant
 
 Exécution et débogage
@@ -98,6 +98,8 @@ var
   st: AppState
   lintGen: Atomic[int]
   running: Atomic[bool]
+  stopAsked: Atomic[bool]   # Arrêter a été demandé pour l'exécution en cours.
+  btnLock: Lock             # sérialise la mise à jour des boutons (plusieurs fils).
   inLock: Lock
   inCond: Cond
   inQueue: Deque[string]
@@ -105,6 +107,7 @@ var
 
 initLock(gLock)
 initLock(inLock)
+initLock(btnLock)
 initCond(inCond)
 
 template withState(body: untyped) =
@@ -163,6 +166,7 @@ proc consoleCopy() =
   status("Contenu de la console copié dans le presse-papiers (" & $text.len & " caractères).")
 
 proc setRunButtons(isRunning, isPaused: bool) =
+  # Utiliser refreshRunButtons : l'état affiché doit refléter l'état réel.
   let idle = not isRunning
   btnRun.state = (if idle: csActive else: csGrayed)
   btnDebug.state = (if idle: csActive else: csGrayed)
@@ -172,6 +176,17 @@ proc setRunButtons(isRunning, isPaused: bool) =
   btnStepOut.state = (if isPaused: csActive else: csGrayed)
   btnPause.state = (if isRunning and not isPaused: csActive else: csGrayed)
   btnStop.state = (if isRunning: csActive else: csGrayed)
+
+proc refreshRunButtons() =
+  # Les boutons sont recalculés à partir de l'état réel (running, paused), sous
+  # verrou : la fin du programme (fil de l'interpréteur) et les commandes de
+  # l'atelier (autres fils) ne peuvent plus s'écraser dans le désordre.
+  {.cast(gcsafe).}:
+    withLock btnLock:
+      var p = false
+      withState: p = st.paused
+      let r = running.load()
+      setRunButtons(r, r and p)
 
 #
 # Projet
@@ -502,10 +517,11 @@ proc showPause(info: PauseInfo, frameIdx: int) =
     discard tableAddLine(tblVars, v.name, v.value, v.kind, v.scope)
 
 proc onPaused(info: PauseInfo) =
+  if not running.load() or stopAsked.load(): return   # arrêt en cours : pas de pause.
   withState:
     st.pause = info
     st.paused = true
-  setRunButtons(true, true)
+  refreshRunButtons()
   let uid = uidForSource(info.source)
   if uid >= 0:
     editorSetExecLine(edId, uid, info.line - 1)
@@ -525,7 +541,7 @@ proc resume(mode: StepMode) =
     st.paused = false
   if not wasPaused: return
   editorSetExecLine(edId, -1, 0)
-  setRunButtons(true, false)
+  refreshRunButtons()
   status("Exécution…")
   debugCommand(mode)
 
@@ -538,7 +554,7 @@ proc programInput(prompt: string): (bool, string) =
     setFocus(edIn)
     status("Le programme attend une saisie : tapez dans la console puis Entrée")
     acquire(inLock)
-    while inQueue.len == 0 and running.load():
+    while inQueue.len == 0 and running.load() and not stopAsked.load():
       wait(inCond, inLock)
     var line = ""
     var ok = false
@@ -576,6 +592,9 @@ proc runProgramFrom(debug, stepFirst: bool) =
       return
     path = editorSourceName(edId, uid)
   discard saveAll()
+  stopAsked.store(false)
+  {.cast(gcsafe).}:
+    withLock inLock: inQueue.clear()     # pas de saisie restée d'une exécution précédente.
   withState:
     st.runtimeRows.setLen(0)
     st.paused = false
@@ -584,7 +603,7 @@ proc runProgramFrom(debug, stepFirst: bool) =
   tableDeleteAll(tblVars)
   listDeleteAll(lstStack)
   tabBottom.value = "2"
-  setRunButtons(true, false)
+  refreshRunButtons()
   updateTitle()
   consoleAppend("▶ " & extractFilename(path) & (if debug: " (débogage)" else: "") & "\n")
   status(if debug: "Débogage de " & extractFilename(path) else: "Exécution de " & extractFilename(path))
@@ -607,9 +626,11 @@ proc runProgramFrom(debug, stepFirst: bool) =
   hooks.finished = proc (ok: bool, msg, source: string, line: int) =
     {.cast(gcsafe).}:
       running.store(false)
+      withState: st.paused = false
       withLock inLock: signal(inCond)
+      waitingInput.store(false)
       editorSetExecLine(edId, -1, 0)
-      setRunButtons(false, false)
+      refreshRunButtons()
       if ok:
         consoleAppend("\n■ " & msg & "\n")
         status("Programme " & msg)
@@ -625,11 +646,27 @@ proc runProgramFrom(debug, stepFirst: bool) =
 
 proc doStop() =
   if not running.load(): return
-  stopProgram()
-  {.cast(gcsafe).}:
-    withLock inLock: signal(inCond)
-  resume(smRun)
+  stopAsked.store(true)
+  # Sortie de pause sans passer par resume() : resume() remettait les boutons
+  # en « en cours » et pouvait le faire APRÈS la fin du programme (course entre
+  # fils), laissant la barre figée alors que le programme était arrêté.
+  withState: st.paused = false
+  editorSetExecLine(edId, -1, 0)
   status("Arrêt demandé…")
+  stopProgram()                          # drapeau d'arrêt + reprise du débogueur + fermeture des fenêtres.
+  {.cast(gcsafe).}:
+    withLock inLock: signal(inCond)      # débloque une saisie en attente.
+  refreshRunButtons()
+  # Si le programme ne s'arrête pas (appel bloquant : dialogue modal, réseau,
+  # fil qui ne rend pas la main...), le dire au lieu de laisser un état ambigu.
+  var waited = 0
+  while running.load() and waited < 3000:
+    sleep(50)
+    waited += 50
+  if running.load():
+    status("Le programme ne répond pas encore à l'arrêt (appel bloquant en cours) — Arrêter à nouveau, ou fermez ses dialogues.")
+    consoleAppend("\n[arrêt demandé : le programme est bloqué dans un appel qui ne rend pas la main " &
+                  "(dialogue, réseau, fil...). Il s'arrêtera dès que cet appel se terminera.]\n")
 
 proc doContinueOrDebug() =
   var p = false
@@ -689,10 +726,27 @@ proc callTemplate(e: ApiDoc): string =
 # Menus
 #
 
+const EditorBaseFont = 14.0     # taille par défaut de la police de l'éditeur.
+
 proc applyView() =
   let o = opts()
   editorSetOptions(edId, o.minimap, o.dark)
-  if haveWin.load(): gWin.theme = themeFor(o.dark)
+  editorSetFontSize(edId, EditorBaseFont + float(o.fontDelta))
+  if haveWin.load(): gWin.theme = themeFor(o.dark, o.fontDelta)
+
+proc changeFont(delta: int, reset = false) =
+  var o = opts()
+  let d = (if reset: 0 else: clamp(o.fontDelta + delta, FontDeltaMin, FontDeltaMax))
+  if d == o.fontDelta:
+    status(if reset: "La police est déjà à sa taille par défaut."
+           elif delta > 0: "Taille de police maximale atteinte."
+           else: "Taille de police minimale atteinte.")
+    return
+  o.fontDelta = d
+  setOpts(o)
+  applyView()
+  status("Police : " & $int(EditorBaseFont + float(d)) & " pt dans l'éditeur" &
+         (if d == 0: " (taille par défaut)" elif d > 0: " (+" & $d & ")" else: " (" & $d & ")"))
 
 proc onMenu(path: string) =
   let item = path.split(TreeSep)[^1]
@@ -757,6 +811,9 @@ proc onMenu(path: string) =
     o.minimap = not o.minimap
     setOpts(o)
     applyView()
+  of "Agrandir la police (Ctrl++)": changeFont(+1)
+  of "Réduire la police (Ctrl+-)": changeFont(-1)
+  of "Taille de police par défaut (Ctrl+0)": changeFont(0, reset = true)
   of "Thème sombre / clair":
     var o = opts()
     o.dark = not o.dark
@@ -780,10 +837,11 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.5 - atelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.5.2\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
-      "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr\n" &
-      "SIRET 13033319800013 — metalab (at) sonaliwan.fr\n\n" &
+      "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
+      "⛶ https://sonaliwan.fr - ✉ metalab (at) sonaliwan.fr\n" &
+      "SIRET 13033319800013\n\n" &
       "Paquets : " & names.join(", ") & "\n" & $apiEntries().len & " fonctions documentées.",
       title = "À propos")
   else: discard
@@ -802,7 +860,9 @@ proc buildMenu(m: ControlId) =
                    "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)",
                    "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts",
                    "Arguments et fichier principal…"]),
-    ("Affichage", @["Copier la console", "Effacer la console", "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",
+    ("Affichage", @["Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
+                    "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)",
+                    "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",
                     "Signaler les procédures inconnues"]),
     ("Aide", @["Raccourcis clavier", "Référence des fonctions et paquets", "À propos"])]
   for (top, items) in menus:
@@ -840,6 +900,9 @@ proc onEditorSignal(text: string) =
     of "stepover": doStep(smOver)
     of "stepout": doStep(smOut)
     of "new": newFileInProject()
+    of "fontbigger": changeFont(+1)
+    of "fontsmaller": changeFont(-1)
+    of "fontreset": changeFont(0, reset = true)
     of "open": onMenu("Fichier" & TreeSep & "Ouvrir un fichier…")
     of "close":
       try: closeDoc(parseInt(arg)) except ValueError: discard
@@ -971,7 +1034,7 @@ proc buildUi() =
   elif s.lastProject.len > 0 and dirExists(s.lastProject):
     startDir = s.lastProject
 
-  win = newWindow(AppName & " — Lexis+", 1320, 860, handler, layout = lkBorder, theme = themeFor(s.dark))
+  win = newWindow(AppName & " — Lexis+", 1320, 860, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
 
   let top = win.addChild(newSupercontrol(lkVertical))
   top.dock = dkTop
@@ -1075,8 +1138,9 @@ proc buildUi() =
   lstStack = lsk.id
 
   editorSetOptions(edId, s.minimap, s.dark)
+  editorSetFontSize(edId, EditorBaseFont + float(s.fontDelta))
   fillApiTree()
-  setRunButtons(false, false)
+  refreshRunButtons()
   if startDir.len > 0: openProject(startDir)
   if startFile.len > 0:
     try: discard editorOpen(edId, startFile, readFile(startFile))

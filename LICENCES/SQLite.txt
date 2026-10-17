@@ -1,0 +1,5 @@
+Public Domain
+
+The SQLite source code is in the public domain. See https://sqlite.org/copyright.html for details.
+
+Because SQLite is in the public domain, we do not normally accept pull requests, because if we did take a pull request, the changes in that pull request might carry a copyright and the SQLite source code would then no longer be fully in the public domain.

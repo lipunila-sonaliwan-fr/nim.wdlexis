@@ -12,6 +12,11 @@ type
     lastProject*: string
     programArgs*: string     # arguments passés au programme (séparés par des espaces).
     mainFile*: string        # fichier lancé par Exécuter ("" = principal.prg, sinon le fichier actif).
+    fontDelta*: int          # écart de taille de police (points) par rapport au thème : Affichage > Police.
+
+const
+  FontDeltaMin* = -4
+  FontDeltaMax* = 12
 
 proc defaultSettings*(): Settings =
   Settings(dark: true, minimap: true, flagGlobals: true, unknownCalls: true)
@@ -31,6 +36,8 @@ proc loadSettings*(): Settings =
     get(lastProject, getStr)
     get(programArgs, getStr)
     get(mainFile, getStr)
+    get(fontDelta, getInt)
+    result.fontDelta = clamp(result.fontDelta, FontDeltaMin, FontDeltaMax)
   except CatchableError:
     discard
 

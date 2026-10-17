@@ -18,8 +18,8 @@ from lexis/lexer import SyntaxError
 from lexis/parser import parseChunk
 
 proc usage() =
-  echo "wdlexis+ [RT] 1.5 — Lexis+ : développez naturellement vos applications métier"
-  echo "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr — metalab (at) sonaliwan.fr"
+  echo "wdlexis+ [RT] 1.5.2 - runtime du langage Lexis+"
+  echo "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr"
   echo "  wdlexisrt programme.prg [arguments...]"
   echo "  wdlexisrt --verifier programme.prg"
   echo "  wdlexisrt -e \"code\""

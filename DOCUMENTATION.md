@@ -725,6 +725,11 @@ retourner vrai                             && faux interrompt la réponse
 | Ctrl+Espace | complétion |
 | Ctrl+B | commenter / décommenter (`&&`) |
 | F12 ou Ctrl+clic | aller à la définition d'une procédure |
+| Ctrl++ / Ctrl+- / Ctrl+0 | agrandir / réduire la police / taille par défaut (aussi *Affichage*) |
+
+- **Taille de la police** : *Affichage > Agrandir la police*, *Réduire la
+  police* et *Taille de police par défaut* agissent sur l'éditeur et sur
+  toute l'interface (menus, listes, console) ; le réglage est mémorisé.
 
 - **Analyse en continu** : erreurs de syntaxe (le vrai analyseur de
   l'interpréteur), appels de procédures inconnues, variables non déclarées dans

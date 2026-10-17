@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-version       = "1.5.0"
+version       = "1.5.2"
 author        = "Jean-Marc QUÉRÉ, sonaliwan.fr"
 description   = "wdlexis+ : atelier et runtime du langage Lexis+"
 license       = "Propriétaire - tous droits réservés"

@@ -7,7 +7,7 @@
 && NIMLLM_MODEL puis dans models/Llama-3.2-1B-Instruct-Q4_K_M.gguf.
 
 && 1. Où se trouve le modèle ?
-locale chemin = systeme.args[1] ou systeme.env("NIMLLM_MODEL") ou "models/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+locale chemin = systeme.args[1] ou systeme.env("NIMLLM_MODEL") ou "models/llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
 && 2. Chargement : le fichier est « mappé » en mémoire, c'est quasi instantané.
 locale modele = llm.charger(chemin)
@@ -16,5 +16,5 @@ locale modele = llm.charger(chemin)
 locale conversation = modele:conversation()
 
 && 4. Une question, une réponse.
-locale reponse = conversation:demander("Quelle est la capitale de la France ?")
+locale reponse = conversation:demander("Quelle est la formule pour calculer PI sans passer par la circonférence et le diamètre?")
 ? reponse.texte

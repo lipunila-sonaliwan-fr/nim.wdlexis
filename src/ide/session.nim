@@ -221,8 +221,16 @@ proc runProgram*(path: string, args: seq[string], debug: bool, stepFirst: bool,
     except CatchableError as e:
       ok = false
       msg = e.msg
-    L.closeAllWindows()
-    L.shutdown()
+    except Exception as e:
+      # Defect de Nim (index, nil...) : sans cela, finished n'était jamais
+      # appelé et l'atelier restait « en cours » avec les boutons figés.
+      ok = false
+      msg = "erreur interne : " & e.msg
+    # La fin est TOUJOURS signalée à l'atelier, même si le nettoyage échoue.
+    try: L.closeAllWindows()
+    except Exception: discard
+    try: L.shutdown()
+    except Exception: discard
     L.leave()
     withLock sLock: current = nil
     hooks.finished(ok, msg, src, line)
