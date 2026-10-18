@@ -1,14 +1,14 @@
-## CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-##   wdlexis+ - runtime autonome du langage Lexis+
-##
-##   wdlexisrt programme.prg [arguments...]   exécute un programme (et les .prg de son dossier)
-##   wdlexisrt --verifier programme.prg       vérifie la syntaxe sans exécuter
-##   wdlexisrt --paquets                      liste les paquets disponibles
-##   wdlexisrt -e "code"                      exécute du code
-##
-## Même interpréteur et mêmes paquets que l'atelier. Si le programme a ouvert
-## des fenêtres (paquet interface) sans appeler interface.executer(), la boucle
-## de wdgui est lancée à la fin du programme, jusqu'à la fermeture des fenêtres.
+# CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
+#   wdlexis+ - runtime autonome du langage Lexis+
+#
+#   wdlexisrt programme.prg [arguments...]   exécute un programme (et les .prg de son dossier)
+#   wdlexisrt --verifier programme.prg       vérifie la syntaxe sans exécuter
+#   wdlexisrt --paquets                      liste les paquets disponibles
+#   wdlexisrt -e "code"                      exécute du code
+#
+# Même interpréteur et mêmes paquets que l'atelier. Si le programme a ouvert
+# des fenêtres (paquet interface) sans appeler interface.executer(), la boucle
+# de wdgui est lancée à la fin du programme, jusqu'à la fermeture des fenêtres.
 
 import std/[os, strutils]
 import wdgui
@@ -18,7 +18,7 @@ from lexis/lexer import SyntaxError
 from lexis/parser import parseChunk
 
 proc usage() =
-  echo "wdlexis+ [RT] 1.5.2 - runtime du langage Lexis+"
+  echo "wdlexis+ [RT] 1.6.0 - runtime du langage Lexis+"
   echo "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr"
   echo "  wdlexisrt programme.prg [arguments...]"
   echo "  wdlexisrt --verifier programme.prg"

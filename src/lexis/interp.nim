@@ -879,10 +879,25 @@ proc execBlock(L: Interp, fr: Frame, body: seq[Stmt]): ExecResult =
 # Chargement des programmes
 #
 
+var embeddedSources*: seq[tuple[path, src: string]]
+  ## Applications générées (wdlexisapp) : sources .prg embarquées dans
+  ## l'exécutable, chemins absolus « virtuels » (dossier de l'application).
+  ## Renseigné une seule fois au démarrage, avant tout fil d'exécution.
+
+proc embeddedSource*(path: string): (bool, string) =
+  {.cast(gcsafe).}:
+    if embeddedSources.len == 0: return (false, "")
+    let p = normalizedPath(absolutePath(path))
+    for e in embeddedSources:
+      if e.path == p: return (true, e.src)
+    (false, "")
+
 proc readSource*(L: Interp, path: string): string =
   if not L.sourceProvider.isNil:
     let (ok, s) = L.sourceProvider(path)
     if ok: return s
+  let (ok, s) = embeddedSource(path)
+  if ok: return s
   readFile(path)
 
 proc registerProgram*(L: Interp, prog: Program, allowMain: bool): Value =
@@ -905,6 +920,14 @@ proc load*(L: Interp, src, source: string): Value =
 proc projectFiles*(mainPath: string): seq[string] =
   ## Fichiers .prg du dossier du programme (sous-dossiers compris, sauf cachés).
   let dir = mainPath.parentDir
+  {.cast(gcsafe).}:
+    if embeddedSources.len > 0:
+      let m = normalizedPath(absolutePath(mainPath))
+      let d = normalizedPath(absolutePath(dir))
+      for e in embeddedSources:
+        if e.path != m and e.path.startsWith(d & DirSep): result.add e.path
+      result.sort()
+      return
   if dir.len == 0 or not dirExists(dir): return
   for f in walkDirRec(dir):
     let rel = relativePath(f, dir).replace('\\', '/')

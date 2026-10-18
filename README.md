@@ -88,9 +88,51 @@ wdlexis/
                          tests/firebird : liaison Firebird testée avec un client simulé ;
                          tests/webview : pont webview testé avec une bibliothèque simulée
   linOS/, macOS/, winOS/ bibliothèques webview (webview.so, .dylib, .dll)
+  wdlexisapp.nim         runtime des applications générées (projet embarqué)
+  wdlexisgen.nim         génération d'applications en ligne de commande
+  ide/toolchain.nim      chaîne de génération : projet -> C -> Zig -> distribution
+  ide/generer.nim        boîte « Générer l'application » (menu Exécuter)
+  ide/shellview.nim, ide/cropview.nim, ide/imagetools.nim, ide/archives.nim
+                         journal coloré, cadrage d'icône, images (stb), zip / tar.gz
+  rtc/                   runtime Lexis+ pré-transpilé en C, pour chaque cible
+                         (généré par « nimble rtc »)
+  linZG/, macZG/, winZG/ Zig embarqué pour l'hôte Linux, macOS, Windows :
+                         <arch>/zig[.exe] et lib/
+  outils/                rtc.nim (génère rtc/), compat/ (macOS), elaguer_zig.sh,
+                         preparer_zig.sh / .ps1 (installe Zig pour un hôte),
+                         distribution.sh (archive wdlexis+ + Zig)
 ```
 
+## Générer une application (Linux, macOS, Windows)
+
+*Exécuter > Générer l'application…* produit, depuis n'importe quel système, des
+exécutables pour **Linux x64 / arm64, macOS x64 / Apple Silicon et Windows x64 /
+arm64** : type console, graphique (avec icône), service ou bibliothèque,
+distribution en dossier ou en archive, bibliothèques et polices intégrées. Le
+projet est transpilé en C puis compilé par **Zig 0.17.0**, embarqué dans
+wdlexis+ ; aucune autre installation n'est nécessaire. Détails : section 8.1 de
+`DOCUMENTATION.md`.
+
+| Dossier | Contenu |
+| --- | --- |
+| `linZG/x86_64`, `linZG/aarch64` + `linZG/lib` | Zig pour un hôte Linux x64 / arm64 |
+| `macZG/aarch64` + `macZG/lib` | Zig pour un hôte macOS Apple Silicon |
+| `winZG/x86_64` + `winZG/lib` | Zig pour un hôte Windows x64 (aussi utilisé, émulé, sous Windows arm64) |
+| `rtc/` | runtime Lexis+ en C (6 cibles x 2 variantes : sans / avec interface) |
+
+`outils/preparer_zig.sh` installe Zig pour un hôte absent de la distribution
+(macOS Intel, Windows arm64) depuis ziglang.org, avec contrôle de l'empreinte
+SHA-256.
+
 ## Compilation
+
+**IMPORTANT**\
+Pour pouvoir compiler :
+- vers Linux, décompressez l'archive 7-Zip nommée **linZG.7z** (→ crée un dossier `linZG` au même niveau que le dossier `linOS`),
+- vers macOS, décompressez l'archive 7-Zip nommée **macZG.7z** (→ crée un dossier `macZG` au même niveau que le dossier `macOS`),
+- vers Windows, décompressez l'archive 7-Zip nommée **winZG.7z** (→ crée un dossier `winZG` au même niveau que le dossier `winOS`).
+
+Toutes les versions de wdLexis+ (Linux, macOS et Windows) peuvent générer des exécutables pour toutes ces plates-formes (et pas seulement celle où wdLexis+ est utilisée).
 
 ```
 cd apps/wdlexis
@@ -98,6 +140,9 @@ nimble atelier            # ou : nim c -d:release -o:wdlexis+ wdlexis.nim
 nimble runtime            # ou : nim c -d:release wdlexisrt.nim
 nimble test               # tests du langage, sans interface graphique
 nimble testwebview        # pont webview, avec une bibliothèque simulée (gcc)
+nimble rtc                # régénère rtc/ (runtime C des applications) après
+                          # une modification de l'interpréteur ou des paquets
+nimble generateur         # outil en ligne de commande wdlexisgen
 ./wdlexis+ exemples/gestion
 ./wdlexisrt exemples/gestion/principal.prg
 ```

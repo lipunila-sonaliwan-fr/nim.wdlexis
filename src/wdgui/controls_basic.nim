@@ -252,6 +252,10 @@ type
     options*: seq[string]
     selection*: int    # 0-based, -1 = none.
     horizontal*: bool
+    disabled*: seq[bool]   # options grayed individually (index 0-based; shorter = active).
+
+proc optionEnabled*(c: RadioButton, i: int): bool =
+  i >= 0 and i < c.options.len and (i >= c.disabled.len or not c.disabled[i])
 
 proc newRadioButton*(options: openArray[string], selection = 0, horizontal = false): RadioButton =
   result = RadioButton(options: @options, selection: selection, horizontal: horizontal)
@@ -286,13 +290,15 @@ method draw*(c: RadioButton, d: Drawing, t: Theme) =
     let ro = c.radioRect(d, t, i)
     let cx = ro.x + 3 + s / 2
     let cy = ro.y + ro.h / 2
+    let off = grayed or not c.optionEnabled(i)
     if i == c.selection:
-      d.fillCircle(cx, cy, s / 2, if grayed: t.textDisabled else: acc)
+      d.fillCircle(cx, cy, s / 2, if off: t.textDisabled else: acc)
       d.fillCircle(cx, cy, s * 0.22, t.textOnAccent)
     else:
-      d.fillCircle(cx, cy, s / 2, if t.look == lfWindows: t.textSecondary else: t.border)
-      d.fillCircle(cx, cy, s / 2 - 1, t.fieldBg)
-    d.textIn(rect(ro.x + s + 11, ro.y, max(0.0, ro.w - s - 11), ro.h), o, textColor(c, t))
+      d.fillCircle(cx, cy, s / 2, if off: t.textDisabled elif t.look == lfWindows: t.textSecondary else: t.border)
+      d.fillCircle(cx, cy, s / 2 - 1, if off: t.windowBg else: t.fieldBg)
+    d.textIn(rect(ro.x + s + 11, ro.y, max(0.0, ro.w - s - 11), ro.h), o,
+             if off: t.textDisabled else: textColor(c, t))
     if c.focus and i == max(0, c.selection):
       d.drawFocus(t, rect(cx - s/2, cy - s/2, s, s), s / 2)
 
@@ -300,6 +306,7 @@ method onMouse*(c: RadioButton, e: MouseEvent) =
   if e.action != maRelease or e.button != mbLeft: return
   for i in 0 ..< c.options.len:
     if c.radioRect(c.win.drawing, c.win.theme, i).containsPoint(e.x, e.y):
+      if not c.optionEnabled(i): return
       if i != c.selection:
         c.selection = i
         emit(c, evChange, index = i + 1, text = c.options[i])
@@ -308,10 +315,14 @@ method onMouse*(c: RadioButton, e: MouseEvent) =
 method onKey*(c: RadioButton, e: KeyEvent): bool =
   var n = c.selection
   case e.key
-  of SDLK_UP, SDLK_LEFT: n = max(0, n - 1)
-  of SDLK_DOWN, SDLK_RIGHT: n = min(c.options.high, n + 1)
+  of SDLK_UP, SDLK_LEFT:
+    n = n - 1
+    while n >= 0 and not c.optionEnabled(n): dec n
+  of SDLK_DOWN, SDLK_RIGHT:
+    n = n + 1
+    while n <= c.options.high and not c.optionEnabled(n): inc n
   else: return false
-  if n != c.selection:
+  if n >= 0 and n <= c.options.high and n != c.selection:
     c.selection = n
     emit(c, evChange, index = n + 1, text = c.options[n])
   true
@@ -1274,14 +1285,14 @@ method draw*(o: Tab, d: Drawing, t: Theme) =
   for i, rr in rs:
     let isActiveTab = i == o.activePage
     var col = if isActiveTab: t.text else: t.textSecondary
-    if o.isGrayed: col = t.textDisabled
+    if o.isGrayed or o.children[i].state == csGrayed: col = t.textDisabled
     case t.look
     of lfMacOS:
       if isActiveTab:
         d.fillRoundRect(rect(rr.x + 2, rr.y + 3, rr.w - 4, rr.h - 4), t.radius - 1, t.shadow)
         d.fillRoundRect(rect(rr.x + 2, rr.y + 2, rr.w - 4, rr.h - 4), t.radius - 1,
                            if t.dark: t.surface else: White)
-      elif i == o.hoverIndex:
+      elif i == o.hoverIndex and o.children[i].state != csGrayed:
         d.fillRoundRect(rr.shrink(2), t.radius - 1, withAlpha(t.surfaceHover, 160))
     else:
       if isActiveTab:
@@ -1291,7 +1302,7 @@ method draw*(o: Tab, d: Drawing, t: Theme) =
           d.fillRoundRect(rect(rr.x + rr.w / 2 - 8, rr.y + rr.h - 4, 16, 3), 1.5, acc)
         else:
           d.fillRect(rect(rr.x + 6, rr.y + rr.h - 3, rr.w - 12, 3), acc)
-      elif i == o.hoverIndex:
+      elif i == o.hoverIndex and o.children[i].state != csGrayed:
         d.fillRoundRect(rr.shrink(2), t.radius, t.surfaceHover)
     d.textIn(rr, o.children[i].caption, col, alCenter)
     if o.focus and isActiveTab: d.drawFocus(t, rr.shrink(2), t.radius)
@@ -1301,7 +1312,8 @@ method onMouse*(o: Tab, e: MouseEvent) =
   for i, rr in rs:
     if rr.containsPoint(e.x, e.y):
       if e.action == maMove: o.hoverIndex = i
-      elif e.action == maPress and e.button == mbLeft and i != o.activePage:
+      elif e.action == maPress and e.button == mbLeft and i != o.activePage and
+           o.children[i].state != csGrayed:     # page grisée : onglet inaccessible.
         o.activePage = i
         emit(o, evChange, index = i + 1, text = o.children[i].caption)
       return
@@ -1313,7 +1325,7 @@ method onKey*(o: Tab, e: KeyEvent): bool =
   of SDLK_LEFT: n = max(0, n - 1)
   of SDLK_RIGHT: n = min(o.children.high, n + 1)
   else: return false
-  if n != o.activePage and n >= 0:
+  if n != o.activePage and n >= 0 and o.children[n].state != csGrayed:
     o.activePage = n
     emit(o, evChange, index = n + 1, text = o.children[n].caption)
   true

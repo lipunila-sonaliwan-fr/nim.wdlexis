@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.5.2,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.6.0,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -23,6 +23,7 @@
 import std/[os, strutils, sets, tables, atomics, locks, algorithm, deques]
 import wdgui
 import ide/[compat, settings, lexislang, langdocs, lexislint, codeeditor, session]
+from ide/generer import generationDialog
 import lexis/api
 import paquets/tous
 
@@ -806,6 +807,15 @@ proc onMenu(path: string) =
   of "Basculer le point d'arrêt (F9)": editorToggleBreakpoint(edId)
   of "Supprimer tous les points d'arrêt": editorClearBreakpoints(edId)
   of "Arguments et fichier principal…": programArguments()
+  of "Générer l'application…":
+    if root().len == 0:
+      alert(iconInformation, "Ouvrez d'abord un projet (Fichier > Ouvrir un projet…).", title = "Générer l'application")
+    else:
+      discard saveAll()
+      status("Génération de l'application…")
+      generationDialog(root(), opts().mainFile, theme(gWin))
+      fillProjectTree()
+      status("Prêt")
   of "Minicarte":
     var o = opts()
     o.minimap = not o.minimap
@@ -837,7 +847,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.5.2\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.6.0\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr - ✉ metalab (at) sonaliwan.fr\n" &
@@ -859,7 +869,7 @@ proc buildMenu(m: ControlId) =
                    "Pas principal (F10)", "Sortir de la procédure (Maj+F11)", "Pause",
                    "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)",
                    "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts",
-                   "Arguments et fichier principal…"]),
+                   "Arguments et fichier principal…", "Générer l'application…"]),
     ("Affichage", @["Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
                     "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)",
                     "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",

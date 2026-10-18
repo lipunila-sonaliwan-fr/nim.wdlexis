@@ -746,6 +746,103 @@ retourner vrai                             && faux interrompt la réponse
   niveau affiche ses variables).
 - Les documents ouverts sont exécutés tels qu'à l'écran, même non enregistrés.
 
+### 8.1 Générer une application (Zig embarqué)
+
+*Exécuter > Générer l'application…* transforme le projet en application
+autonome pour Linux, macOS et Windows, depuis n'importe lequel de ces systèmes.
+Aucun outil n'est à installer : wdlexis+ embarque le compilateur **Zig**
+(dossiers `linZG/`, `macZG/`, `winZG/`) et le **runtime Lexis+ déjà transpilé
+en C** pour chaque cible (dossier `rtc/`).
+
+**Onglet Projet**
+
+| Option | Valeurs |
+| --- | --- |
+| Type d'application | **Console**, **Graphique**, **Service**, **Bibliothèque**. Si le projet utilise le paquet `interface`, *Graphique* est imposé et les autres types sont grisés. |
+| Icône de l'application | (type *Graphique*) une image PNG, JPEG, BMP, GIF ou TGA ; le cadre carré choisit la partie retenue (glisser le cadre, molette ou poignée du coin pour la taille, flèches du clavier). |
+| Générer un exécutable pour | Linux x64, Linux arm64, macOS x64, macOS Mx (Apple Silicon), Windows x64, Windows arm64. |
+| Distribution | *Fichiers dans un dossier* ou *Archive* : `.zip` pour Windows, `.tar.gz` pour Linux et macOS, rangée dans le dossier `distribution/` du projet. |
+| Intégrer les bibliothèques requises | copie dans la distribution le dossier `linOS/`, `macOS/` ou `winOS/` de wdlexis+ (selon la cible ; un sous-dossier `x64/` ou `arm64/` est préféré s'il existe), les bibliothèques posées à côté de l'exécutable de wdlexis+ et le dossier `ttf/`. Une bibliothèque d'une autre architecture que la cible est signalée en orange. |
+
+**[Sauver]** enregistre ces choix dans le projet (`.wdlexis/application.ini`) ;
+**[Annuler]** ferme la boîte ; **[Compiler]** lance la génération : l'onglet
+**Détails** devient accessible et s'affiche, les options de l'onglet *Projet*
+sont grisées, ainsi que [Sauver] et [Compiler]. Au-dessus des boutons, le
+libellé de l'étape en cours, la jauge et le temps écoulé ; le bouton *Détails*
+passe d'un onglet à l'autre. [Annuler] interrompt alors la compilation (les
+processus de Zig sont arrêtés) et ferme la boîte.
+
+**Onglet Détails** : les commandes lancées et leurs retours, dans une zone de
+type shell (retour à la ligne automatique, ascenseur ; Ctrl+C ou clic droit
+copie tout le journal). Libellés d'étape en **jaune**, messages en blanc,
+avertissements en **orange**, erreurs en **rouge**, fin de chaque étape en
+**vert** avec sa durée entre crochets, puis « Génération terminée [durée
+totale] ». Une erreur arrête la génération sans fermer la boîte.
+
+**Étapes, pour chaque cible**
+
+1. *Transpilation du projet en C* : `projet.c` contient les sources `.prg`
+   (embrouillées : elles n'apparaissent pas en clair dans l'exécutable), le
+   type d'application et le point d'entrée.
+2. *Compilation C par Zig* : le runtime (`rtc/`) et `projet.c`, en parallèle.
+   Les objets du runtime sont gardés en cache (dossier de cache de
+   l'utilisateur, `wdlexis/obj`) : les générations suivantes ne recompilent que
+   `projet.c` et ne prennent que quelques secondes. La toute première
+   génération pour Windows est plus longue : Zig prépare une fois pour toutes les
+   bibliothèques C de la cible.
+3. *Icône Windows* (`.ico` lié à l'exécutable).
+4. *Édition des liens*.
+5. *Distribution* : exécutable (paquet `.app` avec icône `.icns` pour une
+   application graphique macOS ; `.png` et `.desktop` sous Linux), autres
+   fichiers du projet (pages, données...), bibliothèques, `LICENCES/`,
+   `LISEZMOI.txt`.
+
+**Selon le type**
+
+- *Console* : exécutable en ligne de commande ; `systeme.args` reçoit les
+  arguments.
+- *Graphique* : sous Windows, pas de fenêtre de console (les erreurs
+  s'affichent dans une boîte de message) ; sous macOS, un paquet `.app`.
+- *Service* : arrêt propre sur demande du système (SIGTERM sous Linux et macOS,
+  gestionnaire de services Windows : le drapeau d'arrêt est levé, comme le bouton
+  *Arrêter* de l'atelier). Fichiers fournis : unité systemd
+  (`installer-service.sh`), LaunchDaemon (`installer-service.sh`), ou
+  `installer-service.cmd` (`sc create`) ; sous Windows, les sorties du programme
+  vont dans `<nom>.log`.
+- *Bibliothèque* : `lib<nom>.so`, `lib<nom>.dylib` ou `<nom>.dll` et l'en-tête
+  `<nom>.h`. Les procédures du projet s'appellent par leur nom, arguments et
+  résultat en JSON :
+
+  ```c
+  #include "monprojet.h"
+  char *r = wdlexis_appeler("CARRE", "[12]");   /* "144" ; NULL en cas d'erreur */
+  if (r == NULL) puts(wdlexis_derniere_erreur());
+  wdlexis_liberer(r);
+  wdlexis_terminer();
+  ```
+
+  `wdlexis_initialiser()` (facultatif, appelé sinon au premier appel) exécute les
+  instructions en tête du fichier principal.
+
+**Paquets d'IA** : si le projet utilise `llm`, `gguf` ou `entrainement`, la
+distribution contient un dossier `models/` avec pour seul contenu
+`models.txt` : la liste des modèles GGUF présents dans le dossier `models/` de
+wdlexis+ et, en pied, le lien vers https://huggingface.co (création d'un compte,
+usage dans le cadre de la licence de chaque modèle après avoir déclaré la nature
+de l'usage, accepté la licence et obtenu l'accord des propriétaires). Les
+modèles eux-mêmes ne sont pas copiés.
+
+**macOS** : les exécutables pour macOS sont signés « ad hoc » par Zig. Une
+application téléchargée (navigateur, messagerie) est mise en quarantaine par le
+système ; `xattr -dr com.apple.quarantine MonAppli.app` la débloque. Si le
+Zig du dossier `macZG` (archive téléchargée) refuse de démarrer pour la même
+raison, wdlexis+ lui retire cet attribut et le signale en orange.
+
+**En ligne de commande** : `wdlexisgen <dossier_du_projet> [--type=...]
+[--cibles=linux-x64,windows-x64,...|toutes] [--archive] [--icone=image]` fait la
+même chose sans interface (utile pour l'intégration continue) ; sans option, il
+reprend les paramètres enregistrés par [Sauver].
+
 ## 9. Le runtime
 
 ```
