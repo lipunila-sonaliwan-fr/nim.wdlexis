@@ -21,7 +21,8 @@
 #     surfermeture... et surevenement pour tous ; ev:arreter() arrête la
 #     propagation ; un gestionnaire est une référence de procédure (@NOM) ;
 #   - méthodes selon la famille : liste:ajouter, tableau:ajouterligne,
-#     arbre:ajouter, grille:ajoutercolonne, graphe:ajouterdonnee, onglets:ajouterpage...
+#     arbre:ajouter, grille:ajoutercolonne, graphe:ajouterdonnee, onglets:ajouterpage,
+#     markdown:charger...
 #
 # Les gestionnaires s'exécutent sur les fils de wdgui ; l'interpréteur les
 # sérialise avec son verrou global. ui.executer() attend la fermeture des
@@ -252,23 +253,25 @@ proc numOf(v: Value, what: string): float =
 proc unsupported(what: string) {.noreturn.} =
   rtError("propriété « " & what & " » non prise en charge par cette version de wdgui")
 
+# NB : `compiles((a = b))` avec doubles parenthèses ; `compiles(a = b)` serait lu
+# comme un argument nommé et vaudrait toujours faux.
 template setNum(lhs: untyped, v: float, what = "") =
-  when compiles(lhs = v): lhs = v
-  elif compiles(lhs = typeof(lhs)(v)): lhs = typeof(lhs)(v)
+  when compiles((lhs = v)): lhs = v
+  elif compiles((lhs = typeof(lhs)(v))): lhs = typeof(lhs)(v)
   else: unsupported(what)
 
 template setAny(lhs: untyped, v: untyped, what: string) =
-  when compiles(lhs = v): lhs = v
+  when compiles((lhs = v)): lhs = v
   else: unsupported(what)
 
 template setVia(c: UiCtl, idExpr, objField: untyped, v: untyped, what: string) =
   # Affectation par identifiant (API de wdgui) ; à défaut, sur l'objet Control sous le verrou de wdgui.
-  when compiles(idExpr = v):
+  when compiles((idExpr = v)):
     idExpr = v
   else:
     if c.ctl.isNil: unsupported(what)
     withControl(c.id, Control, obj):
-      when compiles(obj.objField = v): obj.objField = v
+      when compiles((obj.objField = v)): obj.objField = v
       else: unsupported(what)
     requestRedraw(c.id)
 
@@ -298,8 +301,11 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
     let txt = L.tostr(v)
     if c.family in captionFamilies and key == "texte":
       setVia(c, id.caption, caption, txt, key)
+    elif int(id) == 0 and not c.ctl.isNil:
+      # pas encore ajouté à une fenêtre (sans identifiant) : directement sur l'objet.
+      guarded: c.ctl.setValueText(txt)
     else:
-      when compiles(id.value = txt): id.value = txt
+      when compiles((id.value = txt)): id.value = txt
       else:
         if c.ctl.isNil: unsupported(key)
         withControl(c.id, Control, obj): obj.setValueText(txt)
@@ -329,14 +335,14 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
   of "hauteur": setNum(id.height, numOf(v, "hauteur"), key)
   of "couleur", "couleurtexte":
     let col = colorOf(v)
-    when compiles(id.color = col): id.color = col
+    when compiles((id.color = col)): id.color = col
     else:
       if c.ctl.isNil: unsupported(key)
       c.ctl.style.text = some(col)
       requestRedraw(id)
   of "fond":
     let col = colorOf(v)
-    when compiles(id.backgroundColor = col): id.backgroundColor = col
+    when compiles((id.backgroundColor = col)): id.backgroundColor = col
     else:
       if c.ctl.isNil: unsupported(key)
       c.ctl.style.background = some(col)
@@ -608,6 +614,28 @@ proc addChildTo(L: Interp, parent: UiCtl, child: UiCtl) =
     discard Container(parent.ctl).addChild(child.ctl)
   else:
     rtError("« " & parent.family & " » n'est pas un conteneur")
+
+proc programPath(L: Interp, path: string): string =
+  ## Chemin relatif au dossier du programme (comme webview).
+  if path.isAbsolute: path
+  else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
+
+proc readMarkdown(L: Interp, path, fname: string): string =
+  let p = L.programPath(path)
+  try: result = readFile(p)
+  except IOError, OSError: rtError(fname & " : lecture impossible de « " & p & " »")
+
+template withMarkdown(L: Interp, a: seq[Value], fname: string, v, body: untyped) =
+  # Accès direct à l'objet sous le verrou de wdgui (fonctionne aussi avant
+  # l'ajout du contrôle à une fenêtre, quand il n'a pas encore d'identifiant).
+  block:
+    let c0 = L.self(a, fname)
+    if c0.ctl.isNil or not (c0.ctl of MarkdownView): rtError("« " & fname & " » : contrôle markdown attendu")
+    guarded:
+      let v = MarkdownView(c0.ctl)
+      body
+      markDirty(v)
+    wakeUI()
 
 proc defineMethods() =
   # communs
@@ -988,6 +1016,29 @@ proc defineMethods() =
                              L.optStr(a, 3, "importerpages", ""), int(L.optInt(a, 4, "importerpages", 1)))
     if err.len > 0: fail(err) else: @[boolV(true)]
 
+  # visionneuse Markdown
+  mfn "markdown", "charger", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let txt = L.readMarkdown(L.checkStr(a, 2, "charger"), "markdown:charger")
+    L.withMarkdown(a, "charger", v): v.setValueText(txt)
+  mfn "markdown", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let parts = L.strs(a, 2, "ajouter")
+    L.withMarkdown(a, "ajouter", v):
+      for t in parts: v.appendMarkdown(t)
+  mfn "markdown", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withMarkdown(a, "vider", v): v.setValueText("")
+  mfn "markdown", "defilera", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let p = arg(a, 2)
+    let where = if p.kind == vkStr: p.s.toLowerAscii else: ""
+    let y = if p.kind == vkStr: 0.0 else: L.checkNum(a, 2, "defilera")
+    if p.kind == vkStr and where notin ["debut", "fin"]:
+      rtError("markdown:defilera : nombre, \"debut\" ou \"fin\" attendu")
+    L.withMarkdown(a, "defilera", v):
+      if where == "fin": v.scrollToEnd() else: v.scrollTo(y)
+  mfn "markdown", "position", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var y = 0.0
+    L.withMarkdown(a, "position", v): y = v.scrollPosition
+    @[numV(y)]
+
 proc optsArg(a: seq[Value], i: int): LTable =
   if arg(a, i).kind == vkTable: a[i - 1].t else: nil
 
@@ -1113,6 +1164,12 @@ proc openInterface(L: Interp): Value =
     @[L.newCtl(pn, "panneau")]
   ctor("pdf", "pdf"):
     newPdfViewer()
+  m.fn "markdown", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    var txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
+    let path = optField(o, "fichier", "")
+    if path.len > 0: txt = L.readMarkdown(path, "interface.markdown")
+    @[L.newCtl(newMarkdownView(txt), "markdown")]
 
   # boucle et dialogues
   m.fn "executer", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1208,6 +1265,7 @@ const uiDocs = [
   "interface.superconteneur([disposition])", "Conteneur sans marge.", "interface.cadre(titre, [disposition])", "Cadre de groupe.",
   "interface.panneau{disposition=, defilement=, colonnes=}", "Conteneur défilant (defilement : toujours, automatique, masque).",
   "interface.pdf()", "Visionneuse PDF (PDFium).",
+  "interface.markdown(texte | {texte=, fichier=})", "Visionneuse Markdown en lecture seule (titres, listes, citations, code, gras, italique, liens), avec retour à la ligne automatique et ascenseur vertical. valeur : le texte Markdown ; surselection : URL du lien cliqué dans ev.texte ; fichier : relatif au dossier du programme.",
   "interface.alerte(message, [icone], [titre])", "Message (icone : information, question, attention, stop, aucune).",
   "interface.confirmer(message, [icone])", "OK / Annuler ; renvoie un logique.",
   "interface.demander(message, [defaut])", "Saisie d'un texte.",
@@ -1245,7 +1303,12 @@ const uiDocs = [
   "grille:fixermodifiable([b])", "Mode saisie.", "grille:verscsv([sep])", "Export CSV.",
   "grille:chargercsv(chemin, [sep])", "Import CSV.",
   "grille:versjson()", "Export JSON.", "grille:chargerjson(chemin)", "Import JSON.",
-  "panneau:defilera(x, y)", "Fait défiler.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre."]
+  "panneau:defilera(x, y)", "Fait défiler.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre.",
+  "markdown:charger(chemin)", "Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut.",
+  "markdown:ajouter(texte, ...)", "Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé.",
+  "markdown:vider()", "Efface le contenu.",
+  "markdown:defilera(position)", "Fait défiler : nombre de pixels depuis le haut, \"debut\" ou \"fin\".",
+  "markdown:position()", "Défilement actuel en pixels depuis le haut."]
 
 registerPackage PackageDef(name: "interface", open: openInterface,
   description: "Interface graphique wdgui", docs: docs("interface", uiDocs))

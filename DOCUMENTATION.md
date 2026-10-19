@@ -469,7 +469,7 @@ retourner
   `ascenseur`, `compteur`, `notation`, `image`, `codebarre`, `graphe`,
   `calendrier`, `kanban`, `mosaique`, `gantt`, `barremenu`, `onglets`,
   `separateur`, `conteneur`, `colonne`, `rangee`, `superconteneur`, `cadre`,
-  `panneau`, `pdf`. Un contrôle s'ajoute avec `conteneur:ajouter(controle)`.
+  `panneau`, `pdf`, `markdown`. Un contrôle s'ajoute avec `conteneur:ajouter(controle)`.
 - Propriétés : `valeur`, `num`, `libelle` (ou `titre`), `texte`, `visible`, `etat`
   (`actif`, `grise`, `lecture`), `actif`, `infobulle`, `nom`, `x`, `y`, `largeur`,
   `hauteur`, `couleur`, `fond`, `bordure`, `accent`, `rayon`, `coche`, `min`, `max`,
@@ -489,6 +489,30 @@ retourner
 - `ui.tracer(vrai)` affiche dans la console chaque événement reçu.
 
 L'exemple `exemples/carnet` montre une grille, une barre de menus et une base.
+
+Le contrôle `markdown` affiche un texte Markdown mis en forme, en lecture seule :
+titres, listes (imbriquées par l'indentation), citations, blocs de code, règles,
+**gras**, *italique*, `code` et liens. Le texte revient à la ligne selon la largeur
+du contrôle et un ascenseur vertical apparaît s'il déborde (molette, flèches,
+Page préc./suiv., Début/Fin) ; Cmd/Ctrl+C copie le texte source. Un clic sur un
+lien déclenche `surselection` avec l'URL dans `ev.texte`.
+
+```lexis-interface
+ui = paquet("interface")
+fen = ui.fenetre{titre = "Aide", largeur = 520, hauteur = 420}
+aide = fen:ajouter(ui.markdown{fichier = "aide.md"})   && relatif au programme
+aide.poids = 1
+aide.surselection = @LIEN
+aide:ajouter("---", "*Ajouté par le programme.*")
+ui.executer()
+
+procedure LIEN(ev)
+  ? "lien :", ev.texte
+retourner
+```
+
+`aide.valeur = "# Titre"` remplace tout le contenu ; `aide:defilera("fin")`
+descend en bas (utile pour un journal alimenté par `aide:ajouter`).
 
 ### 5.1 Pages web dans une fenêtre : le paquet `webview`
 
@@ -1494,6 +1518,7 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `interface.cadre(titre, [disposition])` | Cadre de groupe. |
 | `interface.panneau{disposition=, defilement=, colonnes=}` | Conteneur défilant (defilement : toujours, automatique, masque). |
 | `interface.pdf()` | Visionneuse PDF (PDFium). |
+| `interface.markdown(texte \| {texte=, fichier=})` | Visionneuse Markdown en lecture seule, retour à la ligne automatique et ascenseur vertical ; `surselection` reçoit l'URL d'un lien cliqué (`ev.texte`) ; `fichier` relatif au dossier du programme. |
 | `interface.alerte(message, [icone], [titre])` | Message (icone : information, question, attention, stop, aucune). |
 | `interface.confirmer(message, [icone])` | OK / Annuler ; renvoie un logique. |
 | `interface.demander(message, [defaut])` | Saisie d'un texte. |
@@ -1554,6 +1579,11 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `panneau:defilera(x, y)` | Fait défiler. |
 | `pdf:ouvrir(chemin)` | Ouvre un PDF. |
 | `pdf:enregistrer([chemin])` | Enregistre. |
+| `markdown:charger(chemin)` | Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut. |
+| `markdown:ajouter(texte, ...)` | Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé. |
+| `markdown:vider()` | Efface le contenu. |
+| `markdown:defilera(position)` | Fait défiler : nombre de pixels depuis le haut, `"debut"` ou `"fin"`. |
+| `markdown:position()` | Défilement actuel en pixels depuis le haut. |
 
 ### Paquet `webview`
 

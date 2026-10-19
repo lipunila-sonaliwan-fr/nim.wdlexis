@@ -595,7 +595,7 @@ proc runProgramFrom(debug, stepFirst: bool) =
   discard saveAll()
   stopAsked.store(false)
   {.cast(gcsafe).}:
-    withLock inLock: inQueue.clear()     # pas de saisie restée d'une exécution précédente.
+    withLock inLock: inQueue.clear()                              # pas de saisie restée d'une exécution précédente.
   withState:
     st.runtimeRows.setLen(0)
     st.paused = false
@@ -654,9 +654,9 @@ proc doStop() =
   withState: st.paused = false
   editorSetExecLine(edId, -1, 0)
   status("Arrêt demandé…")
-  stopProgram()                          # drapeau d'arrêt + reprise du débogueur + fermeture des fenêtres.
+  stopProgram()                  # drapeau d'arrêt + reprise du débogueur + fermeture des fenêtres.
   {.cast(gcsafe).}:
-    withLock inLock: signal(inCond)      # débloque une saisie en attente.
+    withLock inLock: signal(inCond)                               # débloque une saisie en attente.
   refreshRunButtons()
   # Si le programme ne s'arrête pas (appel bloquant : dialogue modal, réseau,
   # fil qui ne rend pas la main...), le dire au lieu de laisser un état ambigu.
@@ -703,6 +703,317 @@ proc fillApiTree() =
   withState: st.apiRows = rows
   treeDeleteAll(trApi)
   for e in rows: treeAdd(trApi, e.section & TreeSep & e.signature)
+
+#
+# Fiches Markdown du panneau Référence
+#
+
+const ApiDocWelcome = """### Référence
+
+Sélectionnez un **paquet** ou une **fonction** dans l'arbre ci-dessus pour afficher sa fiche.
+
+- Double-clic sur une fonction : insérer l'appel dans l'éditeur.
+- Cmd/Ctrl+C dans ce cadre : copier la fiche (Markdown)."""
+
+proc mdEscape(s: string): string =
+  for ch in s:
+    if ch in {'\\', '`', '*', '_', '[', ']'}: result.add '\\'
+    result.add ch
+
+proc mdCode(s: string): string =
+  let f = if '`' in s: "`` " else: "`"
+  f & s & (if '`' in s: " ``" else: "`")
+
+proc isIdentByte(c: char): bool = c in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '_'}
+
+proc matchingClose(s: string, i: int): int =
+  # Position de la parenthèse / accolade / crochet fermant celui ouvert en s[i], -1 sinon.
+  var depth = 0
+  var inStr = false
+  for k in i ..< s.len:
+    let c = s[k]
+    if inStr:
+      if c == '"': inStr = false
+    elif c == '"': inStr = true
+    elif c in {'(', '{', '['}: inc depth
+    elif c in {')', '}', ']'}:
+      dec depth
+      if depth == 0: return k
+  -1
+
+proc mdInline(s: string): string =
+  # Texte de description -> Markdown : chaînes "…", appels f(…), noms pkg.f / obj:f,
+  # @procédures, URL et extensions .prg en code ; vrai/faux/nul en code.
+  var i = 0
+  while i < s.len:
+    let c = s[i]
+    let atStart = i == 0 or not (isIdentByte(s[i - 1]) or ord(s[i - 1]) >= 128)
+    if c == '"':
+      let j = s.find('"', i + 1)
+      if j > i:
+        result.add mdCode(s[i .. j])
+        i = j + 1
+        continue
+    if c == '@' and i + 1 < s.len and isIdentByte(s[i + 1]):
+      var j = i + 1
+      while j < s.len and isIdentByte(s[j]): inc j
+      result.add mdCode(s[i ..< j])
+      i = j
+      continue
+    if c == '.' and atStart and i + 2 < s.len and s[i + 1] in {'a' .. 'z'} and
+       (i == 0 or s[i - 1] == ' '):
+      var j = i + 1
+      while j < s.len and s[j] in {'a' .. 'z', '0' .. '9'}: inc j
+      if j - i <= 6 and (j == s.len or not isIdentByte(s[j])):
+        result.add mdCode(s[i ..< j])
+        i = j
+        continue
+    if atStart and c in {'a' .. 'z', 'A' .. 'Z', '_'}:
+      var j = i
+      var dotted = false
+      while j < s.len:
+        if isIdentByte(s[j]): inc j
+        elif s[j] in {'.', ':'} and j + 1 < s.len and s[j + 1] in {'a' .. 'z', 'A' .. 'Z', '_'}:
+          dotted = true
+          inc j
+        else: break
+      let word = s[i ..< j]
+      if j + 2 < s.len and s[j] == ':' and s[j + 1] == '/' and s[j + 2] == '/':
+        var k = j
+        while k < s.len and s[k] notin {' ', ',', ';', ')'}: inc k
+        if k > j + 3 and s[k - 1] == '.': dec k
+        result.add mdCode(s[i ..< k])
+        i = k
+        continue
+      if j < s.len and s[j] == '(':
+        let k = matchingClose(s, j)
+        if k > j:
+          result.add mdCode(s[i .. k])
+          i = k + 1
+          continue
+      if dotted and not word.endsWith("."):
+        result.add mdCode(word)
+        i = j
+        continue
+      if word.toLowerAscii in ["vrai", "faux", "nul"] and (j == s.len or not isIdentByte(s[j])) and
+         not s[0 ..< i].endsWith("octet "):   # « octet nul » : adjectif, pas la valeur nul.
+        result.add mdCode(word)
+        i = j
+        continue
+      result.add mdEscape(word)
+      i = j
+      continue
+    result.add mdEscape($c)
+    inc i
+
+proc splitTop(s: string, sep: char): seq[string] =
+  # Découpe sur `sep` hors parenthèses, accolades, crochets, chaînes et « … ».
+  var depth = 0
+  var inStr = false
+  var guil = 0
+  var cur = ""
+  var i = 0
+  while i < s.len:
+    let c = s[i]
+    if s.continuesWith("«", i): inc guil
+    elif s.continuesWith("»", i): guil = max(0, guil - 1)
+    if inStr:
+      if c == '"': inStr = false
+    elif c == '"': inStr = true
+    elif c in {'(', '{', '['}: inc depth
+    elif c in {')', '}', ']'}: dec depth
+    elif c == sep and depth == 0 and guil == 0:
+      result.add cur.strip()
+      cur = ""
+      inc i
+      continue
+    cur.add c
+    inc i
+  if cur.strip().len > 0: result.add cur.strip()
+
+proc mdParams(sig: string): seq[string] =
+  # Lignes de liste Markdown décrivant les paramètres d'une signature.
+  let p = sig.find({'(', '{'})
+  if p < 0: return
+  let q = matchingClose(sig, p)
+  if q < 0: return
+  let named = sig[p] == '{'
+  proc option(o: string): string =
+    let eq = o.find('=')
+    if eq < 0: return "  - " & mdCode(o.strip())
+    let k = o[0 ..< eq].strip()
+    let d = o[eq + 1 .. ^1].strip()
+    "  - " & mdCode(k) & (if d.len > 0: " — défaut " & mdCode(d) else: "")
+  if named:
+    result.add "- **Options nommées** (table `{...}`) :"
+    for o in splitTop(sig[p + 1 ..< q], ','): result.add option(o)
+    return
+  for a0 in splitTop(sig[p + 1 ..< q], ','):
+    var a = a0
+    var optional = false
+    if a.startsWith("[") and a.endsWith("]"):
+      optional = true
+      a = a[1 .. ^2].strip()
+    if a == "...":
+      result.add "- " & mdCode("...") & " — nombre variable de valeurs"
+    elif a.startsWith("{") and a.endsWith("}"):
+      result.add "- **Options** (table `{...}`" & (if optional: ", facultative" else: "") & ") :"
+      for o in splitTop(a[1 .. ^2], ','): result.add option(o)
+    elif a.startsWith("@"):
+      result.add "- " & mdCode(a) & " — procédure passée par référence (`@NOM`)" &
+        (if optional: ", *facultative*" else: "")
+    elif a.endsWith("..."):
+      result.add "- " & mdCode(a) & " — valeurs supplémentaires"
+    else:
+      result.add "- " & mdCode(a) & (if optional: " — *facultatif*" else: "")
+
+proc mdDescription(doc: string): tuple[body: string, returns: string] =
+  # Sépare « renvoie … » du reste ; trois propositions ou plus (séparées par « ; »)
+  # deviennent une liste, « clé : texte » mettant la clé en code.
+  const NewSentence = '\1'   # proposition qui commence une nouvelle phrase.
+  var clauses: seq[string]
+  for c in splitTop(doc, ';'):
+    let l = c.toLowerAscii
+    if l.startsWith("renvoie ") and result.returns.len == 0:
+      var r = c[8 .. ^1].strip()
+      let dot = r.find(". ")
+      if dot >= 0:
+        clauses.add NewSentence & r[dot + 2 .. ^1]
+        r = r[0 .. dot]
+      result.returns = r
+    else: clauses.add c
+  if result.returns.len == 0:
+    for k, c in clauses:
+      let pos = c.find(". Renvoie ")
+      if pos >= 0:
+        var r = c[pos + 10 .. ^1].strip()
+        clauses[k] = c[0 .. pos]
+        let dot = r.find(". ")
+        if dot >= 0:
+          clauses.insert(NewSentence & r[dot + 2 .. ^1], k + 1)
+          r = r[0 .. dot]
+        result.returns = r
+        break
+  if result.returns.endsWith("."): result.returns.setLen(result.returns.len - 1)
+  var semis = 0
+  for c in clauses:
+    if c.len == 0 or c[0] != NewSentence: inc semis
+  if semis >= 3:
+    var intro = ""
+    var items = clauses
+    for it in items.mitems: it = it.strip(chars = {NewSentence})
+    let dot = items[0].rfind(". ")
+    if dot >= 0:
+      intro = items[0][0 .. dot]
+      items[0] = items[0][dot + 2 .. ^1]
+    var lines: seq[string]
+    if intro.len > 0: lines.add mdInline(intro) & "\n"
+    for it in items:
+      var t = it.strip()
+      if t.endsWith("."): t.setLen(t.len - 1)
+      let colon = t.find(" : ")
+      if colon > 0 and colon <= 24 and t[0 ..< colon].allCharsInSet(IdentChars + {' ', '=', '"'}):
+        lines.add "- " & mdCode(t[0 ..< colon]) & " : " & mdInline(t[colon + 3 .. ^1])
+      else: lines.add "- " & mdInline(t)
+    result.body = lines.join("\n")
+  else:
+    var t = ""
+    for c in clauses:
+      if c.len > 0 and c[0] == NewSentence:
+        if t.len > 0 and t[^1] notin {'.', '!', '?', ')'}: t.add '.'
+        t.add " " & c[1 .. ^1]
+      elif t.len > 0: t.add " ; " & c
+      else: t = c
+    t = t.strip()
+    if t.len > 0 and t[0] in {'a' .. 'z'}: t[0] = toUpperAscii(t[0])
+    if t.len > 0 and t[^1] notin {'.', '!', '?', ':', ')'} and not t.endsWith("»"): t.add '.'
+    elif t.endsWith(")") and not t.endsWith(".)"): t.add '.'
+    result.body = mdInline(t)
+  if result.returns.len > 0 and result.returns[0] in {'A' .. 'Z'} and
+     (result.returns.len < 2 or result.returns[1] notin {'A' .. 'Z'}):
+    result.returns[0] = toLowerAscii(result.returns[0])
+
+proc availabilityMd(section: string): string =
+  if section == "base": "fonction intégrée, toujours disponible."
+  elif section in ["es", "systeme"]: "paquet " & mdCode(section) & ", toujours disponible."
+  else: "paquet " & mdCode(section) & " : " & mdCode(section & ".fonction(...)") &
+        " ou " & mdCode("x = paquet(\"" & section & "\")") & "."
+
+proc apiDocMarkdown(e: ApiDoc): string =
+  let callable = e.signature.find({'(', '{'}) >= 0
+  let full = e.signature.split({'(', '{'})[0].strip()
+  var md = @["# " & mdEscape(full), ""]
+  if e.isMethod:
+    md.add "**Méthode** de l'objet " & mdCode(e.owner) & " · paquet " & mdCode(e.section)
+  elif e.owner.len > 0:
+    md.add (if callable: "**Fonction** du paquet " else: "**Valeur** du paquet ") & mdCode(e.owner)
+  else:
+    md.add "**Fonction intégrée**"
+  md.add ""
+  md.add "```"
+  md.add e.signature
+  md.add "```"
+  md.add ""
+  let params = mdParams(e.signature)
+  if params.len > 0:
+    md.add "## Paramètres"
+    md.add params
+    md.add ""
+  elif callable:
+    md.add "*Aucun paramètre.*"
+    md.add ""
+  let (body, returns) = mdDescription(e.doc)
+  md.add "## Description"
+  md.add body
+  md.add ""
+  if returns.len > 0:
+    md.add "**Renvoie** : " & mdInline(returns) & "."
+    md.add ""
+  md.add "---"
+  md.add "> **Disponibilité** : " & availabilityMd(e.section)
+  md.add ""
+  md.add "*Double-clic dans l'arbre : insérer l'appel.*"
+  md.join("\n")
+
+proc firstSentence(s: string): string =
+  var p = s.find(". ")
+  while p > 0 and s[p - 1] == '.': p = s.find(". ", p + 2)   # « ... » n'est pas une fin de phrase.
+  result = if p >= 0: s[0 .. p - 1] else: s.strip(chars = {' ', '.'})
+  if result.len > 90:
+    let cut = result.rfind(' ', 0, 85)
+    result = result[0 ..< max(cut, 40)] & "…"
+
+proc packageMarkdown(section: string, rows: seq[ApiDoc]): string =
+  var desc = ""
+  for p in packages():
+    if p.name == section:
+      desc = p.description
+      break
+  var md = @[(if section == "base": "# Fonctions intégrées" else: "# Paquet " & mdCode(section)), ""]
+  if desc.len > 0: md.add mdInline(desc) & "\n"
+  md.add "> **Disponibilité** : " & availabilityMd(section)
+  md.add ""
+  var fns, meths, vals: seq[string]
+  for e in rows:
+    if e.section != section: continue
+    let line = "- " & mdCode(e.signature) & " — " & mdInline(firstSentence(e.doc))
+    if e.isMethod: meths.add line
+    elif e.signature.find({'(', '{'}) < 0: vals.add line
+    else: fns.add line
+  if fns.len > 0:
+    md.add "## Fonctions (" & $fns.len & ")"
+    md.add fns
+    md.add ""
+  if vals.len > 0:
+    md.add "## Valeurs (" & $vals.len & ")"
+    md.add vals
+    md.add ""
+  if meths.len > 0:
+    md.add "## Méthodes (" & $meths.len & ")"
+    md.add meths
+    md.add ""
+  md.add "*Sélectionnez une entrée pour afficher sa fiche.*"
+  md.join("\n")
 
 proc apiEntryForPath(path: string): (bool, ApiDoc) =
   let parts = path.split(TreeSep)
@@ -966,12 +1277,11 @@ proc handler(ev: var Event) {.nimcall, gcsafe.} =
           gotoFile(info.frames[i].source, info.frames[i].line - 1, 0)
       elif ev.id == trApi:
         let (ok, e) = apiEntryForPath(ev.text)
-        if ok:
-          edApiDoc.value = e.signature & "\n\n" & e.doc & "\n\n— " &
-            (if e.section == "base": "fonction intégrée"
-             elif e.section in ["es", "systeme"]: "paquet « " & e.section & " » (toujours disponible)"
-             else: "paquet « " & e.section & " » : " & e.section & ".fonction(...) ou x = paquet(\"" & e.section & "\")") &
-            "\n\nDouble-clic : insérer l'appel."
+        if ok: edApiDoc.value = apiDocMarkdown(e)
+        elif ev.text.len > 0 and TreeSep notin ev.text:
+          var rows: seq[ApiDoc]
+          withState: rows = st.apiRows
+          edApiDoc.value = packageMarkdown(ev.text, rows)
       elif ev.id == tblProb:
         var row: ProblemRow
         var ok = false
@@ -1090,12 +1400,12 @@ proc buildUi() =
   lstOutline = lo.id
   let pgApi = left.addPage("Référence", lkVertical)
   let ta = pgApi.addChild(newTreeView())
-  ta.weight = 2
+  ta.weight = 1
   trApi = ta.id
-  let ad = pgApi.addChild(newMultilineEdit(""))
+  # fiche de l'élément sélectionné : Markdown mis en forme, ascenseur si nécessaire
+  let ad = pgApi.addChild(newMarkdownView(ApiDocWelcome))
   ad.weight = 1
   edApiDoc = ad.id
-  edApiDoc.state = csReadOnly
 
   let right = split.addChild(newSplitter(vertical = false, position = 0.70))
   let ed = right.addChild(newLexisEditor())
