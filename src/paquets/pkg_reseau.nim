@@ -147,6 +147,9 @@ proc openReseau(L: Interp): Value =
       s.sock.close()
     @[boolV(true)]
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("socket", sockMethods)
   let m = newLib()
   m.fn "connecter", proc (L: Interp, a: seq[Value]): seq[Value] =
     let host = L.checkStr(a, 1, "connecter")
@@ -402,6 +405,9 @@ proc openFtp(L: Interp): Value =
       c.closed = true
     @[boolV(true)]
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("ftp", ftpMethods)
   let m = newLib()
   m.fn "connecter", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = L.checkTable(a, 1, "connecter")
@@ -543,6 +549,9 @@ proc openSsh(L: Interp): Value =
   sftpSimple("supprimer", "rm", 1)
   sftpSimple("renommer", "rename", 2)
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("ssh", sshMethods)
   let m = newLib()
   m.fn "connecter", proc (L: Interp, a: seq[Value]): seq[Value] =
     let s = sshFromOpts(L.checkTable(a, 1, "connecter"))

@@ -364,6 +364,14 @@ proc runJobs(jobs: seq[Job], hooks: BuildHooks, prog: Progress, weight = 1.0,
     rJobs = jobs
     rNext.store(0)
     rCancel.store(false)
+    # Nim 2.2 (ARC/ORC) : close() libère le tampon du canal sans remettre
+    # data/count/rd/wr à zéro, et open() ne les réinitialise pas. Au second
+    # runJobs (édition des liens après la compilation), le premier send
+    # agrandissait la file et libérait une seconde fois l'ancien tampon :
+    # double libération, tas corrompu (plantage malloc sur macOS, dans
+    # startProcess ou le cache de textes de l'interface). On repart d'un
+    # canal entièrement remis à zéro.
+    zeroMem(addr rChan, sizeof(rChan))
     rChan.open()
     let n = max(1, min(jobs.len, countProcessors()))
     rProcs = newSeq[Process](n)
@@ -418,6 +426,7 @@ proc runJobs(jobs: seq[Job], hooks: BuildHooks, prog: Progress, weight = 1.0,
       sleep(10)
     for t in threads.mitems: joinThread(t)
     rChan.close()
+    zeroMem(addr rChan, sizeof(rChan))
     rProcs.setLen(0)
     result = not failed
 

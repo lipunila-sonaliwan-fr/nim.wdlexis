@@ -22,7 +22,7 @@
 #     propagation ; un gestionnaire est une référence de procédure (@NOM) ;
 #   - méthodes selon la famille : liste:ajouter, tableau:ajouterligne,
 #     arbre:ajouter, grille:ajoutercolonne, graphe:ajouterdonnee, onglets:ajouterpage,
-#     markdown:charger...
+#     markdown:charger, editeur:ouvrir...
 #
 # Les gestionnaires s'exécutent sur les fils de wdgui ; l'interpréteur les
 # sérialise avec son verrou global. ui.executer() attend la fermeture des
@@ -34,6 +34,9 @@ import std/[strutils, tables, os, locks, options]
 import ../wdgui
 import ../lexis/api
 import ../ide/compat
+import ../ide/[codeeditor, langdocs]
+from ../ide/lexislint import Diagnostic, Severity
+from std/unicode import runeOffset
 
 type
   UiCtl* = ref object of LUser
@@ -637,6 +640,37 @@ template withMarkdown(L: Interp, a: seq[Value], fname: string, v, body: untyped)
       markDirty(v)
     wakeUI()
 
+proc edOf(L: Interp, a: seq[Value], fname: string): ControlId =
+  # Identifiant de l'éditeur (l'API de l'éditeur passe par l'identifiant wdgui).
+  let c = L.self(a, fname)
+  if c.ctl.isNil or not (c.ctl of CodeEditor): rtError("« " & fname & " » : éditeur attendu")
+  if int(c.id) == 0: rtError("« " & fname & " » : ajoutez d'abord l'éditeur à une fenêtre")
+  c.id
+
+proc uidArg(L: Interp, a: seq[Value], i: int, id: ControlId, fname: string): int =
+  if arg(a, i).kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, i, fname))
+
+proc diagOf(L: Interp, t: LTable, lines: seq[string]): Diagnostic =
+  let ln = max(1, optField(t, "ligne", 1)) - 1
+  let col = max(1, optField(t, "colonne", 1)) - 1
+  var bcol = col
+  if ln < lines.len:
+    let o = runeOffset(lines[ln], col)
+    bcol = if o < 0: lines[ln].len else: o
+  let sev = case optField(t, "genre", "erreur").toLowerAscii
+    of "avertissement", "warning": sevWarning
+    of "info", "information": sevInfo
+    else: sevError
+  Diagnostic(line: ln, col: bcol, len: max(1, optField(t, "longueur", 1)), sev: sev,
+             msg: optField(t, "message", ""))
+
+proc findReqOf(texte: string, o: LTable, remplacement = ""): FindRequest =
+  result.findText = texte
+  result.replaceText = remplacement
+  result.matchCase = optField(o, "casse", false)
+  result.wholeWord = optField(o, "motentier", false)
+  result.backwards = optField(o, "arriere", false)
+
 proc defineMethods() =
   # communs
   mfn "*", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1016,6 +1050,137 @@ proc defineMethods() =
                              L.optStr(a, 3, "importerpages", ""), int(L.optInt(a, 4, "importerpages", 1)))
     if err.len > 0: fail(err) else: @[boolV(true)]
 
+  # éditeur de code Lexis+ (multi-documents)
+  mfn "editeur", "ouvrir", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "ouvrir")
+    let p = absolutePath(L.programPath(L.checkStr(a, 2, "ouvrir"))).normalizedPath
+    var txt = ""
+    if fileExists(p):
+      try: txt = readFile(p)
+      except IOError, OSError: rtError("editeur:ouvrir : lecture impossible de « " & p & " »")
+    elif not optBool(a, 3, false): rtError("editeur:ouvrir : fichier introuvable « " & p & " »")
+    @[intV(editorOpen(id, p, txt))]
+  mfn "editeur", "nouveau", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(editorNew(L.edOf(a, "nouveau"), L.optStr(a, 2, "nouveau", "sans titre")))]
+  mfn "editeur", "texte", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "texte")
+    @[strV(editorText(id, L.uidArg(a, 2, id, "texte")))]
+  mfn "editeur", "enregistrer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "enregistrer")
+    let uid = L.uidArg(a, 3, id, "enregistrer")
+    let info = editorInfo(id, uid)
+    var p = if arg(a, 2).kind == vkNil: info.path else: L.programPath(L.checkStr(a, 2, "enregistrer"))
+    if p.len == 0: rtError("editeur:enregistrer : document sans chemin (indiquez-en un)")
+    p = absolutePath(p).normalizedPath
+    let snap = editorSnapshot(id, uid)
+    try: writeFile(p, snap.lines.join("\n"))
+    except IOError, OSError: rtError("editeur:enregistrer : écriture impossible de « " & p & " »")
+    editorMarkSaved(id, uid, snap.version, p)
+    @[strV(p)]
+  mfn "editeur", "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "fermer")
+    editorClose(id, L.uidArg(a, 2, id, "fermer"))
+  mfn "editeur", "actif", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(editorActiveUid(L.edOf(a, "actif")))]
+  mfn "editeur", "activer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorActivate(L.edOf(a, "activer"), int(L.checkInt(a, 2, "activer")))
+  mfn "editeur", "documents", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = newLTable()
+    for d in editorDocs(L.edOf(a, "documents")):
+      t.arr.add record({"uid": intV(d.uid), "chemin": strV(d.path), "titre": strV(d.title),
+                        "modifie": boolV(d.dirty)})
+    @[tableV(t)]
+  mfn "editeur", "chemin", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "chemin")
+    @[strV(editorInfo(id, L.uidArg(a, 2, id, "chemin")).path)]
+  mfn "editeur", "modifie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "modifie")
+    @[boolV(editorInfo(id, L.uidArg(a, 2, id, "modifie")).dirty)]
+  mfn "editeur", "chercherdocument", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "chercherdocument")
+    let p = L.checkStr(a, 2, "chercherdocument")
+    var uid = editorUidOf(id, p)
+    if uid < 0: uid = editorUidOf(id, absolutePath(L.programPath(p)).normalizedPath)
+    @[(if uid < 0: nilV else: intV(uid))]
+  mfn "editeur", "aller", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "aller")
+    let uid = L.uidArg(a, 4, id, "aller")
+    let ln = max(1, int(L.checkInt(a, 2, "aller"))) - 1
+    var col = max(1, int(L.optInt(a, 3, "aller", 1))) - 1
+    let lines = editorText(id, uid).split('\n')
+    if ln < lines.len:
+      let o = runeOffset(lines[ln], col)
+      col = if o < 0: lines[ln].len else: o
+    editorGoto(id, uid, ln, col)
+  mfn "editeur", "curseur", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c = editorCursor(L.edOf(a, "curseur"))
+    @[record({"ligne": intV(c.line + 1), "colonne": intV(c.col + 1)})]
+  mfn "editeur", "inserer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorInsert(L.edOf(a, "inserer"), L.checkStr(a, 2, "inserer"))
+  mfn "editeur", "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[strV(editorSelection(L.edOf(a, "selection")))]
+  mfn "editeur", "motcourant", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[strV(editorWordAtCursor(L.edOf(a, "motcourant")))]
+  mfn "editeur", "commande", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let fr = L.checkStr(a, 2, "commande").toLowerAscii
+    let cmd = case fr
+      of "annuler": "undo"
+      of "retablir": "redo"
+      of "couper": "cut"
+      of "copier": "copy"
+      of "coller": "paste"
+      of "toutselectionner": "selectall"
+      of "dupliquer": "dup"
+      of "commenter": "comment"
+      of "indenter": "indent"
+      of "desindenter": "outdent"
+      else: fr
+    editorCommand(L.edOf(a, "commande"), cmd)
+  mfn "editeur", "diagnostics", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "diagnostics")
+    let uid = L.uidArg(a, 3, id, "diagnostics")
+    let lines = editorText(id, uid).split('\n')
+    var ds: seq[Diagnostic]
+    if arg(a, 2).kind == vkTable:
+      let t = a[1].t
+      for i in 1 .. t.rawLen:
+        let v = t.rawGet(intV(i))
+        if v.kind == vkTable: ds.add L.diagOf(v.t, lines)
+    editorSetDiagnostics(id, uid, editorInfo(id, uid).version, ds)
+  mfn "editeur", "pointsarret", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "pointsarret")
+    let t = newLTable()
+    for l in editorBreakpoints(id, L.uidArg(a, 2, id, "pointsarret")): t.arr.add intV(l + 1)
+    @[tableV(t)]
+  mfn "editeur", "chercher", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "chercher")
+    let o = if arg(a, 3).kind == vkTable: a[2].t else: nil
+    @[boolV(editorFind(id, findReqOf(L.checkStr(a, 2, "chercher"), o)))]
+  mfn "editeur", "remplacer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "remplacer")
+    let o = if arg(a, 4).kind == vkTable: a[3].t else: nil
+    @[boolV(editorReplace(id, findReqOf(L.checkStr(a, 2, "remplacer"), o, L.checkStr(a, 3, "remplacer"))))]
+  mfn "editeur", "remplacertout", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "remplacertout")
+    let o = if arg(a, 4).kind == vkTable: a[3].t else: nil
+    @[intV(editorReplaceAll(id, findReqOf(L.checkStr(a, 2, "remplacertout"), o,
+                                          L.checkStr(a, 3, "remplacertout"))))]
+  mfn "editeur", "lignexecution", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "lignexecution")
+    let ln = int(L.optInt(a, 2, "lignexecution", 0))
+    if ln <= 0: editorSetExecLine(id, -1, -1)
+    else: editorSetExecLine(id, L.uidArg(a, 3, id, "lignexecution"), ln - 1)
+  mfn "editeur", "basculerpointarret", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorToggleBreakpoint(L.edOf(a, "basculerpointarret"))
+  mfn "editeur", "effacerpointsarret", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorClearBreakpoints(L.edOf(a, "effacerpointsarret"))
+  mfn "editeur", "pressepapiers", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorCopyToClipboard(L.edOf(a, "pressepapiers"), L.checkStr(a, 2, "pressepapiers"))
+  mfn "editeur", "taillepolice", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorSetFontSize(L.edOf(a, "taillepolice"), L.checkNum(a, 2, "taillepolice"))
+  mfn "editeur", "minicarte", proc (L: Interp, a: seq[Value]): seq[Value] =
+    editorSetOptions(L.edOf(a, "minicarte"), optBool(a, 2, true), false)
+
   # visionneuse Markdown
   mfn "markdown", "charger", proc (L: Interp, a: seq[Value]): seq[Value] =
     let txt = L.readMarkdown(L.checkStr(a, 2, "charger"), "markdown:charger")
@@ -1164,6 +1329,13 @@ proc openInterface(L: Interp): Value =
     @[L.newCtl(pn, "panneau")]
   ctor("pdf", "pdf"):
     newPdfViewer()
+  m.fn "editeur", proc (L: Interp, a: seq[Value]): seq[Value] =
+    initLangDocs()     # complétion et aide : fonctions intégrées et paquets.
+    let o = optsArg(a, 1)
+    let ed = newLexisEditor()
+    ed.showMinimap = optField(o, "minicarte", true)
+    ed.fontSize = optField(o, "taille", 14.0)
+    @[L.newCtl(ed, "editeur")]
   m.fn "markdown", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = optsArg(a, 1)
     var txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
@@ -1218,6 +1390,20 @@ proc openInterface(L: Interp): Value =
       p = saveFileDialog(defaultName = optField(o, "nom", ""),
                          filter = optField(o, "filtre", "Tous les fichiers|*"))
     @[(if p.len > 0: strV(p) else: nilV)]
+  m.fn "rechercher", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let o = optsArg(a, 1)
+    var req = findReqOf(optField(o, "texte", ""), o, optField(o, "remplacement", ""))
+    let repl = optField(o, "remplacer", false)
+    var r = drCancel
+    L.blocking: r = findDialog(req, replace = repl)
+    if r != drOk or req.action == faNone: return @[nilV]
+    let act = case req.action
+      of faReplace: "remplacer"
+      of faReplaceAll: "toutremplacer"
+      else: "chercher"
+    @[record({"action": strV(act), "texte": strV(req.findText), "remplacement": strV(req.replaceText),
+              "casse": boolV(req.matchCase), "motentier": boolV(req.wholeWord),
+              "arriere": boolV(req.backwards)})]
   m.fn "couleur", proc (L: Interp, a: seq[Value]): seq[Value] =
     var c = hex(L.optStr(a, 1, "couleur", "#005FB8"))
     var ok = false
@@ -1265,12 +1451,14 @@ const uiDocs = [
   "interface.superconteneur([disposition])", "Conteneur sans marge.", "interface.cadre(titre, [disposition])", "Cadre de groupe.",
   "interface.panneau{disposition=, defilement=, colonnes=}", "Conteneur défilant (defilement : toujours, automatique, masque).",
   "interface.pdf()", "Visionneuse PDF (PDFium).",
+  "interface.editeur([{minicarte=, taille=}])", "Éditeur de code Lexis+ à onglets (coloration, complétion, structure, minicarte, points d'arrêt). valeur : texte du document actif. surchangement : texte modifié ; surselection : signal dans ev.texte (\"pos:L:C\", \"doc:UID\", \"cmd:save\", \"cmd:run\"...).",
   "interface.markdown(texte | {texte=, fichier=})", "Visionneuse Markdown en lecture seule (titres, listes, citations, code, gras, italique, liens), avec retour à la ligne automatique et ascenseur vertical. valeur : le texte Markdown ; surselection : URL du lien cliqué dans ev.texte ; fichier : relatif au dossier du programme.",
   "interface.alerte(message, [icone], [titre])", "Message (icone : information, question, attention, stop, aucune).",
   "interface.confirmer(message, [icone])", "OK / Annuler ; renvoie un logique.",
   "interface.demander(message, [defaut])", "Saisie d'un texte.",
   "interface.ouvrirfichier{titre=, filtre=, dossier=}", "Choix d'un fichier à ouvrir ; nul si annulé.",
   "interface.enregistrerfichier{nom=, filtre=}", "Choix d'un fichier à enregistrer ; nul si annulé.",
+  "interface.rechercher{texte=, remplacement=, remplacer=, casse=, motentier=}", "Boîte Rechercher (et Remplacer) ; renvoie {action, texte, remplacement, casse, motentier, arriere} ou nul. action : chercher, remplacer, toutremplacer.",
   "interface.couleur([\"#RRGGBB\"])", "Sélecteur de couleur.",
   "interface.police([famille], [taille])", "Sélecteur de police : {famille, taille, gras, italique}.",
   "interface.sep", "Séparateur des chemins d'arbre et de menu.",
@@ -1304,6 +1492,30 @@ const uiDocs = [
   "grille:chargercsv(chemin, [sep])", "Import CSV.",
   "grille:versjson()", "Export JSON.", "grille:chargerjson(chemin)", "Import JSON.",
   "panneau:defilera(x, y)", "Fait défiler.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre.",
+  "editeur:ouvrir(chemin, [creer])", "Ouvre (ou active) un fichier dans un onglet ; renvoie l'uid du document. creer = vrai : fichier absent accepté.",
+  "editeur:nouveau([titre])", "Nouveau document vide ; renvoie son uid.",
+  "editeur:texte([uid])", "Texte d'un document (actif par défaut).",
+  "editeur:enregistrer([chemin], [uid])", "Écrit le document sur disque et le marque enregistré ; renvoie le chemin.",
+  "editeur:fermer([uid])", "Ferme un document.", "editeur:actif()", "uid du document actif.",
+  "editeur:activer(uid)", "Active un document.",
+  "editeur:documents()", "Documents ouverts : liste de {uid, chemin, titre, modifie}.",
+  "editeur:chemin([uid])", "Chemin d'un document.", "editeur:modifie([uid])", "Vrai si le document a des modifications non enregistrées.",
+  "editeur:chercherdocument(chemin)", "uid du document ouvert sur ce chemin (ou ce titre) ; nul sinon.",
+  "editeur:aller(ligne, [colonne], [uid])", "Place le curseur (lignes et colonnes à partir de 1).",
+  "editeur:curseur()", "Position du curseur : {ligne, colonne}.",
+  "editeur:inserer(texte)", "Insère du texte au curseur.", "editeur:selection()", "Texte sélectionné.",
+  "editeur:motcourant()", "Mot sous le curseur.",
+  "editeur:commande(nom)", "annuler, retablir, couper, copier, coller, toutselectionner, dupliquer, commenter, indenter, desindenter.",
+  "editeur:diagnostics(liste, [uid])", "Souligne des problèmes : liste de {ligne, colonne, longueur, genre, message} (celle de lexis.verifier).",
+  "editeur:pointsarret([uid])", "Lignes des points d'arrêt (F9).",
+  "editeur:chercher(texte, [{casse=, motentier=, arriere=}])", "Sélectionne l'occurrence suivante ; vrai si trouvée.",
+  "editeur:remplacer(texte, remplacement, [options])", "Remplace la sélection si elle correspond, puis cherche la suivante.",
+  "editeur:remplacertout(texte, remplacement, [options])", "Remplace toutes les occurrences ; renvoie leur nombre.",
+  "editeur:lignexecution([ligne], [uid])", "Surligne la ligne d'exécution du débogueur (sans ligne : l'efface).",
+  "editeur:basculerpointarret()", "Pose ou retire un point d'arrêt sur la ligne du curseur.",
+  "editeur:effacerpointsarret()", "Retire tous les points d'arrêt.",
+  "editeur:pressepapiers(texte)", "Copie un texte dans le presse-papiers.",
+  "editeur:taillepolice(taille)", "Taille de la police.", "editeur:minicarte([b])", "Affiche ou masque la minicarte.",
   "markdown:charger(chemin)", "Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut.",
   "markdown:ajouter(texte, ...)", "Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé.",
   "markdown:vider()", "Efface le contenu.",

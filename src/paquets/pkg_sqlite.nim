@@ -278,6 +278,9 @@ proc openSqliteLib(L: Interp): Value =
       discard sq.close_v2(d.db)
     @[boolV(true)]
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("sqlite", dbMethods)
   let m = newLib()
   m.fn "ouvrir", proc (L: Interp, a: seq[Value]): seq[Value] =
     if not loadSqlite(): return fail(loadError)

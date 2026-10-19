@@ -109,6 +109,10 @@ proc openTask(L: Interp): Value =
   chanMethods.fn "nombre", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[intV(checkUser[LChannel](L, a, 1, "nombre", "canal").items.len)]
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("tache", taskMethods)
+  discard L.userMeta("canal", chanMethods)
   let m = newLib()
   m.fn "lancer", proc (L: Interp, a: seq[Value]): seq[Value] =
     let f = L.checkFunc(a, 1, "lancer")
@@ -276,6 +280,9 @@ proc openThread(L: Interp): Value =
   tm.fn "arreter", proc (L: Interp, a: seq[Value]): seq[Value] =
     L.checkThread(a, "arreter").stop[].store(true)
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("fil", threadMethods)
   let m = newLib()
   proc startThread(L: Interp, code, path: string, args: seq[string]): Value =
     let t = LThread(toChild: newQueue(), toParent: newQueue())

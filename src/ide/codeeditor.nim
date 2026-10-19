@@ -1429,6 +1429,28 @@ method onKey*(ed: CodeEditor, e: KeyEvent): bool =
 proc newLexisEditor*(): CodeEditor =
   result = newCodeEditor()
 
+# valeur (paquet interface) : texte du document actif.
+
+method valueText*(ed: CodeEditor): string =
+  if ed.doc != nil: ed.doc.text else: ""
+
+method setValueText*(ed: CodeEditor, v: string) =
+  ## Remplace le texte du document actif (en crée un s'il n'y en a pas) ; annulable.
+  if ed.doc == nil:
+    ed.docs.add newDocument("sans titre", v)
+    ed.current = ed.docs.high
+    ed.signal("doc:" & $ed.docs[^1].uid)
+    return
+  let d = ed.doc
+  d.pushUndo()
+  d.lines = v.replace("\r\n", "\n").replace("\t", "  ").split('\n')
+  if d.lines.len == 0: d.lines = @[""]
+  d.line = min(d.line, d.lines.high)
+  d.col = min(d.col, d.lines[d.line].len)
+  d.collapse()
+  d.changed()
+  ed.notifyChange()
+
 proc identsOf(doc: Document): seq[string] =
   doc.analyze()
   var seen = initHashSet[string]()

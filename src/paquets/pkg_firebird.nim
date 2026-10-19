@@ -968,6 +968,9 @@ proc openFirebirdLib(L: Interp): Value =
         discard fb.detach_database(addr st2[0], addr d.db)
     L.wrap(d, "firebird", dbMethods)
 
+  # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
+  # fil courant ; un objet créé ensuite dans un gestionnaire (autre fil) les retrouve.
+  discard L.userMeta("firebird", dbMethods)
   let m = newLib()
   m.fn "connecter", proc (L: Interp, a: seq[Value]): seq[Value] =
     if not loadFirebird(L.searchDirs): return fail(loadError)

@@ -469,7 +469,7 @@ retourner
   `ascenseur`, `compteur`, `notation`, `image`, `codebarre`, `graphe`,
   `calendrier`, `kanban`, `mosaique`, `gantt`, `barremenu`, `onglets`,
   `separateur`, `conteneur`, `colonne`, `rangee`, `superconteneur`, `cadre`,
-  `panneau`, `pdf`, `markdown`. Un contrôle s'ajoute avec `conteneur:ajouter(controle)`.
+  `panneau`, `pdf`, `markdown`, `editeur`. Un contrôle s'ajoute avec `conteneur:ajouter(controle)`.
 - Propriétés : `valeur`, `num`, `libelle` (ou `titre`), `texte`, `visible`, `etat`
   (`actif`, `grise`, `lecture`), `actif`, `infobulle`, `nom`, `x`, `y`, `largeur`,
   `hauteur`, `couleur`, `fond`, `bordure`, `accent`, `rayon`, `coche`, `min`, `max`,
@@ -513,6 +513,16 @@ retourner
 
 `aide.valeur = "# Titre"` remplace tout le contenu ; `aide:defilera("fin")`
 descend en bas (utile pour un journal alimenté par `aide:ajouter`).
+
+Le contrôle `editeur` est l'éditeur de code de l'atelier : onglets (un par
+document), coloration de Lexis+, complétion, diagramme de structure, minicarte et
+points d'arrêt. `ed:ouvrir(chemin)` ouvre un fichier ; `ed:texte()`,
+`ed:enregistrer()`, `ed:aller(ligne)` agissent sur le document actif. Les
+raccourcis de l'éditeur (Ctrl+S, Ctrl+R, F5...) arrivent dans `surselection` sous
+forme de signaux (`ev.texte` vaut `"cmd:save"`, `"cmd:run"`...), la position du
+curseur sous la forme `"pos:L:C"` ; `surchangement` suit chaque modification.
+`ed:diagnostics(lexis.verifier(ed:texte()))` souligne les problèmes (paquet
+`lexis`, chapitre 8.2).
 
 ### 5.1 Pages web dans une fenêtre : le paquet `webview`
 
@@ -866,6 +876,54 @@ raison, wdlexis+ lui retire cet attribut et le signale en orange.
 [--cibles=linux-x64,windows-x64,...|toutes] [--archive] [--icone=image]` fait la
 même chose sans interface (utile pour l'intégration continue) ; sans option, il
 reprend les paramètres enregistrés par [Sauver].
+
+### 8.2 L'atelier écrit en Lexis+
+
+`exemples/atelier` est l'atelier wdlexis+ réécrit en Lexis+ : mêmes menus,
+même barre d'outils, onglets **Projet**, **Structure** et **Référence** à
+gauche, **Problèmes**, **Console**, **Variables** et **Pile d'appels** en bas ;
+débogueur (points d'arrêt, pas à pas, pas principal, sortie de procédure,
+pause), recherche et remplacement, aller à la ligne et à la définition,
+réglages et session conservés, boîte « Générer l'application ».
+
+```
+wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
+```
+
+| Fichier | Rôle |
+| --- | --- |
+| `principal.prg` | interface, réglages, démarrage |
+| `projet.prg` | projet, fichiers, session (`.wdlexis/atelier.json` du projet) |
+| `edition.prg` | analyse pendant la frappe, problèmes, structure, recherche, définition |
+| `execution.prg` | exécution, débogage, console, variables, pile d'appels |
+| `reference.prg` | référence des fonctions et paquets (fiches Markdown) |
+| `generation.prg` | boîte « Générer l'application » (outil `wdlexisgen`) |
+| `menus.prg` | menus, raccourcis, à propos |
+
+Il s'appuie sur deux briques natives : le contrôle `ui.editeur` (chapitre 5) et
+le paquet `lexis`, qui met le langage à la portée des programmes :
+
+```lexis
+pbs = lexis.verifier(ed:texte(), {nom = "principal.prg", projet = dossier})
+ed:diagnostics(pbs)                         && soulignés dans l'éditeur
+x = lexis.executer("principal.prg", {sursortie = @SORTIE, surdemande = @DEMANDE, surfin = @FIN, ;
+                                     pointsarret = {{source = chemin, lignes = {12}}}, surpause = @PAUSE})
+
+procedure PAUSE(ev)                         && ev.source, ev.ligne, ev.pile, ev.globales
+  ed:lignexecution(ev.ligne)
+  x:passer()                                && ou x:continuer(), x:pas(), x:sortir()
+retourner
+```
+
+`lexis.executer` lance le programme dans un interpréteur neuf, sur son propre
+fil : l'appelant reste réactif. Sortie, demandes de saisie, pauses du débogueur
+et fin arrivent dans les procédures données, appelées comme des gestionnaires
+d'événements.
+
+Les gestionnaires d'événements s'exécutent chacun sur leur fil, dans un ordre qui
+n'est pas garanti : relisez l'état réel (`ed:curseur()`) plutôt que de vous fier
+à l'ordre d'arrivée, et évitez de refaire un travail coûteux déjà fait par un
+gestionnaire précédent (l'atelier n'analyse pas deux fois le même texte).
 
 ## 9. Le runtime
 
@@ -1518,12 +1576,14 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `interface.cadre(titre, [disposition])` | Cadre de groupe. |
 | `interface.panneau{disposition=, defilement=, colonnes=}` | Conteneur défilant (defilement : toujours, automatique, masque). |
 | `interface.pdf()` | Visionneuse PDF (PDFium). |
+| `interface.editeur([{minicarte=, taille=}])` | Éditeur de code Lexis+ à onglets (coloration, complétion, structure, minicarte, points d'arrêt). `valeur` : texte du document actif ; `surchangement` : texte modifié ; `surselection` : signal dans `ev.texte` (`"pos:L:C"`, `"doc:UID"`, `"cmd:save"`, `"cmd:run"`...). |
 | `interface.markdown(texte \| {texte=, fichier=})` | Visionneuse Markdown en lecture seule, retour à la ligne automatique et ascenseur vertical ; `surselection` reçoit l'URL d'un lien cliqué (`ev.texte`) ; `fichier` relatif au dossier du programme. |
 | `interface.alerte(message, [icone], [titre])` | Message (icone : information, question, attention, stop, aucune). |
 | `interface.confirmer(message, [icone])` | OK / Annuler ; renvoie un logique. |
 | `interface.demander(message, [defaut])` | Saisie d'un texte. |
 | `interface.ouvrirfichier{titre=, filtre=, dossier=}` | Choix d'un fichier à ouvrir ; nul si annulé. |
 | `interface.enregistrerfichier{nom=, filtre=}` | Choix d'un fichier à enregistrer ; nul si annulé. |
+| `interface.rechercher{texte=, remplacement=, remplacer=, casse=, motentier=}` | Boîte Rechercher (et Remplacer) ; renvoie `{action, texte, remplacement, casse, motentier, arriere}` ou nul ; `action` : chercher, remplacer, toutremplacer. |
 | `interface.couleur(["#RRGGBB"])` | Sélecteur de couleur. |
 | `interface.police([famille], [taille])` | Sélecteur de police : {famille, taille, gras, italique}. |
 | `interface.sep` | Séparateur des chemins d'arbre et de menu. |
@@ -1579,11 +1639,52 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `panneau:defilera(x, y)` | Fait défiler. |
 | `pdf:ouvrir(chemin)` | Ouvre un PDF. |
 | `pdf:enregistrer([chemin])` | Enregistre. |
+| `editeur:ouvrir(chemin, [creer])` | Ouvre (ou active) un fichier dans un onglet ; renvoie l'uid du document. `creer = vrai` : fichier absent accepté. |
+| `editeur:nouveau([titre])` | Nouveau document vide ; renvoie son uid. |
+| `editeur:texte([uid])` | Texte d'un document (actif par défaut). |
+| `editeur:enregistrer([chemin], [uid])` | Écrit le document sur disque et le marque enregistré ; renvoie le chemin. |
+| `editeur:fermer([uid])`, `editeur:actif()`, `editeur:activer(uid)` | Ferme un document ; uid du document actif ; active un document. |
+| `editeur:documents()` | Documents ouverts : liste de `{uid, chemin, titre, modifie}`. |
+| `editeur:chemin([uid])`, `editeur:modifie([uid])`, `editeur:chercherdocument(chemin)` | Chemin ; modifications non enregistrées ; uid du document ouvert sur ce chemin (nul sinon). |
+| `editeur:aller(ligne, [colonne], [uid])`, `editeur:curseur()` | Place le curseur ; position `{ligne, colonne}` (à partir de 1). |
+| `editeur:inserer(texte)`, `editeur:selection()`, `editeur:motcourant()` | Insère au curseur ; texte sélectionné ; mot sous le curseur. |
+| `editeur:commande(nom)` | `annuler`, `retablir`, `couper`, `copier`, `coller`, `toutselectionner`, `dupliquer`, `commenter`, `indenter`, `desindenter`. |
+| `editeur:diagnostics(liste, [uid])` | Souligne des problèmes : liste de `{ligne, colonne, longueur, genre, message}` (celle de `lexis.verifier`). |
+| `editeur:pointsarret([uid])`, `editeur:taillepolice(taille)`, `editeur:minicarte([b])` | Lignes des points d'arrêt (F9) ; taille de la police ; minicarte. |
+| `editeur:chercher(texte, [{casse=, motentier=, arriere=}])` | Sélectionne l'occurrence suivante ; vrai si trouvée. |
+| `editeur:remplacer(texte, remplacement, [options])`, `editeur:remplacertout(...)` | Remplace la sélection puis cherche la suivante ; remplace tout (renvoie le nombre). |
+| `editeur:lignexecution([ligne], [uid])` | Surligne la ligne d'exécution du débogueur (sans ligne : l'efface). |
+| `editeur:basculerpointarret()`, `editeur:effacerpointsarret()` | Point d'arrêt sur la ligne du curseur ; retire tous les points d'arrêt. |
+| `editeur:pressepapiers(texte)` | Copie un texte dans le presse-papiers. |
 | `markdown:charger(chemin)` | Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut. |
 | `markdown:ajouter(texte, ...)` | Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé. |
 | `markdown:vider()` | Efface le contenu. |
 | `markdown:defilera(position)` | Fait défiler : nombre de pixels depuis le haut, `"debut"` ou `"fin"`. |
 | `markdown:position()` | Défilement actuel en pixels depuis le haut. |
+
+### Paquet `lexis`
+
+Le langage depuis Lexis+ : analyse, documentation et exécution de programmes
+(outils d'atelier) — disponible par son nom (`lexis.…`) ou par `paquet("lexis")`.
+Voir le chapitre 8.2.
+
+| Fonction | Description |
+| --- | --- |
+| `lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])` | Analyse un texte comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste `{ligne, colonne, longueur, genre, message}` ; `genre` : erreur, avertissement, info ; `projet` : dossier dont les procédures sont connues. |
+| `lexis.structure(source)` | Procédures, fonctions et globales définies : liste de `{nom, genre, ligne, colonne}`. |
+| `lexis.documentation([paquet])` | Liste de `{paquet, signature, nom, proprietaire, methode, description}`. |
+| `lexis.paquets()` | Paquets disponibles : liste de `{nom, description, global}`. |
+| `lexis.motscles()` | Mots-clés du langage. |
+| `lexis.executer(chemin, [{arguments=, sursortie=, surdemande=, surfin=, deboguer=, pasapas=, pointsarret=, surpause=}])` | Exécute un `.prg` dans un interpréteur séparé, sans bloquer l'appelant ; renvoie l'exécution. `sursortie(texte)`, `surdemande(invite)`, `surfin(ev)` avec `ev = {ok, message, source, ligne}`. Débogage : `pointsarret = {{source=, lignes={…}}}`, `pasapas` (pause sur la première instruction), `surpause(ev)` avec `ev = {source, ligne, pile, globales}` ; `pile[1]` est le cadre courant `{nom, source, ligne, variables}`, chaque variable `{nom, valeur, genre, portee}`. |
+| `lexis.outil(nom)` | Chemin d'un outil livré à côté du runtime (`wdlexisgen`…) ; nul s'il est absent. |
+| `x:envoyer(texte)` | Fournit une ligne à la saisie en attente. |
+| `x:lire()` | Sortie accumulée depuis la dernière lecture (sans `sursortie`). |
+| `x:actif()`, `x:attentesaisie()` | En cours d'exécution ; en attente d'une saisie. |
+| `x:arreter()`, `x:attendre()` | Demande l'arrêt (et ferme ses fenêtres) ; attend la fin (vrai si sans erreur). |
+| `x:chemin()` | Chemin du programme exécuté. |
+| `x:continuer()`, `x:pas()`, `x:passer()`, `x:sortir()` | En pause : reprend ; pas à pas (entre dans les procédures) ; pas principal ; termine la procédure en cours. |
+| `x:pause()`, `x:enpause()` | Interrompt à la prochaine instruction ; vrai si le programme est en pause. |
+| `x:pointsarret(source, lignes)` | Remplace les points d'arrêt d'un fichier pendant l'exécution. |
 
 ### Paquet `webview`
 

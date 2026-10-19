@@ -147,7 +147,7 @@ proc parseBlocks(src: string): seq[MdBlock] =
       while i < lines.len and not lines[i].strip().startsWith(fence):
         b.lines.add lines[i].replace("\t", "    ")
         inc i
-      inc i                      # clôture.
+      inc i   # clôture
       result.add b
       continue
     if t.len == 0:
@@ -413,15 +413,15 @@ proc atomsOf(spans: seq[Span], base: MdFont, col, codeFg, codeBg, linkCol: Color
           result.add Atom(text: w, url: sp.url, font: f, color: c, link: sp.link, space: pendingSpace)
           w = ""
         pendingSpace = true
-      else: w.add ch             # sans espace avant : collé au morceau précédent (« **gras**, »).
+      else: w.add ch   # sans espace avant : collé au morceau précédent (« **gras**, »).
     if w.len > 0:
       result.add Atom(text: w, url: sp.url, font: f, color: c, link: sp.link, space: pendingSpace)
       pendingSpace = false
 
 proc flowInline(v: MarkdownView, d: Drawing, atoms: seq[Atom], x0, maxW: float,
                 y: var float, gap: float): float =
-  # Place les morceaux de x0 à x0 + maxW à partir de y ; y avance jusqu'au bas de
-  # la dernière ligne. Renvoie la hauteur de la première ligne.
+  ## Place les morceaux de x0 à x0 + maxW à partir de y ; y avance jusqu'au bas de
+  ## la dernière ligne. Renvoie la hauteur de la première ligne.
   var line: seq[tuple[a: Atom, s: string, x, w: float]]
   var cx = 0.0
   var cy = y
@@ -631,7 +631,7 @@ proc scrollToThumb(v: MarkdownView, thumbY: float) =
 proc lineStep(v: MarkdownView): float = max(12.0, v.heights[mfBody] * 1.25)
 
 proc linkAt(v: MarkdownView, x, y: float): string =
-  # URL du lien sous le point (coordonnées fenêtre), "" sinon.
+  ## URL du lien sous le point (coordonnées fenêtre), "" sinon.
   let z = v.viewport
   if not z.containsPoint(x, y): return ""
   let cx = x - z.x
@@ -645,7 +645,7 @@ proc linkAt(v: MarkdownView, x, y: float): string =
 proc markdown*(v: MarkdownView): string = v.source
 
 proc appendMarkdown*(v: MarkdownView, s: string) =
-  # Ajoute du texte à la fin (sur une nouvelle ligne) sans changer le défilement.
+  ## Ajoute du texte à la fin (sur une nouvelle ligne) sans changer le défilement.
   if v.source.len > 0 and not v.source.endsWith("\n"): v.source.add '\n'
   v.source.add s
   v.layoutKey = ""
@@ -654,7 +654,7 @@ proc scrollPosition*(v: MarkdownView): float = v.scrollY
 
 proc scrollTo*(v: MarkdownView, y: float) =
   v.pendingEnd = false
-  v.scrollY = max(0.0, y)        # borné au prochain dessin.
+  v.scrollY = max(0.0, y)   # borné au prochain dessin.
 
 proc scrollToEnd*(v: MarkdownView) =
   v.pendingEnd = true
@@ -681,7 +681,7 @@ method draw*(v: MarkdownView, d: Drawing, t: Theme) =
   if key != v.layoutKey:
     v.layoutKey = key
     v.layout(d, t, z.w)
-    if v.overflows: v.layout(d, t, z.w - BarW - 4)                # place réservée à l'ascenseur.
+    if v.overflows: v.layout(d, t, z.w - BarW - 4)   # place réservée à l'ascenseur.
   if v.pendingEnd:
     v.scrollY = v.maxScroll
     v.pendingEnd = false

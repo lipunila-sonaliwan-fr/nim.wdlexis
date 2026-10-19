@@ -595,7 +595,7 @@ proc runProgramFrom(debug, stepFirst: bool) =
   discard saveAll()
   stopAsked.store(false)
   {.cast(gcsafe).}:
-    withLock inLock: inQueue.clear()                              # pas de saisie restée d'une exécution précédente.
+    withLock inLock: inQueue.clear()     # pas de saisie restée d'une exécution précédente.
   withState:
     st.runtimeRows.setLen(0)
     st.paused = false
@@ -654,9 +654,9 @@ proc doStop() =
   withState: st.paused = false
   editorSetExecLine(edId, -1, 0)
   status("Arrêt demandé…")
-  stopProgram()                  # drapeau d'arrêt + reprise du débogueur + fermeture des fenêtres.
+  stopProgram()                          # drapeau d'arrêt + reprise du débogueur + fermeture des fenêtres.
   {.cast(gcsafe).}:
-    withLock inLock: signal(inCond)                               # débloque une saisie en attente.
+    withLock inLock: signal(inCond)      # débloque une saisie en attente.
   refreshRunButtons()
   # Si le programme ne s'arrête pas (appel bloquant : dialogue modal, réseau,
   # fil qui ne rend pas la main...), le dire au lieu de laisser un état ambigu.
@@ -727,7 +727,7 @@ proc mdCode(s: string): string =
 proc isIdentByte(c: char): bool = c in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '_'}
 
 proc matchingClose(s: string, i: int): int =
-  # Position de la parenthèse / accolade / crochet fermant celui ouvert en s[i], -1 sinon.
+  ## Position de la parenthèse / accolade / crochet fermant celui ouvert en s[i], -1 sinon.
   var depth = 0
   var inStr = false
   for k in i ..< s.len:
@@ -742,8 +742,8 @@ proc matchingClose(s: string, i: int): int =
   -1
 
 proc mdInline(s: string): string =
-  # Texte de description -> Markdown : chaînes "…", appels f(…), noms pkg.f / obj:f,
-  # @procédures, URL et extensions .prg en code ; vrai/faux/nul en code.
+  ## Texte de description -> Markdown : chaînes "…", appels f(…), noms pkg.f / obj:f,
+  ## @procédures, URL et extensions .prg en code ; vrai/faux/nul en code.
   var i = 0
   while i < s.len:
     let c = s[i]
@@ -807,7 +807,7 @@ proc mdInline(s: string): string =
     inc i
 
 proc splitTop(s: string, sep: char): seq[string] =
-  # Découpe sur `sep` hors parenthèses, accolades, crochets, chaînes et « … ».
+  ## Découpe sur `sep` hors parenthèses, accolades, crochets, chaînes et « … ».
   var depth = 0
   var inStr = false
   var guil = 0
@@ -832,7 +832,7 @@ proc splitTop(s: string, sep: char): seq[string] =
   if cur.strip().len > 0: result.add cur.strip()
 
 proc mdParams(sig: string): seq[string] =
-  # Lignes de liste Markdown décrivant les paramètres d'une signature.
+  ## Lignes de liste Markdown décrivant les paramètres d'une signature.
   let p = sig.find({'(', '{'})
   if p < 0: return
   let q = matchingClose(sig, p)
@@ -868,8 +868,8 @@ proc mdParams(sig: string): seq[string] =
       result.add "- " & mdCode(a) & (if optional: " — *facultatif*" else: "")
 
 proc mdDescription(doc: string): tuple[body: string, returns: string] =
-  # Sépare « renvoie … » du reste ; trois propositions ou plus (séparées par « ; »)
-  # deviennent une liste, « clé : texte » mettant la clé en code.
+  ## Sépare « renvoie … » du reste ; trois propositions ou plus (séparées par « ; »)
+  ## deviennent une liste, « clé : texte » mettant la clé en code.
   const NewSentence = '\1'   # proposition qui commence une nouvelle phrase.
   var clauses: seq[string]
   for c in splitTop(doc, ';'):

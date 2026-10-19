@@ -150,7 +150,7 @@ nimble generateur         # outil en ligne de commande wdlexisgen
 Le nom de l'exécutable de l'atelier est `wdlexis+` ; le source s'appelle
 `wdlexis.nim` car le signe "+" est interdit dans un nom de module Nim.
 
-Options utilisées : `--threads:on --mm:atomicArc -d:sdlttf -d:ssl`.
+Options utilisées : `--threads:on --mm:atomicArc -d:useMalloc -d:sdlttf -d:ssl`.
 
 Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 

@@ -28,8 +28,14 @@ var
   builtins: HashSet[string]       # majuscules
   pkgNames: seq[string]
 
+var ready: bool
+
 proc initLangDocs*() =
-  ## À appeler une fois au démarrage (après l'import des paquets).
+  ## À appeler au démarrage (après l'import des paquets) ; les appels suivants
+  ## sont sans effet (l'atelier, ui.editeur et le paquet lexis l'appellent).
+  {.cast(gcsafe).}:
+    if ready: return
+    ready = true
   entries = allDocs()
   builtins = initHashSet[string]()
   for d in entries:
