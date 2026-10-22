@@ -106,6 +106,7 @@ type
   Window* = ref object of Control
     title*: string
     appliedTitle*: string
+    appliedIcon*: int     # version de l'icône d'application déjà posée.
     width*, height*: int
     root*: Container
     dispatch*: DispatchProc

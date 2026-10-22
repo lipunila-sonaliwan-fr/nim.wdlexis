@@ -197,6 +197,8 @@ proc SDL_SetTextureColorMod*(t: SDL_Texture, cr, cg, cb: uint8): bool
 proc SDL_SetTextureAlphaMod*(t: SDL_Texture, a: uint8): bool
 proc SDL_LoadBMP*(file: cstring): SDL_Surface
 proc SDL_DestroySurface*(s: SDL_Surface)
+proc SDL_CreateSurfaceFrom*(w, h: cint, format: uint32, pixels: pointer, pitch: cint): SDL_Surface
+proc SDL_SetWindowIcon*(w: SDL_Window, icon: SDL_Surface): bool
 proc SDL_WaitEventTimeout*(e: ptr SDL_Event, ms: int32): bool
 proc SDL_PollEvent*(e: ptr SDL_Event): bool
 proc SDL_PushEvent*(e: ptr SDL_Event): bool

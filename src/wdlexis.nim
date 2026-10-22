@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.6.0,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.7.2,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -24,6 +24,11 @@ import std/[os, strutils, sets, tables, atomics, locks, algorithm, deques]
 import wdgui
 import ide/[compat, settings, lexislang, langdocs, lexislint, codeeditor, session]
 from ide/generer import generationDialog
+import ide/designer
+from ide/formmodel import isFormFile
+import ide/reportdesigner
+import ide/appicon
+from ide/etats import isReportFile
 import lexis/api
 import paquets/tous
 
@@ -1060,6 +1065,68 @@ proc changeFont(delta: int, reset = false) =
   status("Police : " & $int(EditorBaseFont + float(d)) & " pt dans l'éditeur" &
          (if d == 0: " (taille par défaut)" elif d > 0: " (+" & $d & ")" else: " (" & $d & ")"))
 
+#
+# Concepteur de formulaires
+#
+
+proc designerCodeFile(): string =
+  # Code qui recevra les procédures : le .prg actif s'il est dans le projet (et
+  # n'est pas un formulaire), sinon le fichier principal.
+  let r = root()
+  let uid = editorActiveUid(edId)
+  if uid >= 0:
+    let p = editorInfo(edId, uid).path
+    if p.len > 0 and p.toLowerAscii.endsWith(".prg") and not isFormFile(p) and
+       normalizedPath(absolutePath(p)).startsWith(normalizedPath(absolutePath(r))):
+      return p
+  let o = opts()
+  if o.mainFile.len > 0 and fileExists(r / o.mainFile): return r / o.mainFile
+  if fileExists(r / MainName): return r / MainName
+  ""
+
+proc openFormDesigner(formFile: string) =
+  let r = root()
+  if r.len == 0:
+    alert(iconInformation, "Ouvrez d'abord un projet (Fichier > Ouvrir un projet…).", title = "Concepteur de formulaires")
+    return
+  if designerIsOpen():
+    alert(iconInformation, "Le concepteur de formulaires est déjà ouvert.", title = "Concepteur de formulaires")
+    return
+  var code = designerCodeFile()
+  if code.len == 0:
+    alert(iconInformation, "Ouvrez ou créez d'abord un fichier .prg du projet : il recevra les procédures " &
+          "des événements du formulaire.", title = "Concepteur de formulaires")
+    return
+  let uid = editorUidOf(edId, code)
+  if uid >= 0 and editorInfo(edId, uid).dirty: discard save(uid)
+  if not openDesigner(r, code, formFile, edId, theme(gWin)):
+    alert(iconStop, "« " & extractFilename(formFile) & " » ne contient pas de dessin de formulaire " &
+          "(lignes « &&§ » écrites par le concepteur).", title = "Concepteur de formulaires")
+  else:
+    status("Concepteur : " & (if formFile.len > 0: extractFilename(formFile) else: "nouveau formulaire") &
+           " · code : " & extractFilename(code))
+
+proc designerButton() =
+  # Formulaire actif dans l'éditeur : le rouvrir ; sinon nouveau formulaire pour le fichier courant.
+  let uid = editorActiveUid(edId)
+  let p = if uid >= 0: editorInfo(edId, uid).path else: ""
+  if p.len > 0 and isFormFile(p): openFormDesigner(p) else: openFormDesigner("")
+
+proc onDesignerFile(path: string) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}: (fillProjectTree(); reindex())
+
+proc onDesignerCode(path: string) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}: reindex()
+
+proc openReport(reportFile: string) =
+  let r = root()
+  if r.len == 0:
+    alert(iconInformation, "Ouvrez d'abord un projet (Fichier > Ouvrir un projet…).", title = "Éditeur d'états")
+    return
+  let msg = openReportDesigner(r, reportFile, edId, theme(gWin))
+  if msg.len > 0: alert(iconInformation, msg, title = "Éditeur d'états")
+  else: status("Éditeur d'états : " & (if reportFile.len > 0: extractFilename(reportFile) else: "nouvel état"))
+
 proc onMenu(path: string) =
   let item = path.split(TreeSep)[^1]
   case item
@@ -1118,6 +1185,30 @@ proc onMenu(path: string) =
   of "Basculer le point d'arrêt (F9)": editorToggleBreakpoint(edId)
   of "Supprimer tous les points d'arrêt": editorClearBreakpoints(edId)
   of "Arguments et fichier principal…": programArguments()
+  of "Nouveau formulaire pour le fichier courant…": openFormDesigner("")
+  of "Ouvrir un formulaire…":
+    let r = root()
+    if r.len == 0: openFormDesigner("")
+    else:
+      let p = openFileDialog(title = "Ouvrir un formulaire", folder = r,
+                             filter = "Formulaires Lexis+ (form_*.prg)|*.prg")
+      if p.len > 0:
+        if not isFormFile(p):
+          alert(iconInformation, "Choisissez un fichier form_<nom>.prg créé par le concepteur.",
+                title = "Concepteur de formulaires")
+        else: openFormDesigner(p)
+  of "Concepteur de formulaires": designerButton()
+  of "Nouvel état…": openReport("")
+  of "Ouvrir un état…":
+    let r = root()
+    if r.len == 0: openReport("")
+    else:
+      let p = openFileDialog(title = "Ouvrir un état", folder = r, filter = "États Lexis+ (etat_*.prg)|*.prg")
+      if p.len > 0:
+        if not isReportFile(p):
+          alert(iconInformation, "Choisissez un fichier etat_<nom>.prg créé par l'éditeur d'états.",
+                title = "Éditeur d'états")
+        else: openReport(p)
   of "Générer l'application…":
     if root().len == 0:
       alert(iconInformation, "Ouvrez d'abord un projet (Fichier > Ouvrir un projet…).", title = "Générer l'application")
@@ -1158,7 +1249,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.6.0\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.7.2\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr - ✉ metalab (at) sonaliwan.fr\n" &
@@ -1181,6 +1272,8 @@ proc buildMenu(m: ControlId) =
                    "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)",
                    "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts",
                    "Arguments et fichier principal…", "Générer l'application…"]),
+    ("Conception", @["Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…",
+                     "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"]),
     ("Affichage", @["Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
                     "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)",
                     "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",
@@ -1234,8 +1327,8 @@ proc onEditorSignal(text: string) =
 # Gestionnaire
 #
 
-proc handler(ev: var Event) {.nimcall, gcsafe.} =
-  {.cast(gcsafe).}:   # l'état partagé est protégé par gLock (withState).
+proc handleEvent(ev: var Event) =
+  block:
     if not haveWin.load():
       {.cast(gcsafe).}: gWin = ev.window
       haveWin.store(true)
@@ -1295,7 +1388,14 @@ proc handler(ev: var Event) {.nimcall, gcsafe.} =
             editorFlush(edId)
           else: gotoFile(row.path, row.line, 0)
     of evDoubleClick:
-      if ev.id == trApi:
+      if ev.id == trProj:
+        let r = root()
+        let parts = trProj.value.split(TreeSep)
+        if r.len > 0 and parts.len > 1:
+          let p = r / parts[1 .. ^1].join($DirSep)
+          if fileExists(p) and isFormFile(p): openFormDesigner(p)
+          elif fileExists(p) and isReportFile(p): openReport(p)
+      elif ev.id == trApi:
         let (ok, e) = apiEntryForPath(trApi.value)
         if ok:
           editorInsert(edId, callTemplate(e))
@@ -1324,8 +1424,16 @@ proc handler(ev: var Event) {.nimcall, gcsafe.} =
       elif ev.id == btnClear: consoleClear()
     of evWindowClose:
       doStop()
+      closeDesigner()
+      closeReportDesigner()
       saveSettings(opts())
     else: discard
+
+proc handler(ev: var Event) {.nimcall, gcsafe.} =
+  # L'état partagé est protégé par gLock (withState). Le corps est dans une
+  # procédure à part : avec Nim 2.2, un {.cast(gcsafe).} imbriqué (withState,
+  # guarded…) rétablit le contrôle pour la suite du bloc englobant.
+  {.cast(gcsafe).}: handleEvent(ev)
 
 #
 # Interface
@@ -1457,6 +1565,9 @@ proc buildUi() =
   lsk.weight = 1
   lstStack = lsk.id
 
+  designerFileCreated = onDesignerFile
+  designerCodeChanged = onDesignerCode
+  reportFileCreated = onDesignerFile
   editorSetOptions(edId, s.minimap, s.dark)
   editorSetFontSize(edId, EditorBaseFont + float(s.fontDelta))
   fillApiTree()
@@ -1467,5 +1578,6 @@ proc buildUi() =
     except IOError, OSError: discard
 
 when isMainModule:
+  useLexisIcon()
   buildUi()
   runApplication()

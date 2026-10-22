@@ -1233,7 +1233,8 @@ proc addPage*(o: Tab, title: string, layout = lkVertical, columns = 2): Containe
 
 proc tabHeaderHeight(t: Theme): float = t.controlHeight + 8
 
-proc tabRects(o: Tab, d: Drawing, t: Theme): seq[Rect] =
+proc tabRects*(o: Tab, d: Drawing, t: Theme): seq[Rect] =
+  # Rectangles des en-têtes (aussi utilisé par le concepteur de formulaires de wdlexis+).
   var ws: seq[float]
   var total = 0.0
   for e in o.children:

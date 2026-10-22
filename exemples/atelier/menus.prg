@@ -15,6 +15,8 @@ retourner { ;
                 "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)", ;
                 "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts", ;
                 "Arguments et fichier principal…", "Générer l'application…"}}, ;
+  {"Conception", {"Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
+                  "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"}}, ;
   {"Affichage", {"Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)", ;
                  "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)", ;
                  "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites", ;
@@ -113,6 +115,17 @@ procedure MENU(ev)
     ARGUMENTS()
   cas choix = "Générer l'application…"
     GENERER_DIALOGUE()
+  && Conception
+  cas choix = "Nouveau formulaire pour le fichier courant…"
+    CONCEPTEUR_NOUVEAU()
+  cas choix = "Ouvrir un formulaire…"
+    CONCEPTEUR_CHOISIR()
+  cas choix = "Concepteur de formulaires"
+    CONCEPTEUR_BOUTON()
+  cas choix = "Nouvel état…"
+    ETAT_NOUVEAU()
+  cas choix = "Ouvrir un état…"
+    ETAT_CHOISIR()
   && Affichage
   cas choix = "Copier la console"
     COPIER_CONSOLE()
@@ -138,9 +151,12 @@ procedure MENU(ev)
   cas choix = "Référence des fonctions et paquets"
     gauche.valeur = 3
   cas choix = "À propos"
-    ui.alerte("wdlexis+ [Lexis+] — l'atelier Lexis+ écrit en Lexis+." + car(10) + ;
-              "Développez naturellement vos applications métier." + car(10) + car(10) + ;
-              "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr", "information", "À propos")
+    ui.alerte("wdlexis+ [S]tudio 1.7.2\nAtelier du langage Lexis+ (en Lexis+!)\n" +
+      "Développez naturellement vos applications métier\n\n" +
+      "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
+      "⛶ https://sonaliwan.fr - ✉ metalab (at) sonaliwan.fr\n" +
+      "SIRET 13033319800013"
+      , "information", "À propos")
   fincas
 retourner
 

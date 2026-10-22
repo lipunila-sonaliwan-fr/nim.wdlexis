@@ -12,13 +12,14 @@
 
 import std/[os, strutils]
 import wdgui
+import ide/appicon
 import lexis/api
 import paquets/tous
 from lexis/lexer import SyntaxError
 from lexis/parser import parseChunk
 
 proc usage() =
-  echo "wdlexis+ [RT] 1.6.0 - runtime du langage Lexis+"
+  echo "wdlexis+ [RT] 1.7.2 - runtime du langage Lexis+"
   echo "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr"
   echo "  wdlexisrt programme.prg [arguments...]"
   echo "  wdlexisrt --verifier programme.prg"
@@ -108,4 +109,5 @@ proc main(): int =
   code
 
 when isMainModule:
+  useLexisIcon()      # icône par défaut ; un programme peut la changer (interface.icone)
   quit main()

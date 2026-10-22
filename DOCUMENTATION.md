@@ -489,6 +489,8 @@ retourner
 - `ui.tracer(vrai)` affiche dans la console chaque événement reçu.
 
 L'exemple `exemples/carnet` montre une grille, une barre de menus et une base.
+Les fenêtres peuvent aussi se dessiner à la souris avec le **concepteur de
+formulaires** de l'atelier (chapitre 8.3), qui génère ce code.
 
 Le contrôle `markdown` affiche un texte Markdown mis en forme, en lecture seule :
 titres, listes (imbriquées par l'indentation), citations, blocs de code, règles,
@@ -898,6 +900,8 @@ wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
 | `execution.prg` | exécution, débogage, console, variables, pile d'appels |
 | `reference.prg` | référence des fonctions et paquets (fiches Markdown) |
 | `generation.prg` | boîte « Générer l'application » (outil `wdlexisgen`) |
+| `concepteur.prg` | concepteur de formulaires (menu *Conception*, chapitre 8.3) |
+| `etats.prg` | éditeur d'états PDF (menu *Conception*, chapitre 8.4) |
 | `menus.prg` | menus, raccourcis, à propos |
 
 Il s'appuie sur deux briques natives : le contrôle `ui.editeur` (chapitre 5) et
@@ -924,6 +928,229 @@ Les gestionnaires d'événements s'exécutent chacun sur leur fil, dans un ordre
 n'est pas garanti : relisez l'état réel (`ed:curseur()`) plutôt que de vous fier
 à l'ordre d'arrivée, et évitez de refaire un travail coûteux déjà fait par un
 gestionnaire précédent (l'atelier n'analyse pas deux fois le même texte).
+
+### 8.3 Concepteur de formulaires
+
+*Conception > Nouveau formulaire pour le fichier courant…* ouvre le concepteur
+pour le fichier `.prg` affiché (à défaut, le fichier principal) : c'est lui qui
+recevra les procédures des événements. *Conception > Ouvrir un formulaire…*, ou
+un **double-clic** sur un `form_<nom>.prg` dans l'arbre du projet, rouvre un
+formulaire existant (avec le fichier de code qui lui est associé).
+
+La fenêtre du concepteur a quatre parties.
+
+**Palette (à gauche).** Les contrôles du paquet `interface`, sous leurs noms
+Lexis+ :
+
+| Catégorie | Contrôles |
+| --- | --- |
+| Dispositions | `conteneur`, `cadre`, `panneau`, `separateur`, `onglets`, `page` |
+| Contrôles | `etiquette`, `bouton`, `saisie`, `cases`, `radio`, `combo`, `liste`, `compteur`, `curseur`, `plage`, `jauge`, `notation`, `ascenseur`, `image`, `codebarre` |
+| Données | `calendrier`, `graphe`, `arbre`, `tableau`, `grille`, `kanban`, `mosaique`, `gantt`, `markdown`, `barremenu` |
+
+- Glisser un élément sur le formulaire, ou cliquer dessus pour l'ajouter à la fin
+  du conteneur sélectionné (une `page` va dans les `onglets` sélectionnés ; des
+  onglets commencent avec une page).
+- **Contrôle personnalisé…** ajoute un contrôle créé par une fonction Lexis+ du
+  projet : son nom, le contrôle dont il dérive (pour l'aperçu, les propriétés et
+  les événements) et l'expression qui le crée, par exemple
+  `BOUTONROND($libelle)` (`$propriété` est remplacé par la valeur de la
+  propriété). Il est rangé dans `wdlexis_palette.json`, à la racine du projet ;
+  on peut y ajouter des propriétés :
+  `"props": [{"name": "rayon", "type": "nombre", "default": "12"}]`.
+
+**Canevas (au centre).** Un aperçu construit avec les vrais contrôles de wdgui,
+tels que les crée le paquet `interface`, dans un cadre de fenêtre.
+
+- Clic pour sélectionner (Échap sélectionne le parent, Suppr supprime) ; les
+  poignées redimensionnent, celles de la fenêtre changent sa taille.
+- Un clic sur l'en-tête d'une page d'onglets l'affiche : les contrôles ajoutés
+  vont dans la page affichée.
+- Glisser un contrôle le déplace :
+  - dans une disposition verticale, horizontale, grille ou flux, une barre bleue
+    montre où il sera inséré ;
+  - dans une disposition bordure, la zone en surbrillance donne son ancrage
+    (haut, bas, gauche, droite, centre) ;
+  - lâché sur un autre conteneur, il y entre ;
+  - dans une disposition absolue, il se place librement (flèches : 1 pixel,
+    Maj : 10).
+- **Repères** (magenta) pendant un déplacement ou un redimensionnement :
+  - bords et centres alignés sur les autres contrôles et sur le conteneur ;
+  - largeur ou hauteur égale à celle d'un autre contrôle (« = btn1 ») ;
+  - proportions du conteneur (« 1/4 », « 1/3 », « 1/2 », « 2/3 », « 3/4 », « tout »).
+
+  Une pastille donne la position ou la taille.
+
+**Hiérarchie (à droite, en haut).** L'arbre du formulaire ; sélectionner un nœud
+sélectionne le contrôle (et affiche sa page d'onglets). La barre d'outils donne
+**Monter / Descendre** (ordre d'affichage, et superposition en disposition
+absolue), **Sortir** (du conteneur), **Supprimer** et **Formulaire** (sélectionne
+la fenêtre).
+
+**Inspecteur (à droite).**
+
+- **Propriétés**, modifiées sur place, avec leurs noms Lexis+ : `nom`, `libelle`,
+  `texte`, `indication`, `options` et `elements` (`a;b;c`), colonnes de tableau
+  (`Nom;Valeur`) et de grille (`nom:Titre;…`), nœuds d'arbre (`Racine;Racine/Enfant`),
+  menus (`Fichier/Ouvrir;…`), `disposition`, `marge`, `espacement`, `colonnes`,
+  `min`, `max`, `valeur`, `etat`, `infobulle`, `largeurfixe`, `hauteurfixe`,
+  `x` / `y` (disposition absolue), `poids`, `etirer`, `ancrage` (disposition
+  bordure), `couleur` et `fond` (avec un sélecteur de couleur).
+- Le `nom` s'applique par **Entrée** (ou à la sortie du champ). Pour la fenêtre,
+  c'est le nom du formulaire : `titre`, `largeur`, `hauteur`, `disposition`,
+  `theme`, `sombre`.
+- **Événements** : chaque événement du contrôle (`surclic`, `surchangement`,
+  `surselection`, `surdoubleclic`… ; `surouverture`, `surfermeture`… pour la
+  fenêtre) a une liste :
+  - **(aucune)** retire l'association ;
+  - une procédure du projet à un paramètre (`procedure NOM(ev)`) l'associe ;
+  - **+ nouvelle procédure…** écrit `procedure BTN1_CLIC(ev) … finprocedure` dans
+    le code édité, l'associe et place le curseur dedans.
+
+  Une procédure associée mais introuvable dans le projet est signalée dans la
+  barre d'état du concepteur.
+
+#### Fichiers produits
+
+Le formulaire est enregistré à chaque modification dans **`form_<nom>.prg`**, à
+la racine du projet. `<nom>` est le nom de la fenêtre ; un nouveau formulaire
+prend le premier numéro libre (1, 2…). Renommer le formulaire renomme le fichier
+et suit dans le code (marques, appel, variable).
+
+`form_<nom>.prg` ne contient qu'une fonction, comme tout fichier secondaire d'un
+projet (le runtime charge tous les `.prg` du dossier : rien à importer) :
+
+```lexis
+fonction FORMCLIENT_OUVRIR()
+  globale formclient
+  locale f = {}
+  f.fenetre = interface.fenetre{titre = "Fiche client", largeur = 560, hauteur = 480, disposition = "bordure"}
+  f.nom = f.identite:ajouter(interface.saisie{indication = "Dupont"})
+  ...
+  f.enregistrer.surclic = @CLIENT_ENREGISTRER
+  formclient = f
+retourner f
+finfonction
+```
+
+suivi du dessin lui-même, en commentaires `&&§`, que le concepteur relit.
+
+Le code édité reçoit, à la fin, un bloc marqué avec les procédures créées :
+
+```lexis
+&& ---- formulaire « client » : début (généré par le concepteur, gardez ces marques) ----
+&& FORMCLIENT_OUVRIR() ouvre le formulaire ; ses contrôles sont dans formclient (formclient.fenetre…).
+
+procedure CLIENT_ENREGISTRER(ev)
+  && surclic de enregistrer (formulaire « client »)
+  ? formclient.nom.valeur
+finprocedure
+
+&& ---- formulaire « client » : fin ----
+```
+
+**Câbler le code** ajoute ce bloc s'il manque et, dans le programme principal,
+l'appel `FORMCLIENT_OUVRIR()` suivi de `interface.executer()` (avant
+`ui.executer()` s'il y en a déjà un). Les contrôles s'utilisent ensuite par la
+variable globale : `formclient.nom.valeur`, `formclient.enregistrer.actif = faux`.
+
+L'exemple `exemples/formulaire` est une fiche client dessinée avec le concepteur.
+
+L'atelier écrit en Lexis+ (chapitre 8.2) a le même concepteur, dans
+`concepteur.prg` : le canevas `ui.concepteur` et la palette `ui.palette` sont
+natifs (avec le modèle et la génération de `form_<nom>.prg`, au même format que
+l'atelier natif : un formulaire s'ouvre dans l'un ou l'autre) ; la fenêtre, la
+hiérarchie, l'inspecteur, les procédures écrites dans le code, le câblage et le
+renommage sont en Lexis+.
+
+### 8.4 États PDF (éditeur d'états et paquet `rapport`)
+
+*Conception > Nouvel état…* ouvre l'éditeur d'états ; *Conception > Ouvrir un
+état…*, ou un **double-clic** sur un `etat_<nom>.prg` dans l'arbre du projet,
+rouvre un état. Comme le concepteur de formulaires, l'éditeur a une palette, une
+page de dessin, une hiérarchie et un inspecteur.
+
+Un état est une suite de **zones horizontales** :
+
+| Zone | Rôle |
+| --- | --- |
+| `entete` | en haut de chaque page générée |
+| `pied` | en bas de chaque page générée |
+| tout autre nom (`titre`, `ligne`, `total`…) | ajoutée par le programme, autant de fois qu'il le faut, les unes sous les autres ; une zone qui ne tient plus dans la page passe à la suivante, qui reçoit à son tour l'en-tête et le pied |
+
+Chaque zone contient des éléments placés au millimètre : **textes** (police
+Helvetica, Times ou Courier, taille, gras, italique, souligné, alignements,
+couleur, fond, bordure, retour à la ligne), **rectangles** (bordure, fond, coins
+arrondis), **lignes** (pleines ou pointillées) et **images** (PNG ou JPEG,
+ajustées, étirées ou centrées ; un JPEG progressif figure bien dans le PDF, mais
+l'éditeur l'affiche comme un simple cadre).
+
+Le paquet `rapport` est écrit entièrement en Nim, sans bibliothèque C : il est
+disponible dans toutes les applications générées, avec ou sans interface
+graphique (console, service, bibliothèque).
+
+- **Palette** : zone nommée, en-tête, pied ; texte, champ (`{variable}`),
+  rectangle, lignes horizontale et verticale, image, numéro de page, date. À
+  glisser sur une zone, ou à cliquer pour l'ajouter à la zone sélectionnée.
+- **Page** : les zones à la largeur de la page (marges déduites), à l'échelle
+  (*Zoom +* / *Zoom −*), avec une règle en millimètres. Glisser un élément le
+  déplace, y compris d'une zone à l'autre ; ses poignées le redimensionnent.
+  Les repères magenta alignent ses bords et son centre sur ceux des autres
+  éléments et de la zone, sinon les positions vont de 0,5 mm en 0,5 mm. Le
+  **bord bas** d'une zone règle sa hauteur. Le texte est mis en page avec les
+  mêmes métriques que le PDF. Suppr supprime, les flèches déplacent de 0,5 mm
+  (Maj : 5 mm), Échap sélectionne la zone puis l'état.
+- **Inspecteur** : l'état (format A4, A5, A3, Lettre, Legal ; portrait ou
+  paysage ; marges), la zone (hauteur ; **extensible** : ses textes l'agrandissent
+  et les éléments placés dessous descendent d'autant ; **sautavant** : toujours
+  sur une nouvelle page ; fond), ou l'élément (position, taille, propriétés).
+  Le nom s'applique par Entrée.
+- **Aperçu PDF** génère l'état avec chaque zone trois fois, les variables
+  affichées telles quelles (`{nom}`), et l'ouvre dans la visionneuse PDF.
+- **Insérer le code** écrit dans l'éditeur, au curseur, le code qui remplit
+  l'état, avec les variables de chaque zone.
+
+Dans les textes (et le chemin d'une image), `{nom}` est remplacé par la valeur
+donnée par le programme ; `{prix:2}` affiche un nombre avec 2 décimales
+(`1 234,50`). Variables calculées : `{page}`, `{nombre de page}` (ou
+`{nombre de pages}`), `{date}`, `{heure}`.
+
+L'état est enregistré à chaque modification dans `etat_<nom>.prg`, une fonction
+`ETAT_<NOM>()` qui renvoie sa description : il est chargé avec les autres
+fichiers du projet et embarqué dans les applications générées.
+
+```lexis
+r = rapport.début("facture.pdf")          && état « facture » (etat_facture.prg)
+r.entête("entete", {numero = "2026-0142", client = "Librairie du Port"})
+r.pied("pied", {societe = "Atelier Kerlann"})
+r.ajoute("colonnes", {})
+r.entete("suite", {numero = "2026-0142"})  && en-tête des pages suivantes
+pour chaque a dans articles
+  r.ajoute("ligne", {designation = a.designation, quantite = a.quantite, prix = a.prix})
+suivant
+r.ajoute("total", {ttc = total})
+? r.fin()                                  && écrit le PDF, renvoie son chemin
+```
+
+- `rapport.debut(pdf, [etat])` : l'état est `etat_<etat>.prg` ; sans `etat`, le
+  nom du PDF sans `.pdf`. Un chemin relatif est pris dans le dossier du programme.
+- `r.ajoute(zone, {variable = valeur, ...})` : ajoute une zone à la suite.
+- `r.entete(zone, {...})` : remplace l'en-tête, pour la page en cours si rien n'y
+  est encore placé, sinon à partir de la page suivante ; `r.entete(nul)` le retire.
+- `r.pied(zone, {...})` : remplace le pied, pour la page en cours et les suivantes.
+- `r.fin()` : calcule `{page}` et `{nombre de page}` et écrit le PDF.
+- `début` et `entête` s'écrivent aussi avec leurs accents ; `r:ajoute(...)` est
+  accepté comme `r.ajoute(...)` ; `{{variable = valeur}}` comme `{variable = valeur}`.
+
+Le PDF est écrit sans bibliothèque extérieure : les polices standard des PDF
+(Helvetica, Times, Courier) couvrent tous les caractères du français (é, ç, œ,
+«, », €…). L'exemple `exemples/etats` produit une facture de deux pages.
+
+L'atelier écrit en Lexis+ (chapitre 8.2) a le même éditeur, dans `etats.prg` : le
+canevas `ui.etat`, la palette `ui.paletteetat`, le modèle, la mise en page et le
+PDF sont natifs (mêmes fichiers `etat_<nom>.prg` que l'atelier natif) ; la
+fenêtre, la hiérarchie, l'inspecteur, le renommage, l'aperçu et l'insertion du
+code sont en Lexis+.
 
 ## 9. Le runtime
 
@@ -1542,6 +1769,7 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `interface.executer()` | Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime). |
 | `interface.quitter()` | Ferme toutes les fenêtres du programme. |
 | `interface.fenetres()` | Nombre de fenêtres ouvertes. |
+| `interface.icone(chemin)` | Icône des fenêtres du programme (PNG ou JPEG, carrée, 256 px conseillé) : barre de titre, barre des tâches, Dock. Rend faux si l'image est illisible. Sans effet sur les fenêtres de l'atelier quand le programme y est exécuté. |
 | `interface.tracer([actif])` | Affiche dans la console chaque événement reçu (diagnostic). |
 | `interface.etiquette(texte, [alignement])` | Libellé (alignement : gauche, centre, droite). |
 | `interface.bouton(libelle, [{defaut=, annuler=}])` | Bouton. |
@@ -1661,6 +1889,26 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 | `markdown:vider()` | Efface le contenu. |
 | `markdown:defilera(position)` | Fait défiler : nombre de pixels depuis le haut, `"debut"` ou `"fin"`. |
 | `markdown:position()` | Défilement actuel en pixels depuis le haut. |
+| `c:detruire()` | Retire le contrôle (et son contenu) de sa fenêtre. |
+| `editeur:fixertexte(texte, [uid], [enregistre])` | Remplace le texte d'un document (annulable) ; `enregistre = vrai` le marque enregistré. |
+| `interface.concepteur{projet=, fichier= \| nom=}` | Canevas du concepteur de formulaires (aperçu réel, glisser-déposer, repères, poignées) ; `fichier` : un `form_<nom>.prg` à rouvrir, `nom` : un formulaire neuf. `surselection` : élément sélectionné ; `surchangement` : dessin modifié à la souris ou au clavier. |
+| `interface.palette(concepteur)` | Palette du concepteur (glisser ou cliquer pour ajouter). |
+| `concepteur:nom()`, `concepteur:code()`, `concepteur:codeassocie([chemin])` | Nom du formulaire ; texte de `form_<nom>.prg` ; fichier de code associé. |
+| `concepteur:noeuds()`, `concepteur:element([uid])` | Éléments `{uid, nom, genre, chemin, niveau, conteneur}` ; un élément `{uid, nom, genre, racine, conteneur}`. |
+| `concepteur:selection()`, `concepteur:selectionner([uid])` | uid sélectionné ; sélectionne (sans argument : la fenêtre). |
+| `concepteur:proprietes([uid])`, `concepteur:fixerpropriete(nom, valeur, [uid])` | Propriétés `{nom, genre, valeur, choix}` ; modification (« nom » renomme) : nul ou le message d'erreur. |
+| `concepteur:evenements([uid])`, `concepteur:associer(evenement, procedure, [uid])` | Événements `{nom, procedure}` ; association (`""` la retire). |
+| `concepteur:supprimer()`, `:monter()`, `:descendre()`, `:sortir()` | Commandes sur l'élément sélectionné. |
+| `concepteur:ajouterpersonnalise(projet, genre, base, expression)` | Contrôle personnalisé dans `wdlexis_palette.json` ; nul ou le message d'erreur. |
+| `interface.etat{projet=, fichier= \| nom=}` | Canevas de l'éditeur d'états (zones à l'échelle, glisser-déposer, poignées, repères, hauteur des zones) ; `fichier` : un `etat_<nom>.prg` à rouvrir, `nom` : un état neuf. `surselection` : sélection ; `surchangement` : état modifié à la souris ou au clavier. |
+| `interface.paletteetat(etat)` | Palette de l'éditeur d'états (glisser ou cliquer pour ajouter). |
+| `etat:nom()`, `etat:code()`, `etat:codeexemple()` | Nom de l'état ; texte de `etat_<nom>.prg` ; code Lexis+ qui le remplit. |
+| `etat:noeuds()`, `etat:element()` | L'état, ses zones et leurs éléments `{uid, nom, genre, chemin, niveau, conteneur}` ; la sélection `{uid, nom, genre, titre, aide}`. |
+| `etat:selection()`, `etat:selectionner([uid])` | uid sélectionné ; sélectionne (sans argument : l'état). |
+| `etat:proprietes()`, `etat:fixerpropriete(nom, valeur, [cible])` | Propriétés de la sélection `{nom, genre, valeur, choix, cible}` ; modification : nul ou le message d'erreur. |
+| `etat:renommer(uid, nom, projet)` | Renomme l'état, une zone ou un élément : `{message, ancien}`. |
+| `etat:supprimer()`, `:monter()`, `:descendre()`, `:nouvellezone([genre])`, `:zoom([facteur])` | Commandes de l'éditeur. |
+| `etat:apercu(chemin, [projet])` | PDF d'aperçu (chaque zone trois fois) : `{chemin, erreurs}`. |
 
 ### Paquet `lexis`
 
@@ -1685,6 +1933,20 @@ Voir le chapitre 8.2.
 | `x:continuer()`, `x:pas()`, `x:passer()`, `x:sortir()` | En pause : reprend ; pas à pas (entre dans les procédures) ; pas principal ; termine la procédure en cours. |
 | `x:pause()`, `x:enpause()` | Interrompt à la prochaine instruction ; vrai si le programme est en pause. |
 | `x:pointsarret(source, lignes)` | Remplace les points d'arrêt d'un fichier pendant l'exécution. |
+
+### Paquet `rapport`
+
+États PDF dessinés avec l'éditeur d'états (chapitre 8.4) — disponible par son nom (`rapport.…`).
+
+| Appel | Rôle |
+| --- | --- |
+| `rapport.debut(pdf, [etat])` | Commence un état (`etat_<etat>.prg` ; sans etat : le nom du PDF sans « .pdf ») ; chemin relatif : dossier du programme. « début » s'écrit aussi. Renvoie l'état en cours `r`. |
+| `r.ajoute(zone, {variable = valeur, ...})` | Ajoute une zone à la suite ; nouvelle page (avec en-tête et pied) si elle ne tient plus. |
+| `r.entete(zone, {variable = valeur, ...})` | Remplace l'en-tête (au départ : la zone « entete ») ; « entête » s'écrit aussi ; zone nul : plus d'en-tête. |
+| `r.pied(zone, {variable = valeur, ...})` | Remplace le pied (au départ : la zone « pied ») ; zone nul : plus de pied. |
+| `r.fin()` | Calcule {page} et {nombre de page}, écrit le PDF, renvoie son chemin. |
+| `r.nombrepages()` | Nombre de pages (définitif après `r.fin()`). |
+| `rapport.etats()` | Noms des états du projet. |
 
 ### Paquet `webview`
 

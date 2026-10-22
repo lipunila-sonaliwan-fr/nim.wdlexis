@@ -28,16 +28,22 @@ propre dossier).
 | Police, minicarte, thème sombre / clair, options d'analyse | oui, conservés dans `~/.wdlexis-atelier.json` |
 | Session (fichiers ouverts), arguments, fichier principal | oui, dans `.wdlexis/atelier.json` du projet |
 | Générer l'application | boîte en Lexis+, compilation par l'outil `wdlexisgen` ; mêmes réglages (`.wdlexis/application.ini`) |
+| Concepteur de formulaires (menu Conception, double-clic sur un `form_<nom>.prg`) | oui (`concepteur.prg`) ; mêmes fichiers `form_<nom>.prg` que l'atelier natif |
+| Éditeur d'états PDF (menu Conception, double-clic sur un `etat_<nom>.prg`) | oui (`etats.prg`) ; mêmes fichiers `etat_<nom>.prg` que l'atelier natif |
 
 ## Ce qui est en Lexis+ et ce qui est natif
 
 | Partie | Où |
 | --- | --- |
-| Toute l'interface, les menus, la logique d'atelier | les 7 fichiers `.prg` (environ 1 600 lignes) |
+| Toute l'interface, les menus, la logique d'atelier | les 9 fichiers `.prg` (environ 3 000 lignes) |
 | Éditeur de code | natif : `ui.editeur` (`ide/codeeditor.nim`) |
 | Analyse du langage | natif : `lexis.verifier`, `lexis.structure` (`ide/lexislint.nim`) |
 | Exécution et débogage dans un interpréteur séparé | natif : `lexis.executer` (`paquets/pkg_lexis.nim`) |
 | Compilation de l'application | outil `wdlexisgen` (chaîne Zig) |
+| Concepteur : canevas, palette, modèle, génération de `form_<nom>.prg` | natif : `ui.concepteur`, `ui.palette` (`ide/designer.nim`, `ide/formmodel.nim`) |
+| Concepteur : fenêtre, hiérarchie, inspecteur, procédures, câblage, renommage | `concepteur.prg` |
+| États : canevas, palette, modèle, mise en page, PDF | natif : `ui.etat`, `ui.paletteetat` (`ide/reportdesigner.nim`, `ide/etats.nim`, `ide/pdfwriter.nim`) |
+| États : fenêtre, hiérarchie, inspecteur, renommage, aperçu, code d'exemple | `etats.prg` |
 
 ## Mesures (Linux, écran virtuel, frappe simulée à ~30 caractères/s)
 

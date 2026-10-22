@@ -25,7 +25,11 @@ par enregistrement à la manière de dBase. On y trouve :
   et disponible en runtime autonome ;
 - un **atelier** (`wdlexis.nim`) : éditeur avec coloration, complétion et analyse en
   continu, exécution directe ou **pas à pas** (points d'arrêt, variables, pile
-  d'appels, zone de base de données courante), console avec saisie ;
+  d'appels, zone de base de données courante), console avec saisie, et un
+  **concepteur de formulaires** (menu *Conception*) qui dessine les fenêtres à la
+  souris et génère le code Lexis+, et un **éditeur d'états** : des zones (en-tête,
+  pied, zones nommées) dessinées au millimètre, remplies par le programme avec le
+  paquet `rapport` pour produire des PDF de plusieurs pages ;
 - des **paquets** écrits en Nim, aux noms français : entrées / sorties, système,
   fichiers, binaire, CSV, JSON, réseau (TCP/UDP, HTTP/HTTPS, FTP, SSH/SFTP),
   SQLite, **Firebird**, tâches, fils d'exécution, **l'interface graphique wdgui** et
@@ -84,6 +88,8 @@ wdlexis/
     llm/                 20 exemples d'IA (01_bonjour ... 20_reprise_entrainement)
     firebird/            base Firebird
     webview/             pages web : bonjour, Lexis+ -> JS, JS -> Lexis+, application
+    formulaire/          fiche client dessinée avec le concepteur de formulaires
+    etats/               facture PDF de deux pages (éditeur d'états, paquet rapport)
   tests/                 tests du langage (sans interface graphique) ;
                          tests/firebird : liaison Firebird testée avec un client simulé ;
                          tests/webview : pont webview testé avec une bibliothèque simulée
@@ -92,6 +98,16 @@ wdlexis/
   wdlexisgen.nim         génération d'applications en ligne de commande
   ide/toolchain.nim      chaîne de génération : projet -> C -> Zig -> distribution
   ide/generer.nim        boîte « Générer l'application » (menu Exécuter)
+  ide/designer.nim, ide/formmodel.nim
+                         concepteur de formulaires (menu Conception) : canevas,
+                         palette, repères, hiérarchie, inspecteur ; modèle et
+                         génération de form_<nom>.prg
+  ide/reportdesigner.nim éditeur d'états (menu Conception)
+  ide/etats.nim          états : modèle, mise en page, pagination (sans interface)
+  ide/pdfwriter.nim, ide/pdfmetrics.nim, ide/zflate.nim
+                         écriture PDF en Nim pur : polices standard, images PNG / JPEG,
+                         compression zlib
+  paquets/pkg_rapport.nim  paquet rapport (rapport.debut, r.ajoute, r.entete, r.pied, r.fin)
   ide/shellview.nim, ide/cropview.nim, ide/imagetools.nim, ide/archives.nim
                          journal coloré, cadrage d'icône, images (stb), zip / tar.gz
   rtc/                   runtime Lexis+ pré-transpilé en C, pour chaque cible
@@ -143,6 +159,8 @@ nimble testwebview        # pont webview, avec une bibliothèque simulée (gcc)
 nimble rtc                # régénère rtc/ (runtime C des applications) après
                           # une modification de l'interpréteur ou des paquets
 nimble generateur         # outil en ligne de commande wdlexisgen
+nimble icones             # régénère les icônes après avoir changé src/ressources/wdlexis.png
+nimble raccourci          # Linux : ajoute wdlexis+ (avec son icône) au menu des applications
 ./wdlexis+ exemples/gestion
 ./wdlexisrt exemples/gestion/principal.prg
 ```
@@ -151,6 +169,22 @@ Le nom de l'exécutable de l'atelier est `wdlexis+` ; le source s'appelle
 `wdlexis.nim` car le signe "+" est interdit dans un nom de module Nim.
 
 Options utilisées : `--threads:on --mm:atomicArc -d:useMalloc -d:sdlttf -d:ssl`.
+
+### Icônes
+
+L'icône vient de `src/ressources/wdlexis.png` (carrée, 1024 px). Ce que voit chaque système :
+
+| Système | Icône du fichier | Icône des fenêtres |
+| --- | --- | --- |
+| Windows | liée à l'exécutable par `src/config.nims` (ressources `src/ressources/windows/<exe>-<amd64\|arm64>.o`, avec les informations de version) : Explorateur, raccourcis | barre de titre, barre des tâches |
+| macOS | posée sur le fichier par `nimble atelier` / `runtime` / `generateur` (Finder) | Dock |
+| Linux | menu des applications après `nimble raccourci` | barre des tâches, sélecteur de fenêtres |
+
+Les ressources Windows sont des objets COFF écrits par `outils/icones.nim` (sans
+`windres`) : elles sont prises en compte aussi avec un simple `nim c`, avec MinGW,
+Zig, clang ou MSVC, et en compilation croisée. L'icône des fenêtres est incorporée à
+`wdlexis+` et `wdlexisrt` ; un programme Lexis+ peut choisir la sienne avec
+`interface.icone(chemin)`.
 
 Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 

@@ -10,6 +10,8 @@
 &&   execution.prg   exécution, débogage, console, variables, pile d'appels
 &&   reference.prg   référence des fonctions et paquets (fiches Markdown)
 &&   generation.prg  boîte « Générer l'application » (outil wdlexisgen)
+&&   concepteur.prg  concepteur de formulaires (form_<nom>.prg)
+&&   etats.prg       éditeur d'états PDF (etat_<nom>.prg, paquet rapport)
 &&   menus.prg       menus, raccourcis, aide
 &&
 && L'éditeur (ui.editeur), l'analyse et l'exécution (paquet lexis) sont natifs ;
@@ -29,8 +31,15 @@ docs = {}               && référence : entrées de lexis.documentation par che
 docsparnom = {}         && référence : entrée par nom (aide sur le mot courant)
 gendlg = nul            && boîte « Générer l'application » ouverte
 genctl = {}             && ses contrôles
+condlg = nul            && fenêtre du concepteur de formulaires
+canevas = nul           && son canevas (ui.concepteur)
+conctl = {}             && ses autres contrôles
+concode = ""            && fichier de code qui reçoit les procédures du formulaire
+etdlg = nul             && fenêtre de l'éditeur d'états
+etcanevas = nul         && son canevas (ui.etat)
+etctl = {}              && ses autres contrôles
 
-fen = ui.fenetre{titre = "wdlexis+ [Lexis+]", largeur = 1320, hauteur = 860, disposition = "bordure", ;
+fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.7.2", largeur = 1320, hauteur = 860, disposition = "bordure", ;
                  sombre = reglages.sombre}
 fen.surfermeture = @FERMETURE
 fen.surtouchebas = @TOUCHE_FENETRE      && F5, F9, F10, F11 depuis n'importe quel contrôle
@@ -72,6 +81,7 @@ pprojet = gauche:ajouterpage("Projet")
 arbre = pprojet:ajouter(ui.arbre())
 arbre.poids = 1
 arbre.surselection = @ARBRE
+arbre.surdoubleclic = @ARBRE_DOUBLE     && form_<nom>.prg : concepteur de formulaires
 pstruct = gauche:ajouterpage("Structure")
 lstruct = pstruct:ajouter(ui.liste())
 lstruct.poids = 1
@@ -190,6 +200,12 @@ retourner
 procedure FERMETURE(ev)
   ENREGISTRER_SESSION()
   ECRIRE_REGLAGES()
+  si condlg <> nul
+    condlg:fermer()
+  finsi
+  si etdlg <> nul
+    etdlg:fermer()
+  finsi
   si execution <> nul
     execution:arreter()
   finsi

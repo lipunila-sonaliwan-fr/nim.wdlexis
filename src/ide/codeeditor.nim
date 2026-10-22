@@ -1559,6 +1559,30 @@ proc editorText*(id: ControlId, uid: int): string =
     let i = ed.docIndex(uid)
     if i >= 0: result = ed.docs[i].lines.join("\n")
 
+proc editorSetText*(id: ControlId, uid: int, text: string, modified = true): bool =
+  ## Remplace le texte d'un document ouvert (annulable) ; faux si le document n'existe pas.
+  ## modified = false : le document est marqué enregistré (fichier écrit à côté).
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i < 0: return false
+    let d = ed.docs[i]
+    let newLines = block:
+      var ls = text.replace("\r\n", "\n").replace("\t", "  ").split('\n')
+      if ls.len == 0: ls = @[""]
+      ls
+    if newLines == d.lines:
+      if not modified: d.modified = false
+      return true
+    d.pushUndo()
+    d.lines = newLines
+    d.line = min(d.line, d.lines.high)
+    d.col = min(d.col, d.lines[d.line].len)
+    d.collapse()
+    d.changed()
+    if not modified: d.modified = false
+    if i == ed.current: ed.notifyChange()
+    result = true
+
 proc editorSnapshot*(id: ControlId, uid: int): tuple[version: int, lines: seq[string]] =
   readControl(id, CodeEditor, ed):
     let i = ed.docIndex(uid)

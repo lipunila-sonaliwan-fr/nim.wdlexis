@@ -30,12 +30,21 @@
 # Les valeurs nommées (dispositions, ancrages, icônes...) s'écrivent en
 # français ; les noms anglais de wdgui sont aussi acceptés.
 
-import std/[strutils, tables, os, locks, options]
+import std/[strutils, tables, os, locks, options, math]
 import ../wdgui
 import ../lexis/api
 import ../ide/compat
 import ../ide/[codeeditor, langdocs]
+from ../ide/designer import FormCanvas, PaletteView, newFormCanvas, newPaletteView, nodeByUid, pathOfNode,
+  visibleProps, canvasSetProp, select, deleteSelected, moveSelected, moveOut, showNode
+from ../ide/reportdesigner import ReportCanvas, ReportPalette, SelKind, newReportCanvas, newReportPalette,
+  findNode, selectedUid, selectUid, selectionTitle, inspectorRows, selectionHelp, setSelectionValue, renameNode,
+  reportExampleCode, writePreview, addBand, deleteSelected, moveSelected
+from ../ide/etats import ReportModel, newReport, parseReportCode, generateReportCode, reportFileName
+from ../ide/formmodel import FormModel, DNode, PropKind, newModel, parseModel, generateCode, loadCustomPalette,
+  addCustomEntry, allNodes, getProp, handlerFor, setHandler, eventsOf, isContainerKind, findEntry, isIdent
 from ../ide/lexislint import Diagnostic, Severity
+from ../ide/imagedecode import decodeImageFile
 from std/unicode import runeOffset
 
 type
@@ -671,6 +680,51 @@ proc findReqOf(texte: string, o: LTable, remplacement = ""): FindRequest =
   result.wholeWord = optField(o, "motentier", false)
   result.backwards = optField(o, "arriere", false)
 
+template withCanvas(L: Interp, a: seq[Value], fname: string, v, body: untyped) =
+  # Concepteur de formulaires : l'objet sous le verrou de wdgui.
+  block:
+    let c0 = L.self(a, fname)
+    if c0.ctl.isNil or not (c0.ctl of FormCanvas): rtError("« " & fname & " » : concepteur attendu")
+    guarded:
+      let v = FormCanvas(c0.ctl)
+      body
+      markDirty(v)
+    wakeUI()
+
+proc nodeArg(L: Interp, c: FormCanvas, a: seq[Value], i: int, fname: string): DNode =
+  # Nœud désigné par son uid (argument i), sinon le nœud sélectionné (ou la fenêtre).
+  if arg(a, i).kind == vkNil:
+    result = if c.selected != nil: c.selected else: c.model.root
+  else:
+    result = c.nodeByUid(int(L.checkInt(a, i, fname)))
+    if result == nil: rtError(fname & " : élément inconnu (uid " & $L.checkInt(a, i, fname) & ")")
+
+proc kindName(k: PropKind): string =
+  case k
+  of pkString: "texte"
+  of pkInt: "entier"
+  of pkFloat: "nombre"
+  of pkBool: "logique"
+  of pkEnum: "choix"
+  of pkColor: "couleur"
+  of pkList: "liste"
+
+template withReport(L: Interp, a: seq[Value], fname: string, v, body: untyped) =
+  # Éditeur d'états : le canevas sous le verrou de wdgui.
+  block:
+    let c0 = L.self(a, fname)
+    if c0.ctl.isNil or not (c0.ctl of ReportCanvas): rtError("« " & fname & " » : éditeur d'état attendu")
+    guarded:
+      let v = ReportCanvas(c0.ctl)
+      body
+      markDirty(v)
+    wakeUI()
+
+proc subtree(c: Control, acc: var seq[Control]) =
+  acc.add c
+  if c of Container:
+    for e in Container(c).children: subtree(e, acc)
+
 proc defineMethods() =
   # communs
   mfn "*", "ajouter", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -683,6 +737,24 @@ proc defineMethods() =
   mfn "*", "menucontextuel", proc (L: Interp, a: seq[Value]): seq[Value] =
     let c = L.self(a, "menucontextuel")
     openContextMenu(c.id, L.strs(a, 2, "menucontextuel"))
+  mfn "*", "detruire", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Retire le contrôle (et son contenu) de sa fenêtre.
+    let c = L.self(a, "detruire")
+    if c.ctl.isNil: rtError("detruire : utilisez fen:fermer() pour une fenêtre")
+    var gone: seq[Control]
+    guarded: subtree(c.ctl, gone)
+    if int(c.id) != 0: deleteControl(c.id)
+    else:
+      guarded:
+        if c.ctl.parent != nil:
+          let i = c.ctl.parent.children.find(c.ctl)
+          if i >= 0: c.ctl.parent.children.delete(i)
+          c.ctl.parent = nil
+    let st = L.uiState
+    var keep: seq[UiCtl]
+    for x in st.ctls:
+      if x.ctl.isNil or x.ctl notin gone: keep.add x
+    st.ctls = keep
   mfn "*", "redessiner", proc (L: Interp, a: seq[Value]): seq[Value] =
     requestRedraw(L.self(a, "redessiner").id)
 
@@ -1077,6 +1149,11 @@ proc defineMethods() =
     except IOError, OSError: rtError("editeur:enregistrer : écriture impossible de « " & p & " »")
     editorMarkSaved(id, uid, snap.version, p)
     @[strV(p)]
+  mfn "editeur", "fixertexte", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Remplace le texte d'un document (annulable) ; enregistre = vrai : marqué enregistré.
+    let id = L.edOf(a, "fixertexte")
+    let txt = L.checkStr(a, 2, "fixertexte")
+    @[boolV(editorSetText(id, L.uidArg(a, 3, id, "fixertexte"), txt, modified = not optBool(a, 4, false)))]
   mfn "editeur", "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
     let id = L.edOf(a, "fermer")
     editorClose(id, L.uidArg(a, 2, id, "fermer"))
@@ -1203,6 +1280,226 @@ proc defineMethods() =
     var y = 0.0
     L.withMarkdown(a, "position", v): y = v.scrollPosition
     @[numV(y)]
+
+  # éditeur d'états (canevas) : modèle, mise en page et PDF natifs ; la fenêtre de
+  # l'éditeur s'écrit en Lexis+ (exemples/atelier/etats.prg).
+  mfn "etat", "nom", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = ""
+    L.withReport(a, "nom", c): r = c.model.name
+    @[strV(r)]
+  mfn "etat", "code", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = ""
+    L.withReport(a, "code", c): r = generateReportCode(c.model)
+    @[strV(r)]
+  mfn "etat", "codeexemple", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = ""
+    L.withReport(a, "codeexemple", c): r = reportExampleCode(c.model)
+    @[strV(r)]
+  mfn "etat", "noeuds", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # {uid, nom, genre, chemin, niveau, conteneur} : l'état, ses zones, leurs éléments.
+    let t = newLTable()
+    L.withReport(a, "noeuds", c):
+      let m = c.model
+      let top = "état " & m.name
+      t.arr.add record({"uid": intV(m.uid), "nom": strV(m.name), "genre": strV("etat"), "chemin": strV(top),
+                        "niveau": intV(0), "conteneur": boolV(true)})
+      for b in m.bands:
+        let pb = top & $TreeSep & b.name
+        t.arr.add record({"uid": intV(b.uid), "nom": strV(b.name), "genre": strV("zone"), "chemin": strV(pb),
+                          "niveau": intV(1), "conteneur": boolV(b.items.len > 0)})
+        for i in b.items:
+          t.arr.add record({"uid": intV(i.uid), "nom": strV(i.name), "genre": strV(i.kind),
+                            "chemin": strV(pb & $TreeSep & i.name), "niveau": intV(2), "conteneur": boolV(false)})
+    @[tableV(t)]
+  mfn "etat", "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = 0
+    L.withReport(a, "selection", c): r = c.selectedUid
+    @[intV(r)]
+  mfn "etat", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Sélectionne l'état, une zone ou un élément (uid) ; sans argument : l'état. Pas d'événement.
+    L.withReport(a, "selectionner", c):
+      c.selectUid(if arg(a, 2).kind == vkNil: c.model.uid else: int(L.checkInt(a, 2, "selectionner")))
+  mfn "etat", "element", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # {uid, nom, genre (etat, zone, texte, rectangle, ligne, image), titre, aide} de la sélection.
+    var r = nilV
+    L.withReport(a, "element", c):
+      let uid = c.selectedUid
+      let n = c.findNode(uid)
+      let (nom, genre) = case n.kind
+        of skReport: (c.model.name, "etat")
+        of skBand: (n.band.name, "zone")
+        of skItem: (n.item.name, n.item.kind)
+      r = record({"uid": intV(uid), "nom": strV(nom), "genre": strV(genre), "titre": strV(c.selectionTitle),
+                  "aide": strV(c.selectionHelp)})
+    @[r]
+  mfn "etat", "proprietes", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Propriétés de la sélection : {nom, genre, valeur, choix, cible} ; cible « geom » :
+    # position, taille ou hauteur (mm).
+    let t = newLTable()
+    L.withReport(a, "proprietes", c):
+      for r in c.inspectorRows:
+        let ch = newLTable()
+        for x in r.d.choices: ch.arr.add strV(x)
+        t.arr.add record({"nom": strV(r.d.name), "genre": strV(kindName(r.d.kind)), "valeur": strV(r.v),
+                          "choix": tableV(ch), "cible": strV(r.target)})
+    @[tableV(t)]
+  mfn "etat", "fixerpropriete", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # fixerpropriete(nom, valeur, [cible]) sur la sélection ; nul si c'est fait, sinon le message.
+    let key = L.checkStr(a, 2, "fixerpropriete")
+    let v = L.tostr(arg(a, 3))
+    let target = if arg(a, 4).kind == vkNil: "prop" else: L.checkStr(a, 4, "fixerpropriete")
+    var msg = ""
+    L.withReport(a, "fixerpropriete", c): msg = c.setSelectionValue(target, key, v)
+    @[(if msg.len > 0: strV(msg) else: nilV)]
+  mfn "etat", "renommer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # renommer(uid, nom, projet) : {message, ancien} ; ancien : ancien nom de l'état renommé
+    # (son fichier etat_<ancien>.prg est à supprimer).
+    let uid = int(L.checkInt(a, 2, "renommer"))
+    let nv = L.checkStr(a, 3, "renommer")
+    let root = L.optStr(a, 4, "renommer", "")
+    var r: tuple[msg, oldReport: string]
+    L.withReport(a, "renommer", c): r = c.renameNode(uid, nv, root)
+    @[record({"message": (if r.msg.len > 0: strV(r.msg) else: nilV),
+              "ancien": (if r.oldReport.len > 0: strV(r.oldReport) else: nilV)})]
+  mfn "etat", "supprimer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withReport(a, "supprimer", c): c.deleteSelected()
+  mfn "etat", "monter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withReport(a, "monter", c): c.moveSelected(-1)
+  mfn "etat", "descendre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withReport(a, "descendre", c): c.moveSelected(1)
+  mfn "etat", "nouvellezone", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # nouvellezone([genre]) : "zone" (défaut), "entete" ou "pied".
+    let kind = L.optStr(a, 2, "nouvellezone", "zone")
+    L.withReport(a, "nouvellezone", c): discard c.addBand(kind, c.selBand)
+  mfn "etat", "zoom", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # zoom([facteur]) : multiplie l'échelle ; renvoie le zoom en %.
+    var r = 0.0
+    let f = if arg(a, 2).kind == vkNil: 1.0 else: L.checkNum(a, 2, "zoom")
+    L.withReport(a, "zoom", c):
+      c.scale = clamp(c.scale * f, 1.5, 8.0)
+      r = c.scale / 3.0 * 100
+    @[numV(round(r))]
+  mfn "etat", "apercu", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # apercu(chemin, [projet]) : PDF d'aperçu (chaque zone trois fois) ; {chemin, erreurs}.
+    let path = L.checkStr(a, 2, "apercu")
+    let root = L.optStr(a, 3, "apercu", "")
+    var errs: seq[string]
+    var fail = ""
+    L.withReport(a, "apercu", c):
+      try: errs = writePreview(c.model, path, root)
+      except CatchableError as e: fail = e.msg
+    if fail.len > 0: rtError("apercu : " & fail)
+    @[record({"chemin": strV(path), "erreurs": strV(errs.join("; "))})]
+
+  # concepteur de formulaires (canevas) : le modèle et la génération sont natifs,
+  # la fenêtre du concepteur s'écrit en Lexis+ (exemples/atelier/concepteur.prg).
+  mfn "concepteur", "nom", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = ""
+    L.withCanvas(a, "nom", c): r = c.model.root.name
+    @[strV(r)]
+  mfn "concepteur", "code", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = ""
+    L.withCanvas(a, "code", c): r = generateCode(c.model)
+    @[strV(r)]
+  mfn "concepteur", "codeassocie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = ""
+    let nv = arg(a, 2)
+    let s2 = if nv.kind == vkNil: "" else: L.checkStr(a, 2, "codeassocie")
+    L.withCanvas(a, "codeassocie", c):
+      if nv.kind != vkNil: c.model.code = s2
+      r = c.model.code
+    @[strV(r)]
+  mfn "concepteur", "noeuds", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = newLTable()
+    L.withCanvas(a, "noeuds", c):
+      for n in c.model.allNodes:
+        var depth = 0
+        var p = n.parent
+        while p != nil:
+          inc depth
+          p = p.parent
+        t.arr.add record({"uid": intV(n.uid), "nom": strV(n.name), "genre": strV(n.kind),
+                          "chemin": strV(pathOfNode(n)), "niveau": intV(depth),
+                          "conteneur": boolV(n.children.len > 0)})
+    @[tableV(t)]
+  mfn "concepteur", "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = -1
+    L.withCanvas(a, "selection", c):
+      r = if c.selected != nil: c.selected.uid else: c.model.root.uid
+    @[intV(r)]
+  mfn "concepteur", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Sélectionne un élément (par uid) ; sans argument : la fenêtre. Pas d'événement.
+    L.withCanvas(a, "selectionner", c):
+      let n = L.nodeArg(c, a, 2, "selectionner")
+      c.selected = if arg(a, 2).kind == vkNil: c.model.root else: n
+      c.showNode(c.selected)
+  mfn "concepteur", "element", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # {uid, nom, genre, racine, parent} d'un élément (sélectionné par défaut).
+    var r = nilV
+    L.withCanvas(a, "element", c):
+      let n = L.nodeArg(c, a, 2, "element")
+      r = record({"uid": intV(n.uid), "nom": strV(n.name), "genre": strV(n.kind),
+                  "racine": boolV(n == c.model.root),
+                  "conteneur": boolV(n.kind == "fenetre" or isContainerKind(n.kind))})
+    @[r]
+  mfn "concepteur", "proprietes", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Propriétés à montrer : liste de {nom, genre, valeur, choix} (genre : texte, entier,
+    # nombre, logique, choix, couleur, liste).
+    let t = newLTable()
+    L.withCanvas(a, "proprietes", c):
+      let n = L.nodeArg(c, a, 2, "proprietes")
+      for d in visibleProps(n):
+        let ch = newLTable()
+        for x in d.choices: ch.arr.add strV(x)
+        t.arr.add record({"nom": strV(d.name), "genre": strV(kindName(d.kind)),
+                          "valeur": strV(n.getProp(d.name)), "choix": tableV(ch)})
+    @[tableV(t)]
+  mfn "concepteur", "fixerpropriete", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Modifie une propriété (« nom » : renomme) ; nul si c'est fait, sinon le message.
+    let key = L.checkStr(a, 2, "fixerpropriete")
+    let v = L.tostr(arg(a, 3))
+    var msg = ""
+    L.withCanvas(a, "fixerpropriete", c):
+      let n = L.nodeArg(c, a, 4, "fixerpropriete")
+      msg = canvasSetProp(c, n, (if key == "nom": "name" else: key), v)
+    @[(if msg.len > 0: strV(msg) else: nilV)]
+  mfn "concepteur", "evenements", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = newLTable()
+    L.withCanvas(a, "evenements", c):
+      let n = L.nodeArg(c, a, 2, "evenements")
+      for e in eventsOf(n.kind):
+        t.arr.add record({"nom": strV(e), "procedure": strV(n.handlerFor(e))})
+    @[tableV(t)]
+  mfn "concepteur", "associer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # associer(evenement, procedure) ; procédure "" ou nul : retire l'association.
+    let ev = L.checkStr(a, 2, "associer")
+    let h = if arg(a, 3).kind == vkNil: "" else: L.tostr(arg(a, 3))
+    L.withCanvas(a, "associer", c):
+      let n = L.nodeArg(c, a, 4, "associer")
+      n.setHandler(ev, h)
+  mfn "concepteur", "supprimer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withCanvas(a, "supprimer", c): c.deleteSelected()
+  mfn "concepteur", "monter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withCanvas(a, "monter", c): c.moveSelected(-1)
+  mfn "concepteur", "descendre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withCanvas(a, "descendre", c): c.moveSelected(1)
+  mfn "concepteur", "sortir", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withCanvas(a, "sortir", c): c.moveOut()
+  mfn "concepteur", "ajouterpersonnalise", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ajouterpersonnalise(projet, genre, base, expression) : contrôle créé par une fonction
+    # Lexis+ ; enregistré dans wdlexis_palette.json. Renvoie nul ou le message d'erreur.
+    let root = L.checkStr(a, 2, "ajouterpersonnalise")
+    let kind = L.checkStr(a, 3, "ajouterpersonnalise")
+    let base = L.checkStr(a, 4, "ajouterpersonnalise")
+    let ctor = L.checkStr(a, 5, "ajouterpersonnalise")
+    if not isIdent(kind): return @[strV("nom invalide : « " & kind & " »")]
+    if findEntry(base).base != base or base in ["fenetre", "page"]:
+      return @[strV("contrôle de base inconnu : « " & base & " »")]
+    if ctor.strip.len == 0: return @[strV("expression vide")]
+    var ok = false
+    {.cast(gcsafe).}:
+      guarded: ok = addCustomEntry(root, kind, base, ctor.strip)
+    @[(if ok: nilV else: strV("écriture impossible de wdlexis_palette.json"))]
 
 proc optsArg(a: seq[Value], i: int): LTable =
   if arg(a, i).kind == vkTable: a[i - 1].t else: nil
@@ -1342,6 +1639,52 @@ proc openInterface(L: Interp): Value =
     let path = optField(o, "fichier", "")
     if path.len > 0: txt = L.readMarkdown(path, "interface.markdown")
     @[L.newCtl(newMarkdownView(txt), "markdown")]
+  m.fn "concepteur", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Canevas du concepteur de formulaires : {projet=, fichier=} rouvre form_<nom>.prg,
+    # {projet=, nom=} crée un formulaire neuf.
+    let o = optsArg(a, 1)
+    let root = optField(o, "projet", "")
+    let path = optField(o, "fichier", "")
+    var model: FormModel
+    {.cast(gcsafe).}:
+      guarded:
+        if root.len > 0: loadCustomPalette(root)
+      if path.len > 0:
+        var txt = ""
+        try: txt = readFile(L.programPath(path))
+        except IOError, OSError: rtError("interface.concepteur : lecture impossible de « " & path & " »")
+        model = parseModel(txt)
+        if model == nil: rtError("interface.concepteur : « " & path & " » ne contient pas de dessin de formulaire")
+      else:
+        model = newModel(optField(o, "nom", "1"))
+    let cv = newFormCanvas(model)
+    cv.selected = model.root
+    @[L.newCtl(cv, "concepteur")]
+  m.fn "etat", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Canevas de l'éditeur d'états : {projet=, fichier=} rouvre etat_<nom>.prg, {projet=, nom=} : état neuf.
+    let o = optsArg(a, 1)
+    let root = optField(o, "projet", "")
+    let path = optField(o, "fichier", "")
+    var model: ReportModel
+    if path.len > 0:
+      var txt = ""
+      try: txt = readFile(L.programPath(path))
+      except IOError, OSError: rtError("interface.etat : lecture impossible de « " & path & " »")
+      model = parseReportCode(txt)
+      if model == nil: rtError("interface.etat : « " & path & " » ne contient pas de description d'état")
+    else:
+      model = newReport(optField(o, "nom", "etat1"))
+    @[L.newCtl(newReportCanvas(model, root), "etat")]
+  m.fn "paletteetat", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Palette de l'éditeur d'états : glisser une zone ou un élément sur l'état, ou cliquer.
+    let c = ctlOf(arg(a, 1), "etat")
+    if c.ctl.isNil or not (c.ctl of ReportCanvas): rtError("interface.paletteetat : éditeur d'état attendu")
+    @[L.newCtl(newReportPalette(ReportCanvas(c.ctl)), "paletteetat")]
+  m.fn "palette", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Palette du concepteur : glisser un contrôle sur le canevas, ou cliquer pour l'ajouter.
+    let c = ctlOf(arg(a, 1), "concepteur")
+    if c.ctl.isNil or not (c.ctl of FormCanvas): rtError("interface.palette : concepteur attendu")
+    @[L.newCtl(newPaletteView(FormCanvas(c.ctl)), "palette")]
 
   # boucle et dialogues
   m.fn "executer", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1355,6 +1698,14 @@ proc openInterface(L: Interp): Value =
     L.checkStop()
   m.fn "quitter", proc (L: Interp, a: seq[Value]): seq[Value] =
     if L.hosted: L.closeAllWindows() else: quitApplication()
+  m.fn "icone", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let path = L.optStr(a, 1, "icone", "")
+    try:
+      let img = decodeImageFile(path)
+      if not L.hosted: setApplicationIcon(img.w, img.h, img.px)   # dans l'atelier : celle de l'atelier
+      result = @[boolV(true)]
+    except CatchableError, IOError:
+      result = @[boolV(false)]
   m.fn "fenetres", proc (L: Interp, a: seq[Value]): seq[Value] = @[intV(L.openWindows())]
   m.fn "tracer", proc (L: Interp, a: seq[Value]): seq[Value] =
     L.uiState.trace = optBool(a, 1, true)
@@ -1429,6 +1780,7 @@ const uiDocs = [
   "interface.executer()", "Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime).",
   "interface.quitter()", "Ferme toutes les fenêtres du programme.",
   "interface.fenetres()", "Nombre de fenêtres ouvertes.",
+  "interface.icone(chemin)", "Icône des fenêtres du programme (PNG ou JPEG, carrée, 256 px conseillé) : barre de titre, barre des tâches, Dock. Rend faux si l'image est illisible. Sans effet sur les fenêtres de l'atelier quand le programme y est exécuté.",
   "interface.tracer([actif])", "Affiche dans la console chaque événement reçu (diagnostic).",
   "interface.etiquette(texte, [alignement])", "Libellé (alignement : gauche, centre, droite).",
   "interface.bouton(libelle, [{defaut=, annuler=}])", "Bouton.",
@@ -1520,7 +1872,37 @@ const uiDocs = [
   "markdown:ajouter(texte, ...)", "Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé.",
   "markdown:vider()", "Efface le contenu.",
   "markdown:defilera(position)", "Fait défiler : nombre de pixels depuis le haut, \"debut\" ou \"fin\".",
-  "markdown:position()", "Défilement actuel en pixels depuis le haut."]
+  "markdown:position()", "Défilement actuel en pixels depuis le haut.",
+  "c:detruire()", "Retire le contrôle (et son contenu) de sa fenêtre.",
+  "editeur:fixertexte(texte, [uid], [enregistre])", "Remplace le texte d'un document (annulable) ; enregistre = vrai le marque enregistré.",
+  "interface.concepteur{projet=, fichier= | nom=}", "Canevas du concepteur de formulaires : aperçu réel, glisser-déposer, repères, poignées. fichier : form_<nom>.prg à rouvrir ; nom : nouveau formulaire. surselection : élément sélectionné ; surchangement : dessin modifié à la souris ou au clavier.",
+  "interface.palette(concepteur)", "Palette du concepteur : glisser un contrôle sur le canevas, ou cliquer pour l'ajouter au conteneur sélectionné.",
+  "concepteur:nom()", "Nom du formulaire.", "concepteur:code()", "Texte de form_<nom>.prg (fonction FORM<NOM>_OUVRIR et dessin).",
+  "concepteur:codeassocie([chemin])", "Fichier de code du formulaire (relatif au projet) ; avec un argument : le fixe.",
+  "concepteur:noeuds()", "Éléments du formulaire : liste de {uid, nom, genre, chemin, niveau, conteneur} (chemin : celui de la hiérarchie).",
+  "concepteur:selection()", "uid de l'élément sélectionné.", "concepteur:selectionner([uid])", "Sélectionne un élément (sans argument : la fenêtre).",
+  "concepteur:element([uid])", "{uid, nom, genre, racine, conteneur} d'un élément (sélectionné par défaut).",
+  "concepteur:proprietes([uid])", "Propriétés à montrer : liste de {nom, genre, valeur, choix} ; genre : texte, entier, nombre, logique, choix, couleur, liste.",
+  "concepteur:fixerpropriete(nom, valeur, [uid])", "Modifie une propriété (« nom » renomme) ; nul si c'est fait, sinon le message d'erreur.",
+  "concepteur:evenements([uid])", "Événements de l'élément : liste de {nom, procedure}.",
+  "concepteur:associer(evenement, procedure, [uid])", "Associe une procédure à un événement (\"\" : retire l'association).",
+  "concepteur:supprimer()", "Supprime l'élément sélectionné.", "concepteur:monter()", "Plus tôt dans l'ordre d'affichage.",
+  "concepteur:descendre()", "Plus tard dans l'ordre d'affichage.", "concepteur:sortir()", "Sort l'élément de son conteneur.",
+  "interface.etat{projet=, fichier= | nom=}", "Canevas de l'éditeur d'états : zones à l'échelle, glisser-déposer, poignées, repères, hauteur des zones. fichier : etat_<nom>.prg à rouvrir ; nom : état neuf. surselection : sélection ; surchangement : état modifié à la souris ou au clavier.",
+  "interface.paletteetat(etat)", "Palette de l'éditeur d'états : zones et éléments à glisser sur l'état, ou à cliquer.",
+  "etat:nom()", "Nom de l'état.", "etat:code()", "Texte de etat_<nom>.prg (fonction ETAT_<NOM>).",
+  "etat:codeexemple()", "Code Lexis+ qui remplit l'état (rapport.debut, r.ajoute… avec les variables de chaque zone).",
+  "etat:noeuds()", "L'état, ses zones et leurs éléments : liste de {uid, nom, genre, chemin, niveau, conteneur}.",
+  "etat:selection()", "uid de la sélection.", "etat:selectionner([uid])", "Sélectionne (sans argument : l'état).",
+  "etat:element()", "{uid, nom, genre, titre, aide} de la sélection (genre : etat, zone, texte, rectangle, ligne, image).",
+  "etat:proprietes()", "Propriétés de la sélection : liste de {nom, genre, valeur, choix, cible} (cible geom : position, taille, hauteur en mm).",
+  "etat:fixerpropriete(nom, valeur, [cible])", "Modifie la sélection ; nul si c'est fait, sinon le message d'erreur.",
+  "etat:renommer(uid, nom, projet)", "Renomme l'état, une zone ou un élément : {message, ancien} (ancien : ancien nom de l'état, dont le fichier est à supprimer).",
+  "etat:supprimer()", "Supprime la sélection.", "etat:monter()", "Zone plus haut, élément dessiné plus tôt.",
+  "etat:descendre()", "Zone plus bas, élément dessiné plus tard.", "etat:nouvellezone([genre])", "Ajoute une zone (zone, entete ou pied).",
+  "etat:zoom([facteur])", "Multiplie l'échelle ; renvoie le zoom en %.",
+  "etat:apercu(chemin, [projet])", "Écrit un PDF d'aperçu (chaque zone trois fois) : {chemin, erreurs}.",
+  "concepteur:ajouterpersonnalise(projet, genre, base, expression)", "Ajoute à la palette un contrôle créé par une fonction Lexis+ (wdlexis_palette.json) ; nul ou le message d'erreur."]
 
 registerPackage PackageDef(name: "interface", open: openInterface,
   description: "Interface graphique wdgui", docs: docs("interface", uiDocs))

@@ -7,7 +7,7 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [Lexis+] — " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [S]tudio 1.7.2 - " + fichier.nom(dossier)
   ARBRE_PROJET()
   locale s = LIRE_SESSION()
   locale ouverts = 0
@@ -53,6 +53,20 @@ procedure ARBRE(ev)
 retourner
 
 && configuration du projet : arguments, fichier principal, session
+procedure ARBRE_DOUBLE(ev)
+  && double-clic sur un formulaire ou un état : son éditeur
+  locale v = arbre.valeur
+  si v = nul ou v = ""
+    retourner
+  finsi
+  locale p = fichier.joindre(dossier, joindre(decouper(v, ui.sep), "/"))
+  si fichier.estfichier(p) et EST_FORMULAIRE(p)
+    CONCEPTEUR_OUVRIR(p)
+  sinonsi fichier.estfichier(p) et EST_ETAT(p)
+    ETAT_OUVRIR(p)
+  finsi
+retourner
+
 fonction FICHIER_PROJET()
 retourner fichier.joindre(dossier, ".wdlexis", "atelier.json")
 

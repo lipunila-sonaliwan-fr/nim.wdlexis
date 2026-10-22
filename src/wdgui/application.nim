@@ -7,7 +7,7 @@
 # * The dispatcher thread POPS events; each pop starts a dedicated thread
 #   (default mode) that calls the window handler for the target, then for each
 #   parent up to the window, unless `ev.stopPropagation()` was called.
-import std/[atomics, typedthreads]
+import std/[atomics, typedthreads, locks]
 import ../sdl3, core
 
 type
@@ -23,6 +23,39 @@ var
   uiThread {.used.}: Thread[void]
   cursors: array[12, SDL_Cursor]
   currentCursor = -1
+  iconLock: Lock
+  iconPx: seq[uint8]                 # icône des fenêtres (RGBA), protégée par iconLock
+  iconW, iconH: int
+  iconVersion: Atomic[int]           # 0 : aucune icône
+
+initLock(iconLock)
+
+proc setApplicationIcon*(w, h: int, rgba: openArray[uint8]) =
+  ## Icône de toutes les fenêtres (barre de titre, barre des tâches, Dock de macOS),
+  ## y compris celles déjà ouvertes. rgba : w * h * 4 octets, ligne par ligne.
+  if w <= 0 or h <= 0 or rgba.len < w * h * 4: return
+  {.cast(gcsafe).}:
+    withLock iconLock:
+      iconPx = @rgba
+      iconW = w
+      iconH = h
+    iconVersion.atomicInc()
+
+proc applyIcon(f: Window) =
+  # Fil de l'interface uniquement (appelé par realize et drawWindow).
+  let v = iconVersion.load()
+  if v == f.appliedIcon or f.sdlWin == nil: return
+  f.appliedIcon = v
+  {.cast(gcsafe).}:
+    withLock iconLock:
+      if iconPx.len >= iconW * iconH * 4 and iconW > 0:
+        # SDL_PIXELFORMAT_ABGR8888 = octets R, G, B, A en mémoire (petit-boutiste) ;
+        # SDL_SetWindowIcon copie l'image.
+        let s = SDL_CreateSurfaceFrom(cint(iconW), cint(iconH), 0x16762004'u32,
+                                      addr iconPx[0], cint(iconW * 4))
+        if s != nil:
+          discard SDL_SetWindowIcon(f.sdlWin, s)
+          SDL_DestroySurface(s)
 
 # dispatcher
 
@@ -172,6 +205,7 @@ proc realize(f: Window) =
     activeWindow = f
   f.drawing = newDrawing(f.sdlRen)
   f.appliedTitle = f.title
+  f.applyIcon()
   f.opened = true
   f.dirty = true
   emit(f, evWindowOpen)
@@ -210,6 +244,7 @@ proc drawWindow(f: Window) =
   if f.appliedTitle != f.title:
     discard SDL_SetWindowTitle(f.sdlWin, f.title.cstring)
     f.appliedTitle = f.title
+  f.applyIcon()
   var w, h: cint
   discard SDL_GetWindowSize(f.sdlWin, addr w, addr h)
   f.width = int(w)
