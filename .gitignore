@@ -7,3 +7,4 @@ models/llama-3.2-1b-instruct-q4_k_m.gguf
 wdlexisgen
 wdlexisrt
 /rtc
+/exemples/atelier/distribution
