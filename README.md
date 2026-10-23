@@ -148,7 +148,7 @@ Pour pouvoir compiler :
 - vers macOS, décompressez l'archive 7-Zip nommée **macZG.7z** (→ crée un dossier `macZG` au même niveau que le dossier `macOS`),
 - vers Windows, décompressez l'archive 7-Zip nommée **winZG.7z** (→ crée un dossier `winZG` au même niveau que le dossier `winOS`).
 
-Toutes les versions de wdLexis+ (Linux, macOS et Windows) peuvent générer des exécutables pour toutes ces plates-formes (et pas seulement celle où wdLexis+ est utilisé).
+Toutes les versions de wdLexis+ (Linux, macOS et Windows) peuvent générer des exécutables pour toutes ces plates-formes (et pas seulement celle où wdLexis+ est utilisée).
 
 ```
 cd apps/wdlexis

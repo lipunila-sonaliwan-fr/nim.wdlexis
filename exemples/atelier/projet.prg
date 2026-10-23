@@ -7,7 +7,7 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [S]tudio 1.7.2 - " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [Lexis+] — " + fichier.nom(dossier)
   ARBRE_PROJET()
   locale s = LIRE_SESSION()
   locale ouverts = 0

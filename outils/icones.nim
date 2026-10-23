@@ -22,9 +22,9 @@ const
   Root = currentSourcePath().parentDir.parentDir
   ResDir = Root / "src" / "ressources"
   Source = ResDir / "wdlexis.png"
-  Exes = [("wdlexis", "wdlexis+.exe", "wdlexis+ - atelier Lexis+"),
-          ("wdlexisrt", "wdlexisrt.exe", "wdlexis+ - runtime Lexis+"),
-          ("wdlexisgen", "wdlexisgen.exe", "wdlexis+ - générateur d'applications")]
+  Exes = [("wdlexis", "wdlexis+.exe", "wdlexis+ — atelier Lexis+"),
+          ("wdlexisrt", "wdlexisrt.exe", "wdlexis+ — runtime Lexis+"),
+          ("wdlexisgen", "wdlexisgen.exe", "wdlexis+ — générateur d'applications")]
   Machines = [("amd64", 0x8664, 3),     # IMAGE_REL_AMD64_ADDR32NB
               ("arm64", 0xAA64, 2)]     # IMAGE_REL_ARM64_ADDR32NB
   RtIcon = 3
