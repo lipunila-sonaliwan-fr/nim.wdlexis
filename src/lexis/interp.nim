@@ -32,7 +32,7 @@ proc ctx*(): Ctx =
   curCtx
 
 proc position*(): (string, int) =
-  ## (fichier, ligne) de l'instruction Lexis+ en cours.
+  # (fichier, ligne) de l'instruction Lexis+ en cours.
   let c = ctx()
   for i in countdown(c.frames.high, 0):
     let f = c.frames[i]
@@ -60,7 +60,7 @@ proc traceback*(c: Ctx = nil): string =
       break
 
 proc raiseValue*(v: Value) {.noreturn.} =
-  ## Lève une erreur Lexis+ ; v est ce que reçoit « capturer ».
+  # Lève une erreur Lexis+ ; v est ce que reçoit « capturer ».
   let (s, l) = position()
   var e = newException(LexisError, (if s.len > 0: s & ":" & $l & ": " else: "") & display(v))
   e.value = v
@@ -70,7 +70,7 @@ proc raiseValue*(v: Value) {.noreturn.} =
   raise e
 
 proc rtError*(msg: string) {.noreturn.} =
-  ## Erreur d'exécution, avec la position de l'instruction en cours.
+  # Erreur d'exécution, avec la position de l'instruction en cours.
   raiseValue(strV(msg))
 
 #
@@ -104,7 +104,7 @@ proc stopRequested*(L: Interp): bool {.inline.} =
   L.stopFlag.load(moRelaxed) or (not L.parentStop.isNil and L.parentStop[].load(moRelaxed))
 
 proc requestStop*(L: Interp) =
-  ## Demande l'arrêt du programme (vérifié avant chaque instruction).
+  # Demande l'arrêt du programme (vérifié avant chaque instruction).
   L.stopFlag.store(true)
 
 proc checkStop*(L: Interp) {.inline.} =
@@ -121,7 +121,7 @@ proc getMeta*(L: Interp, v: Value): LTable =
   else: nil
 
 proc metaField*(L: Interp, v: Value, name: string): Value =
-  ## name en majuscules (« __INDEX ») ; « __index » est aussi accepté.
+  # name en majuscules (« __INDEX ») ; « __index » est aussi accepté.
   let m = L.getMeta(v)
   if m.isNil: return nilV
   result = m.rawGet(name)
@@ -187,7 +187,7 @@ proc setIndex*(L: Interp, obj, key, val: Value) =
   rtError("__newindex : chaîne de métatables trop longue (cycle ?)")
 
 proc tostr*(L: Interp, v: Value): string =
-  ## Texte d'une valeur (utilise __tostring) ; nul donne "".
+  # Texte d'une valeur (utilise __tostring) ; nul donne "".
   if v.kind in {vkTable, vkUser}:
     let h = L.metaField(v, "__TOSTRING")
     if h.kind != vkNil: return rawToString(first(L.call(h, @[v])))
@@ -212,7 +212,7 @@ proc tryMeta(L: Interp, a, b: Value, ev: string, res: var Value): bool =
   true
 
 proc toNumber*(v: Value, ok: var bool): Value =
-  ## Nombre d'une valeur : nombres, chaînes numériques (virgule décimale admise), logiques (1 / 0).
+  # Nombre d'une valeur : nombres, chaînes numériques (virgule décimale admise), logiques (1 / 0).
   ok = true
   case v.kind
   of vkInt, vkNum: v
@@ -328,7 +328,7 @@ proc setBreakpoints*(d: Debugger, source: string, lines: seq[int]) =
     d.breakpoints[source] = toHashSet(lines)
 
 proc command*(d: Debugger, mode: StepMode) =
-  ## Reprise après une pause (smRun, smInto, smOver, smOut).
+  # Reprise après une pause (smRun, smInto, smOver, smOut).
   withLock d.lock:
     d.cmd = mode
     d.resumed = true
@@ -371,14 +371,14 @@ proc debugLine(L: Interp, fr: Frame, s: Stmt) =
 #
 
 template zoneGuard(body: untyped) =
-  ## Les erreurs de base et de zone deviennent des erreurs Lexis+ positionnées.
+  # Les erreurs de base et de zone deviennent des erreurs Lexis+ positionnées.
   try:
     body
   except ZoneError as e: rtError(e.msg)
   except DuckError as e: rtError("sql : " & e.msg)
 
 proc lookupName*(L: Interp, name: string): Value =
-  ## Lecture d'un nom non local : champ de la zone courante, globale, procédure.
+  # Lecture d'un nom non local : champ de la zone courante, globale, procédure.
   if name == "SESSION": return tableV(L.globals)
   let z = L.currentZone
   if not z.isNil:
@@ -390,7 +390,7 @@ proc lookupName*(L: Interp, name: string): Value =
   if result.kind == vkNil and not L.autoload.isNil: result = L.autoload(L, name)
 
 proc aliasField(L: Interp, alias, name: string): Value =
-  ## alias->champ ; m->nom désigne une variable (comme en dBase) s'il n'y a pas de zone M.
+  # alias->champ ; m->nom désigne une variable (comme en dBase) s'il n'y a pas de zone M.
   if alias == "M" and not L.zoneState.zones.hasKey("M"):
     if name == "SESSION": return tableV(L.globals)
     return L.globals.rawGet(name)
@@ -404,7 +404,7 @@ proc callable*(L: Interp, v: Value): bool =
   v.kind == vkFunc or (v.kind in {vkTable, vkUser} and L.metaField(v, "__CALL").kind != vkNil)
 
 proc callName*(L: Interp, name: string, args: seq[Value]): seq[Value] =
-  ## Appel par nom : procédure, puis globale appelable, puis fonction intégrée.
+  # Appel par nom : procédure, puis globale appelable, puis fonction intégrée.
   let p = L.procs.getOrDefault(name, nilV)
   if p.kind != vkNil: return L.call(p, args)
   let g = L.globals.rawGet(name)
@@ -555,7 +555,7 @@ proc getLocal(fr: Frame, slot: int): Value {.inline.} =
   if c.isNil: nilV else: c.v
 
 proc loopStep(L: Interp, fr: Frame, body: seq[Stmt], stop: var bool): bool =
-  ## Un tour de boucle ; vrai s'il faut remonter un « retourner ».
+  # Un tour de boucle ; vrai s'il faut remonter un « retourner ».
   case L.execBlock(fr, body)
   of erBreak: stop = true
   of erReturn:
@@ -880,9 +880,9 @@ proc execBlock(L: Interp, fr: Frame, body: seq[Stmt]): ExecResult =
 #
 
 var embeddedSources*: seq[tuple[path, src: string]]
-  ## Applications générées (wdlexisapp) : sources .prg embarquées dans
-  ## l'exécutable, chemins absolus « virtuels » (dossier de l'application).
-  ## Renseigné une seule fois au démarrage, avant tout fil d'exécution.
+  # Applications générées (wdlexisapp) : sources .prg embarquées dans
+  # l'exécutable, chemins absolus « virtuels » (dossier de l'application).
+  # Renseigné une seule fois au démarrage, avant tout fil d'exécution.
 
 proc embeddedSource*(path: string): (bool, string) =
   {.cast(gcsafe).}:
@@ -901,7 +901,7 @@ proc readSource*(L: Interp, path: string): string =
   readFile(path)
 
 proc registerProgram*(L: Interp, prog: Program, allowMain: bool): Value =
-  ## Enregistre les procédures d'un fichier ; renvoie le programme principal.
+  # Enregistre les procédures d'un fichier ; renvoie le programme principal.
   for p in prog.procs:
     let old = L.procs.getOrDefault(p.name, nilV)
     if old.kind == vkFunc and not old.f.native and old.f.proto.source != p.source:
@@ -914,14 +914,17 @@ proc registerProgram*(L: Interp, prog: Program, allowMain: bool): Value =
   funcV(LFunc(name: "programme principal", native: false, proto: prog.main))
 
 proc load*(L: Interp, src, source: string): Value =
-  ## Compile du code (et enregistre ses procédures) ; lève SyntaxError.
+  # Compile du code (et enregistre ses procédures) ; lève SyntaxError.
   L.registerProgram(parseChunk(src, source), true)
 
 proc projectFiles*(mainPath: string): seq[string] =
-  ## Fichiers .prg du dossier du programme (sous-dossiers compris, sauf cachés).
+  # Fichiers .prg du dossier du programme (sous-dossiers compris, sauf cachés).
+  # Application générée : les sources embarquées remplacent le disque, mais seulement
+  # pour son propre programme ; un autre programme (par exemple lancé par
+  # lexis.executer depuis l'atelier généré) charge les fichiers de son dossier.
   let dir = mainPath.parentDir
   {.cast(gcsafe).}:
-    if embeddedSources.len > 0:
+    if embeddedSources.len > 0 and embeddedSource(mainPath)[0]:
       let m = normalizedPath(absolutePath(mainPath))
       let d = normalizedPath(absolutePath(dir))
       for e in embeddedSources:
@@ -937,14 +940,14 @@ proc projectFiles*(mainPath: string): seq[string] =
   result.sort()
 
 proc loadProgram*(L: Interp, mainPath: string): Value =
-  ## Charge le fichier principal et les autres fichiers .prg de son dossier.
+  # Charge le fichier principal et les autres fichiers .prg de son dossier.
   let main = L.load(L.readSource(mainPath), mainPath)
   for f in projectFiles(mainPath):
     discard L.registerProgram(parseChunk(L.readSource(f), f), false)
   main
 
 proc runMain*(L: Interp, main: Value, args: seq[Value]): seq[Value] =
-  ## Exécute le programme principal, ou la procédure PRINCIPAL s'il est vide.
+  # Exécute le programme principal, ou la procédure PRINCIPAL s'il est vide.
   if main.f.proto.body.len > 0: return L.call(main, args)
   let p = L.procs.getOrDefault("PRINCIPAL", nilV)
   if p.kind != vkNil: return L.call(p, args)
@@ -952,7 +955,7 @@ proc runMain*(L: Interp, main: Value, args: seq[Value]): seq[Value] =
                      "instructions en tête du fichier principal, ou une procédure PRINCIPAL")
 
 proc runFile*(L: Interp, path: string, args: seq[Value] = @[]): seq[Value] =
-  ## Exécute un programme (le verrou global doit être détenu).
+  # Exécute un programme (le verrou global doit être détenu).
   L.runMain(L.loadProgram(path), args)
 
 #
@@ -1017,7 +1020,7 @@ proc yieldCo*(L: Interp, vals: seq[Value]): seq[Value] =
   move co.transfer
 
 proc closeCoroutine*(co: Coroutine) =
-  ## Termine le thread d'une tâche suspendue.
+  # Termine le thread d'une tâche suspendue.
   if co.started and co.status == csSuspended:
     co.killed = true
     co.resumeSem.post()
@@ -1029,7 +1032,7 @@ proc closeCoroutine*(co: Coroutine) =
   co.status = csDead
 
 proc shutdown*(L: Interp) =
-  ## Libère tâches et ressources des paquets (fin d'exécution).
+  # Libère tâches et ressources des paquets (fin d'exécution).
   for co in L.coroutines: closeCoroutine(co)
   L.coroutines.setLen(0)
   for c in L.closers:
