@@ -1,0 +1,22 @@
+{
+  "type": "csv",
+  "libelle": "Fichiers CSV",
+  "categorie": "Fichiers",
+  "sigle": "CSV",
+  "couleur": "#22C55E",
+  "mode": "fichiers",
+  "parametres": [
+    {
+      "nom": "dossier",
+      "libelle": "Dossier",
+      "defaut": ".",
+      "dossier": true
+    },
+    {
+      "nom": "motif",
+      "libelle": "Motif",
+      "defaut": "*.csv"
+    }
+  ],
+  "lecteur": "read_csv_auto('{chemin}')"
+}

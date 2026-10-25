@@ -1,0 +1,21 @@
+{
+  "type": "odbc",
+  "libelle": "ODBC (DSN ou chaîne)",
+  "categorie": "Bases",
+  "sigle": "OD",
+  "couleur": "#A78BFA",
+  "mode": "requete",
+  "extension": "nanodbc",
+  "installer": "INSTALL nanodbc FROM community",
+  "parametres": [
+    {
+      "nom": "connexion",
+      "libelle": "DSN ou chaîne ODBC",
+      "defaut": "MonDSN"
+    }
+  ],
+  "attacher": [
+    "CREATE SCHEMA IF NOT EXISTS memory.{alias}"
+  ],
+  "aide": "Interrogez la source avec odbc_query(connection='{connexion}', query='...') ou odbc_scan(table_name='...', connection='{connexion}')."
+}

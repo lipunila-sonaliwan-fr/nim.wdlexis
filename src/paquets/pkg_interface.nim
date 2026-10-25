@@ -40,6 +40,8 @@ from ../ide/designer import FormCanvas, PaletteView, newFormCanvas, newPaletteVi
 from ../ide/reportdesigner import ReportCanvas, ReportPalette, SelKind, newReportCanvas, newReportPalette,
   findNode, selectedUid, selectUid, selectionTitle, inspectorRows, selectionHelp, setSelectionValue, renameNode,
   reportExampleCode, writePreview, addBand, deleteSelected, moveSelected
+from ../ide/diagramme import DiagramCanvas, DiaNode, DiaLink, DiaRow, newDiagram, upsertNode, upsertLink, removeNode,
+  placeNew, layout, fit, findNode, invalidate
 from ../ide/etats import ReportModel, newReport, parseReportCode, generateReportCode, reportFileName
 from ../ide/formmodel import FormModel, DNode, PropKind, newModel, parseModel, generateCode, loadCustomPalette,
   addCustomEntry, allNodes, getProp, handlerFor, setHandler, eventsOf, isContainerKind, findEntry, isIdent
@@ -709,6 +711,20 @@ proc kindName(k: PropKind): string =
   of pkColor: "couleur"
   of pkList: "liste"
 
+proc diaOpts(a: seq[Value], i: int): LTable =
+  if arg(a, i).kind == vkTable: a[i - 1].t else: nil
+
+template withDiagram(L: Interp, a: seq[Value], fname: string, v, body: untyped) =
+  # Diagramme : le canevas sous le verrou de wdgui.
+  block:
+    let c0 = L.self(a, fname)
+    if c0.ctl.isNil or not (c0.ctl of DiagramCanvas): rtError("« " & fname & " » : diagramme attendu")
+    guarded:
+      let v = DiagramCanvas(c0.ctl)
+      body
+      markDirty(v)
+    wakeUI()
+
 template withReport(L: Interp, a: seq[Value], fname: string, v, body: untyped) =
   # Éditeur d'états : le canevas sous le verrou de wdgui.
   block:
@@ -1257,6 +1273,22 @@ proc defineMethods() =
     editorSetFontSize(L.edOf(a, "taillepolice"), L.checkNum(a, 2, "taillepolice"))
   mfn "editeur", "minicarte", proc (L: Interp, a: seq[Value]): seq[Value] =
     editorSetOptions(L.edOf(a, "minicarte"), optBool(a, 2, true), false)
+  mfn "editeur", "langage", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:langage() : langage du document actif ; ed:langage("sql" | "lexis" | "", [uid]) : l'impose.
+    let id = L.edOf(a, "langage")
+    if arg(a, 2).kind == vkNil: return @[strV(editorLanguage(id, -1))]
+    let lang = L.checkStr(a, 2, "langage").toLowerAscii
+    if lang notin ["sql", "lexis", ""]: rtError("editeur:langage : « sql », « lexis » ou \"\" attendu")
+    let uid = if arg(a, 3).kind == vkNil: -1 else: int(L.checkInt(a, 3, "langage"))
+    editorSetLanguage(id, uid, lang)
+  mfn "editeur", "noms", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Noms proposés par la complétion (SQL : « table » et « table.colonne »).
+    let id = L.edOf(a, "noms")
+    var names: seq[string]
+    let v = arg(a, 2)
+    if v.kind == vkTable:
+      for i in 1 .. v.t.rawLen: names.add L.tostr(v.t.rawGet(intV(i)))
+    editorSetProjectNames(id, names)
 
   # visionneuse Markdown
   mfn "markdown", "charger", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1371,6 +1403,135 @@ proc defineMethods() =
     # nouvellezone([genre]) : "zone" (défaut), "entete" ou "pied".
     let kind = L.optStr(a, 2, "nouvellezone", "zone")
     L.withReport(a, "nouvellezone", c): discard c.addBand(kind, c.selBand)
+  # diagramme (nœuds et liens)
+  mfn "diagramme", "noeud", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=} : ajoute ou met à jour.
+    let o = diaOpts(a, 2)
+    if o.isNil: rtError("noeud : table {id=, titre=, ...} attendue")
+    let id = optField(o, "id", "")
+    if id.len == 0: rtError("noeud : id attendu")
+    var rows: seq[DiaRow]
+    var hasRows = false
+    let lv = field(o, "lignes")
+    if lv.kind == vkTable:
+      hasRows = true
+      for i in 1 .. lv.t.rawLen:
+        let e = lv.t.rawGet(intV(i))
+        if e.kind == vkTable:
+          rows.add DiaRow(text: optField(e.t, "texte", ""), detail: optField(e.t, "detail", ""), mark: optField(e.t, "marque", ""))
+        else: rows.add DiaRow(text: L.tostr(e))
+    let col = field(o, "couleur")
+    L.withDiagram(a, "noeud", c):
+      let n = c.upsertNode(id)
+      n.title = optField(o, "titre", if n.title.len > 0: n.title else: id)
+      if field(o, "soustitre").kind != vkNil: n.subtitle = optField(o, "soustitre", "")
+      if field(o, "pastille").kind != vkNil: n.badge = optField(o, "pastille", "")
+      if field(o, "forme").kind != vkNil: n.shape = optField(o, "forme", "table")
+      if field(o, "jauge").kind != vkNil: n.gauge = optField(o, "jauge", -1.0)
+      if col.kind == vkStr: n.color = hex(col.s)
+      if hasRows: n.rows = rows
+      if field(o, "x").kind != vkNil: n.x = optField(o, "x", 0.0)
+      if field(o, "y").kind != vkNil: n.y = optField(o, "y", 0.0)
+      c.placeNew()
+  mfn "diagramme", "lien", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # lien{id=, de=, a=, deligne=, aligne=, libelle=, fleche=, pointille=, couleur=, epaisseur=}
+    let o = diaOpts(a, 2)
+    if o.isNil: rtError("lien : table {de=, a=, ...} attendue")
+    var l = DiaLink(src: optField(o, "de", ""), dst: optField(o, "a", ""), srcRow: optField(o, "deligne", 0),
+                  dstRow: optField(o, "aligne", 0), label: optField(o, "libelle", ""),
+                  arrow: optField(o, "fleche", true), dashed: optField(o, "pointille", false),
+                  width: optField(o, "epaisseur", 0.0))
+    if l.src.len == 0 or l.dst.len == 0: rtError("lien : de= et a= attendus")
+    l.id = optField(o, "id", l.src & ">" & l.dst & (if l.srcRow > 0 or l.dstRow > 0: "#" & $l.srcRow & ":" & $l.dstRow else: ""))
+    let col = field(o, "couleur")
+    if col.kind == vkStr: l.color = hex(col.s)
+    L.withDiagram(a, "lien", c):
+      c.upsertLink(l)
+    @[strV(l.id)]
+  mfn "diagramme", "supprimer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.checkStr(a, 2, "supprimer")
+    var ok = false
+    L.withDiagram(a, "supprimer", c):
+      ok = c.removeNode(id)
+    @[boolV(ok)]
+  mfn "diagramme", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withDiagram(a, "vider", c):
+      c.nodes.setLen(0)
+      c.links.setLen(0)
+      c.selected = ""
+      c.selLink = ""
+  mfn "diagramme", "noeuds", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = newLTable()
+    L.withDiagram(a, "noeuds", c):
+      for n in c.nodes:
+        t.arr.add record({"id": strV(n.id), "titre": strV(n.title), "x": numV(n.x), "y": numV(n.y),
+                          "largeur": numV(n.w), "hauteur": numV(n.h)})
+    @[tableV(t)]
+  mfn "diagramme", "liens", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = newLTable()
+    L.withDiagram(a, "liens", c):
+      for l in c.links:
+        t.arr.add record({"id": strV(l.id), "de": strV(l.src), "a": strV(l.dst), "deligne": intV(l.srcRow),
+                          "aligne": intV(l.dstRow), "libelle": strV(l.label)})
+    @[tableV(t)]
+  mfn "diagramme", "selection", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # {genre = "noeud" | "lien" | "", id, ligne}
+    var r: Value
+    L.withDiagram(a, "selection", c):
+      r = if c.selLink.len > 0: record({"genre": strV("lien"), "id": strV(c.selLink), "ligne": intV(0)})
+          elif c.selected.len > 0: record({"genre": strV("noeud"), "id": strV(c.selected), "ligne": intV(c.selRow)})
+          else: record({"genre": strV(""), "id": strV(""), "ligne": intV(0)})
+    @[r]
+  mfn "diagramme", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = if arg(a, 2).kind == vkNil: "" else: L.checkStr(a, 2, "selectionner")
+    L.withDiagram(a, "selectionner", c):
+      c.selected = id
+      c.selLink = ""
+      c.selRow = if arg(a, 3).kind == vkNil: 0 else: int(L.checkInt(a, 3, "selectionner"))
+      let n = c.findNode(id)
+      if n != nil and c.rect.w > 0:
+        # amène le nœud dans la vue
+        let sx = c.panX + n.x * c.zoom
+        let sy = c.panY + n.y * c.zoom
+        if sx < 0 or sy < 0 or sx + n.w * c.zoom > c.rect.w or sy + n.h * c.zoom > c.rect.h:
+          c.panX = c.rect.w / 2 - (n.x + n.w / 2) * c.zoom
+          c.panY = c.rect.h / 2 - (n.y + n.h / 2) * c.zoom
+  mfn "diagramme", "action", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Dernière action de l'utilisateur : {action = "deplace" | "lien" | "supprimer", id, de, a, deligne, aligne}.
+    var r: Value
+    L.withDiagram(a, "action", c):
+      let x = c.lastAction
+      r = record({"action": strV(x.action), "id": strV(x.id), "de": strV(x.src), "a": strV(x.dst),
+                  "deligne": intV(x.srcRow), "aligne": intV(x.dstRow)})
+    @[r]
+  mfn "diagramme", "disposer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let dir = if arg(a, 2).kind == vkNil: "" else: L.checkStr(a, 2, "disposer")
+    if dir.len > 0 and dir notin ["droite", "bas"]: rtError("disposer : « droite » ou « bas » attendu")
+    L.withDiagram(a, "disposer", c):
+      c.layout(dir)
+  mfn "diagramme", "ajuster", proc (L: Interp, a: seq[Value]): seq[Value] =
+    L.withDiagram(a, "ajuster", c):
+      c.fit()
+  mfn "diagramme", "zoom", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var r = 0.0
+    let f = if arg(a, 2).kind == vkNil: 1.0 else: L.checkNum(a, 2, "zoom")
+    L.withDiagram(a, "zoom", c):
+      c.zoom = clamp(c.zoom * f, 0.15, 3.0)
+      r = c.zoom * 100
+    @[numV(round(r))]
+  mfn "diagramme", "position", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.checkStr(a, 2, "position")
+    let x = L.checkNum(a, 3, "position")
+    let y = L.checkNum(a, 4, "position")
+    L.withDiagram(a, "position", c):
+      let n = c.findNode(id)
+      if n != nil:
+        n.x = x
+        n.y = y
+  mfn "diagramme", "modifiable", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let b = optBool(a, 2, true)
+    L.withDiagram(a, "modifiable", c):
+      c.editable = b
   mfn "etat", "zoom", proc (L: Interp, a: seq[Value]): seq[Value] =
     # zoom([facteur]) : multiplie l'échelle ; renvoie le zoom en %.
     var r = 0.0
@@ -1546,7 +1707,7 @@ proc openInterface(L: Interp): Value =
     let txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
     var e: Control
     if optField(o, "multiligne", false): e = newMultilineEdit(txt)
-    elif optField(o, "indication", "").len > 0: e = newEdit(placeholder = optField(o, "indication", ""))
+    elif optField(o, "indication", "").len > 0: e = newEdit(txt, placeholder = optField(o, "indication", ""))
     else: e = newEdit(txt)
     @[L.newCtl(e, "saisie")]
   ctor("cases", "cases"):
@@ -1675,6 +1836,10 @@ proc openInterface(L: Interp): Value =
     else:
       model = newReport(optField(o, "nom", "etat1"))
     @[L.newCtl(newReportCanvas(model, root), "etat")]
+  m.fn "diagramme", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Canevas de diagramme : nœuds et liens, déplacement, zoom, liaisons à la souris.
+    let o = optsArg(a, 1)
+    @[L.newCtl(newDiagram(optField(o, "modifiable", true), optField(o, "direction", "droite")), "diagramme")]
   m.fn "paletteetat", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Palette de l'éditeur d'états : glisser une zone ou un élément sur l'état, ou cliquer.
     let c = ctlOf(arg(a, 1), "etat")
@@ -1868,6 +2033,8 @@ const uiDocs = [
   "editeur:effacerpointsarret()", "Retire tous les points d'arrêt.",
   "editeur:pressepapiers(texte)", "Copie un texte dans le presse-papiers.",
   "editeur:taillepolice(taille)", "Taille de la police.", "editeur:minicarte([b])", "Affiche ou masque la minicarte.",
+  "editeur:langage([langage], [uid])", "Langage d'un document : « sql » (coloration, complétion et commentaires SQL) ou « lexis » ; \"\" : d'après l'extension (.sql). Sans argument : langage du document actif.",
+  "editeur:noms(liste)", "Noms proposés par la complétion ; en SQL, « table » et « table.colonne » (les colonnes sont proposées après « table. »).",
   "markdown:charger(chemin)", "Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut.",
   "markdown:ajouter(texte, ...)", "Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé.",
   "markdown:vider()", "Efface le contenu.",
@@ -1889,6 +2056,16 @@ const uiDocs = [
   "concepteur:supprimer()", "Supprime l'élément sélectionné.", "concepteur:monter()", "Plus tôt dans l'ordre d'affichage.",
   "concepteur:descendre()", "Plus tard dans l'ordre d'affichage.", "concepteur:sortir()", "Sort l'élément de son conteneur.",
   "interface.etat{projet=, fichier= | nom=}", "Canevas de l'éditeur d'états : zones à l'échelle, glisser-déposer, poignées, repères, hauteur des zones. fichier : etat_<nom>.prg à rouvrir ; nom : état neuf. surselection : sélection ; surchangement : état modifié à la souris ou au clavier.",
+  "interface.diagramme([{modifiable=, direction=}])", "Canevas de diagramme (nœuds et liens) : glisser un nœud le déplace, glisser le fond déplace la vue, la molette zoome ; en mode modifiable, glisser depuis la pastille d'un bord (titre ou ligne) vers un autre nœud crée un lien (surchangement, d:action()). direction : droite (défaut) ou bas. surselection : ev.texte = id du nœud, « lien:<id> » ou \"\" ; ev.index = ligne.",
+  "diagramme:noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=}", "Ajoute ou met à jour un nœud. lignes : liste de textes ou de {texte=, detail=, marque=} (marque : PK, FK…) ; forme : table (défaut) ou boite ; pastille : texte en haut à droite ; jauge : 0 à 1 ; sans x/y, placé à droite de l'existant.",
+  "diagramme:lien{id=, de=, a=, deligne=, aligne=, libelle=, fleche=, pointille=, couleur=, epaisseur=}", "Ajoute ou met à jour un lien (deligne, aligne : ligne de départ et d'arrivée, 0 = le nœud) ; renvoie son id.",
+  "diagramme:supprimer(id)", "Supprime un nœud (et ses liens) ou un lien.", "diagramme:vider()", "Supprime tout.",
+  "diagramme:noeuds()", "Liste de {id, titre, x, y, largeur, hauteur}.", "diagramme:liens()", "Liste de {id, de, a, deligne, aligne, libelle}.",
+  "diagramme:selection()", "{genre = noeud | lien | \"\", id, ligne}.", "diagramme:selectionner([id], [ligne])", "Sélectionne un nœud et l'amène dans la vue.",
+  "diagramme:action()", "Dernière action de l'utilisateur (surchangement) : {action = deplace | lien | supprimer, id, de, a, deligne, aligne}.",
+  "diagramme:disposer([direction])", "Disposition automatique en couches (droite ou bas), nœuds isolés en grille.",
+  "diagramme:ajuster()", "Cadre tout le diagramme dans la vue.", "diagramme:zoom([facteur])", "Multiplie le zoom ; renvoie le zoom en %.",
+  "diagramme:position(id, x, y)", "Place un nœud.", "diagramme:modifiable([b])", "Autorise ou non le déplacement et la création de liens.",
   "interface.paletteetat(etat)", "Palette de l'éditeur d'états : zones et éléments à glisser sur l'état, ou à cliquer.",
   "etat:nom()", "Nom de l'état.", "etat:code()", "Texte de etat_<nom>.prg (fonction ETAT_<NOM>).",
   "etat:codeexemple()", "Code Lexis+ qui remplit l'état (rapport.debut, r.ajoute… avec les variables de chaque zone).",

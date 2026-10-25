@@ -1,0 +1,26 @@
+{
+  "type": "duckdb",
+  "libelle": "DuckDB (fichier)",
+  "categorie": "Bases",
+  "sigle": "DK",
+  "couleur": "#F5B83D",
+  "mode": "catalogue",
+  "parametres": [
+    {
+      "nom": "fichier",
+      "libelle": "Fichier .duckdb",
+      "defaut": "donnees.duckdb",
+      "fichier": true
+    }
+  ],
+  "options": [
+    {
+      "nom": "lecture",
+      "libelle": "Lecture seule",
+      "defaut": false
+    }
+  ],
+  "attacher": [
+    "ATTACH '{fichier}' AS {alias} {si_lecture:(READ_ONLY)}"
+  ]
+}

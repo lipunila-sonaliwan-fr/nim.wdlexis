@@ -1,0 +1,38 @@
+{
+  "type": "quack",
+  "libelle": "Quack (serveur DuckDB distant)",
+  "categorie": "Bases",
+  "sigle": "QK",
+  "couleur": "#FB923C",
+  "mode": "catalogue",
+  "version_min": "2.0",
+  "extension": "quack",
+  "parametres": [
+    {
+      "nom": "hote",
+      "libelle": "Hôte",
+      "defaut": "localhost"
+    },
+    {
+      "nom": "port",
+      "libelle": "Port",
+      "defaut": "9494"
+    },
+    {
+      "nom": "jeton",
+      "libelle": "Jeton",
+      "defaut": "",
+      "secret": true
+    }
+  ],
+  "options": [
+    {
+      "nom": "sanstls",
+      "libelle": "Sans TLS (DISABLE_SSL)",
+      "defaut": false
+    }
+  ],
+  "attacher": [
+    "ATTACH 'quack:{hote}:{port}' AS {alias} (TOKEN '{jeton}'{si_sanstls:, DISABLE_SSL true})"
+  ]
+}

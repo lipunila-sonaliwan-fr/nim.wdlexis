@@ -1,0 +1,43 @@
+{
+  "type": "mssql",
+  "libelle": "SQL Server (MSSQL)",
+  "categorie": "Bases",
+  "sigle": "MS",
+  "couleur": "#EF4444",
+  "mode": "catalogue",
+  "extension": "mssql",
+  "installer": "INSTALL mssql FROM community",
+  "parametres": [
+    {
+      "nom": "serveur",
+      "libelle": "Serveur",
+      "defaut": "localhost,1433"
+    },
+    {
+      "nom": "base",
+      "libelle": "Base",
+      "defaut": "master"
+    },
+    {
+      "nom": "utilisateur",
+      "libelle": "Utilisateur",
+      "defaut": "sa"
+    },
+    {
+      "nom": "motdepasse",
+      "libelle": "Mot de passe",
+      "defaut": "",
+      "secret": true
+    }
+  ],
+  "options": [
+    {
+      "nom": "confiance",
+      "libelle": "TrustServerCertificate (tests)",
+      "defaut": false
+    }
+  ],
+  "attacher": [
+    "ATTACH 'Server={serveur};Database={base};User Id={utilisateur};Password={motdepasse}{si_confiance:;TrustServerCertificate=yes}' AS {alias} (TYPE mssql)"
+  ]
+}

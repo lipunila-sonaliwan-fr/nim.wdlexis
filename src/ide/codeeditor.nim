@@ -20,7 +20,7 @@
 import std/[strutils, unicode, tables, os, math, sequtils, streams, sets, algorithm]
 import ../sdl3
 import ../wdgui
-import lexistok, langdocs, lexislint
+import lexistok, sqltok, langdocs, lexislint
 import compat except KHome, KEnd
 from lexislang import Keywords
 from lsptypes import CompletionItem, kindBadge
@@ -62,6 +62,7 @@ type
     maxLevel: int
     analyzed: bool
     diags*: seq[Diagnostic]      # diagnostics de lexislint (colonnes en octets).
+    lang*: string                # "" : d'après l'extension ; "sql" ou "lexis" : imposé (ed:langage).
 
   EditorColors = object
     bg, gutter, gutterText, gutterMajor, currentLine, selection, caret, tabBar, tabActive,
@@ -218,13 +219,21 @@ proc computeCsd(lines: seq[string], toks: seq[seq[Token]], maxLevel: var int): s
     let top = stack.pop()
     result[top].last = max(result[top].first, lines.high)
 
+proc isSql*(doc: Document): bool =
+  ## Document SQL : imposé par ed:langage("sql"), sinon d'après l'extension .sql.
+  if doc.lang.len > 0: doc.lang == "sql" else: doc.path.toLowerAscii.endsWith(".sql")
+
 proc analyze(doc: Document) =
   if doc.analyzed: return
   var state = lsNormal
   var depth = 0
   doc.tokens.setLen(doc.lines.len)
-  for i, l in doc.lines: doc.tokens[i] = lexLine(l, state, depth)
-  doc.csd = computeCsd(doc.lines, doc.tokens, doc.maxLevel)
+  if doc.isSql:
+    for i, l in doc.lines: doc.tokens[i] = lexSqlLine(l, state, depth)
+    doc.csd = @[]
+  else:
+    for i, l in doc.lines: doc.tokens[i] = lexLine(l, state, depth)
+    doc.csd = computeCsd(doc.lines, doc.tokens, doc.maxLevel)
   doc.analyzed = true
 
 # document editing primitives
@@ -418,6 +427,7 @@ proc indentLines(doc: Document, dedent: bool) =
 
 proc toggleComment(doc: Document) =
   doc.pushUndo()
+  let mark = if doc.isSql: "--" else: "&&"
   let (a, b) = doc.selectedLines
   var allCommented = true
   var minInd = high(int)
@@ -426,7 +436,7 @@ proc toggleComment(doc: Document) =
     let ind = leadingSpaces(s)
     if ind >= s.len: continue
     minInd = min(minInd, ind)
-    if not s[ind .. ^1].startsWith("&&"): allCommented = false
+    if not s[ind .. ^1].startsWith(mark): allCommented = false
   if minInd == high(int): return
   for l in a .. b:
     let s = doc.lines[l]
@@ -436,7 +446,7 @@ proc toggleComment(doc: Document) =
       let n = if ind + 2 < s.len and s[ind + 2] == ' ': 3 else: 2
       doc.lines[l] = s[0 ..< ind] & s[ind + n .. ^1]
     else:
-      doc.lines[l] = s[0 ..< minInd] & "&& " & s[minInd .. ^1]
+      doc.lines[l] = s[0 ..< minInd] & mark & " " & s[minInd .. ^1]
   doc.clampCursor()
   doc.changed()
 
@@ -459,7 +469,7 @@ proc newline(doc: Document) =
   var first = ""
   for c in bs:
     if c.isAlphaAscii: first.add c else: break
-  var opens = first in ["si", "sinonsi", "sinon", "tantque", "faire", "cas", "autrement", "pour",
+  var opens = not doc.isSql and first in ["si", "sinonsi", "sinon", "tantque", "faire", "cas", "autrement", "pour",
                         "parcourir", "essayer", "capturer", "procedure", "fonction"] or
               bs.endsWith("{") or bs.endsWith("(")
   if first == "faire" and not (bs.contains(" tantque") or bs.contains(" cas")): opens = false
@@ -1482,7 +1492,23 @@ proc openCompletion(ed: CodeEditor) =
     if lbl.len > 0 and lbl notin seen:
       seen.incl lbl
       items.add CompletionItem(label: lbl, detail: det, kind: k)
-  if sep == ':':
+  if d.isSql:
+    # SQL : après « x. », les noms du catalogue préfixés par x ; sinon mots-clés,
+    # types, fonctions DuckDB et noms fournis par le programme (ed:noms).
+    if sep == '.' and a >= 2:
+      var b = a - 1
+      while b > 0 and line[b - 1].isWordChar: dec b
+      let owner = line[b ..< a - 1].toLowerAscii & "."
+      for n in ed.projectNames:
+        if n.toLowerAscii.startsWith(owner) and n.len > owner.len: addItem(n[owner.len .. ^1], n, 6)
+    else:
+      for n in ed.projectNames:
+        if '.' notin n: addItem(n, "catalogue", 6)
+      for k in SqlKeywords: addItem(k.toUpperAscii, "mot-clé SQL", 14)
+      for k in SqlTypes: addItem(k.toUpperAscii, "type", 7)
+      for f in SqlFunctions: addItem(f, "fonction", 3)
+      for n in d.identsOf(): addItem(n, "fichier", 6)
+  elif sep == ':':
     for e in methodEntries(): addItem(e.name, e.signature, 2)
   elif sep == '.' and a >= 2:
     var b = a - 1
@@ -1760,6 +1786,21 @@ proc editorSetFontSize*(id: ControlId, size: float) =
 
 proc editorSetProjectNames*(id: ControlId, names: seq[string]) =
   withControl(id, CodeEditor, ed): ed.projectNames = names
+
+proc editorSetLanguage*(id: ControlId, uid: int, lang: string) =
+  ## Langage d'un document : "sql", "lexis", ou "" (d'après l'extension).
+  withControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
+        d.lang = lang
+        d.analyzed = false
+        markDirty(ed)
+
+proc editorLanguage*(id: ControlId, uid: int): string =
+  readControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
+        return (if d.isSql: "sql" else: "lexis")
 
 proc editorFlush*(id: ControlId) =
   ## Compatibilité : les signaux sont émis directement.

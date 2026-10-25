@@ -1,0 +1,47 @@
+{
+  "type": "postgres",
+  "libelle": "PostgreSQL",
+  "categorie": "Bases",
+  "sigle": "PG",
+  "couleur": "#3B82F6",
+  "mode": "catalogue",
+  "extension": "postgres",
+  "parametres": [
+    {
+      "nom": "hote",
+      "libelle": "Hôte",
+      "defaut": "localhost"
+    },
+    {
+      "nom": "port",
+      "libelle": "Port",
+      "defaut": "5432"
+    },
+    {
+      "nom": "base",
+      "libelle": "Base",
+      "defaut": "postgres"
+    },
+    {
+      "nom": "utilisateur",
+      "libelle": "Utilisateur",
+      "defaut": "postgres"
+    },
+    {
+      "nom": "motdepasse",
+      "libelle": "Mot de passe",
+      "defaut": "",
+      "secret": true
+    }
+  ],
+  "options": [
+    {
+      "nom": "lecture",
+      "libelle": "Lecture seule",
+      "defaut": true
+    }
+  ],
+  "attacher": [
+    "ATTACH 'host={hote} port={port} dbname={base} user={utilisateur} password={motdepasse}' AS {alias} (TYPE postgres{si_lecture:, READ_ONLY})"
+  ]
+}

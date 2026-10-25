@@ -14,7 +14,7 @@ rayons = {
     {reference = "CLA-011", article = "Pochettes perforées (100)", quantite = 120, prix = 5.4}}}}
 
 r = rapport.début("stock.pdf")
-r.entête("entete", {magasin = "Papeterie du Port — Brest"})
+r.entête("entete", {magasin = "Papeterie du Port - Brest"})
 r.pied("pied", {magasin = "Papeterie du Port"})
 r.ajoute("colonnes", {})
 

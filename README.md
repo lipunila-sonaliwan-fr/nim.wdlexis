@@ -90,6 +90,7 @@ wdlexis/
     webview/             pages web : bonjour, Lexis+ -> JS, JS -> Lexis+, application
     formulaire/          fiche client dessinée avec le concepteur de formulaires
     etats/               facture PDF de deux pages (éditeur d'états, paquet rapport)
+    duckdbstudio/        atelier DuckDB : connexions, SQL, profil, recommandations, schéma
   tests/                 tests du langage (sans interface graphique) ;
                          tests/firebird : liaison Firebird testée avec un client simulé ;
                          tests/webview : pont webview testé avec une bibliothèque simulée

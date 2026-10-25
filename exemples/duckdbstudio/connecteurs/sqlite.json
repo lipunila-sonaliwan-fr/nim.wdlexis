@@ -1,0 +1,20 @@
+{
+  "type": "sqlite",
+  "libelle": "SQLite",
+  "categorie": "Bases",
+  "sigle": "SL",
+  "couleur": "#60A5FA",
+  "mode": "catalogue",
+  "extension": "sqlite",
+  "parametres": [
+    {
+      "nom": "fichier",
+      "libelle": "Fichier SQLite",
+      "defaut": "",
+      "fichier": true
+    }
+  ],
+  "attacher": [
+    "ATTACH '{fichier}' AS {alias} (TYPE sqlite)"
+  ]
+}

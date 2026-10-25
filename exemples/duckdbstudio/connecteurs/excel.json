@@ -1,0 +1,23 @@
+{
+  "type": "excel",
+  "libelle": "Classeurs Excel",
+  "categorie": "Fichiers",
+  "sigle": "XL",
+  "couleur": "#16A34A",
+  "mode": "fichiers",
+  "extension": "excel",
+  "parametres": [
+    {
+      "nom": "dossier",
+      "libelle": "Dossier",
+      "defaut": ".",
+      "dossier": true
+    },
+    {
+      "nom": "motif",
+      "libelle": "Motif",
+      "defaut": "*.xlsx"
+    }
+  ],
+  "lecteur": "read_xlsx('{chemin}')"
+}

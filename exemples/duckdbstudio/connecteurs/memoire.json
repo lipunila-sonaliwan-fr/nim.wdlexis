@@ -1,0 +1,12 @@
+{
+  "type": "memoire",
+  "libelle": "DuckDB (mémoire)",
+  "categorie": "Bases",
+  "sigle": "MM",
+  "couleur": "#F5B83D",
+  "mode": "catalogue",
+  "parametres": [],
+  "attacher": [
+    "ATTACH ':memory:' AS {alias}"
+  ]
+}

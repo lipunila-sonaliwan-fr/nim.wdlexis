@@ -1,0 +1,22 @@
+{
+  "type": "json",
+  "libelle": "Fichiers JSON",
+  "categorie": "Fichiers",
+  "sigle": "JS",
+  "couleur": "#84CC16",
+  "mode": "fichiers",
+  "parametres": [
+    {
+      "nom": "dossier",
+      "libelle": "Dossier",
+      "defaut": ".",
+      "dossier": true
+    },
+    {
+      "nom": "motif",
+      "libelle": "Motif",
+      "defaut": "*.json"
+    }
+  ],
+  "lecteur": "read_json_auto('{chemin}')"
+}

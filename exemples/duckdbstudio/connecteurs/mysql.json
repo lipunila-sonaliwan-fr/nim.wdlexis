@@ -1,0 +1,47 @@
+{
+  "type": "mysql",
+  "libelle": "MySQL / MariaDB",
+  "categorie": "Bases",
+  "sigle": "MY",
+  "couleur": "#0EA5E9",
+  "mode": "catalogue",
+  "extension": "mysql",
+  "parametres": [
+    {
+      "nom": "hote",
+      "libelle": "Hôte",
+      "defaut": "localhost"
+    },
+    {
+      "nom": "port",
+      "libelle": "Port",
+      "defaut": "3306"
+    },
+    {
+      "nom": "base",
+      "libelle": "Base",
+      "defaut": ""
+    },
+    {
+      "nom": "utilisateur",
+      "libelle": "Utilisateur",
+      "defaut": "root"
+    },
+    {
+      "nom": "motdepasse",
+      "libelle": "Mot de passe",
+      "defaut": "",
+      "secret": true
+    }
+  ],
+  "options": [
+    {
+      "nom": "lecture",
+      "libelle": "Lecture seule",
+      "defaut": true
+    }
+  ],
+  "attacher": [
+    "ATTACH 'host={hote} port={port} database={base} user={utilisateur} password={motdepasse}' AS {alias} (TYPE mysql{si_lecture:, READ_ONLY})"
+  ]
+}

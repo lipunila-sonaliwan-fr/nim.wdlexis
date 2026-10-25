@@ -1152,6 +1152,49 @@ PDF sont natifs (mêmes fichiers `etat_<nom>.prg` que l'atelier natif) ; la
 fenêtre, la hiérarchie, l'inspecteur, le renommage, l'aperçu et l'insertion du
 code sont en Lexis+.
 
+### 8.5 DuckDB Studio, un atelier SQL écrit en Lexis+
+
+`exemples/duckdbstudio` est un atelier de conception, d'administration et
+d'optimisation autour de DuckDB, bâti comme l'atelier Lexis+ : explorateur des
+connexions à gauche (avec une palette d'outils et l'historique), vues en
+onglets à droite (**Requêtes**, **Schéma**, **Profil**, **Recommandations**,
+**Cartographie**, **Tableau de bord**), résultats et messages en bas.
+
+```
+wdlexisrt exemples/duckdbstudio/principal.prg [dossier_du_projet]
+```
+
+Le moteur est une base DuckDB en mémoire ; chaque connexion y est attachée sous
+son nom, si bien qu'une requête peut joindre plusieurs sources. Les connecteurs
+sont des greffons JSON (`connecteurs/*.json` : DuckDB, mémoire, Quack, SQLite,
+PostgreSQL, MySQL, SQL Server, ODBC, CSV, Parquet, JSON, Excel) ; on en ajoute
+en déposant un fichier dans le dossier `connecteurs` du programme ou du projet.
+Le menu *Fichier ▸ Créer la base de démonstration* prépare une base de 1,5
+million de ventes, un fichier CSV et un script d'exemples (dont une requête
+fédérée).
+
+| Fichier | Rôle |
+| --- | --- |
+| `principal.prg` | fenêtre, barre d'outils, réglages, démarrage |
+| `projet.prg` | projet (`duckstudio.json`), historique, scripts |
+| `connecteurs.prg` | greffons, attachement, introspection et cache du catalogue (`.duckstudio/`) |
+| `connexions.prg` | concepteur de connexions (paramètres, options, aperçu de l'ATTACH, test et ping) |
+| `explorateur.prg` | arbre connexions / schémas / tables / vues / macros ; palette |
+| `requetes.prg` | éditeur SQL, exécution, résultats, validation pendant la frappe, export |
+| `profil.prg` | `EXPLAIN (ANALYZE, FORMAT JSON)` en graphe, tableau et histogramme |
+| `expertise.prg` | moteur de règles : recommandations Critique / Important / Opportunité, mutualisation, gains estimés |
+| `schema.prg` | concepteur entité-relation, modèle → SQL et script → modèle, analyse d'impact |
+| `carto.prg` | cartographie des sources, tables et vues (dépendances fédérées) |
+| `tableau.prg` | tableau de bord technique |
+| `menus.prg`, `demo.prg` | menus et raccourcis ; base de démonstration |
+
+Il s'appuie sur trois briques natives : le mode SQL de `ui.editeur`
+(`ed:langage("sql")`, `ed:noms(...)` pour la complétion des tables et colonnes),
+le contrôle `ui.diagramme` (schéma, plan d'exécution, cartographie) et la
+fonction `requete`. Les mots de passe saisis ne sont jamais écrits dans le
+projet : ils sont redemandés à la connexion suivante. Voir `LISEZMOI.md` dans le
+dossier de l'exemple.
+
 ## 9. Le runtime
 
 ```
@@ -1891,6 +1934,15 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `markdown:position()` | Défilement actuel en pixels depuis le haut. |
 | `c:detruire()` | Retire le contrôle (et son contenu) de sa fenêtre. |
 | `editeur:fixertexte(texte, [uid], [enregistre])` | Remplace le texte d'un document (annulable) ; `enregistre = vrai` le marque enregistré. |
+| `editeur:langage([langage], [uid])` | Langage d'un document : `"sql"` (coloration, complétion et commentaires `--` SQL) ou `"lexis"` ; `""` : d'après l'extension (`.sql` = SQL). Sans argument : langage du document actif. |
+| `editeur:noms(liste)` | Noms proposés par la complétion ; en SQL, `"table"` et `"table.colonne"` (les colonnes sont proposées après `table.`). |
+| `interface.diagramme([{modifiable=, direction=}])` | Canevas de diagramme (nœuds et liens) : glisser un nœud le déplace, glisser le fond déplace la vue, la molette zoome ; en mode `modifiable`, glisser depuis la pastille d'un bord (titre ou ligne) vers un autre nœud crée un lien (`surchangement`, `d:action()`), Suppr demande une suppression. `direction` : `droite` (défaut) ou `bas`. `surselection` : `ev.texte` = id du nœud, `"lien:<id>"` ou `""` ; `ev.index` = ligne. |
+| `diagramme:noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=}` | Ajoute ou met à jour un nœud. `lignes` : textes ou `{texte=, detail=, marque=}` (marque : PK, FK…) ; `forme` : `table` (défaut) ou `boite` ; `pastille` : texte en haut à droite ; `jauge` : 0 à 1 ; sans `x`/`y`, placé à droite de l'existant. |
+| `diagramme:lien{id=, de=, a=, deligne=, aligne=, libelle=, fleche=, pointille=, couleur=, epaisseur=}` | Ajoute ou met à jour un lien (`deligne`, `aligne` : lignes de départ et d'arrivée, 0 = le nœud) ; renvoie son id. |
+| `diagramme:supprimer(id)`, `:vider()`, `:noeuds()`, `:liens()` | Supprime un nœud (et ses liens) ou un lien ; tout ; liste `{id, titre, x, y, largeur, hauteur}` ; liste `{id, de, a, deligne, aligne, libelle}`. |
+| `diagramme:selection()`, `:selectionner([id], [ligne])` | `{genre = noeud \| lien \| "", id, ligne}` ; sélectionne un nœud et l'amène dans la vue. |
+| `diagramme:action()` | Dernière action de l'utilisateur (`surchangement`) : `{action = deplace \| lien \| supprimer, id, de, a, deligne, aligne}`. |
+| `diagramme:disposer([direction])`, `:ajuster()`, `:zoom([facteur])`, `:position(id, x, y)`, `:modifiable([b])` | Disposition automatique en couches ; tout dans la vue ; zoom (renvoie le %) ; place un nœud ; autorise ou non les modifications. |
 | `interface.concepteur{projet=, fichier= \| nom=}` | Canevas du concepteur de formulaires (aperçu réel, glisser-déposer, repères, poignées) ; `fichier` : un `form_<nom>.prg` à rouvrir, `nom` : un formulaire neuf. `surselection` : élément sélectionné ; `surchangement` : dessin modifié à la souris ou au clavier. |
 | `interface.palette(concepteur)` | Palette du concepteur (glisser ou cliquer pour ajouter). |
 | `concepteur:nom()`, `concepteur:code()`, `concepteur:codeassocie([chemin])` | Nom du formulaire ; texte de `form_<nom>.prg` ; fichier de code associé. |

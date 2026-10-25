@@ -1,0 +1,22 @@
+{
+  "type": "parquet",
+  "libelle": "Fichiers Parquet",
+  "categorie": "Fichiers",
+  "sigle": "PQ",
+  "couleur": "#14B8A6",
+  "mode": "fichiers",
+  "parametres": [
+    {
+      "nom": "dossier",
+      "libelle": "Dossier",
+      "defaut": ".",
+      "dossier": true
+    },
+    {
+      "nom": "motif",
+      "libelle": "Motif",
+      "defaut": "*.parquet"
+    }
+  ],
+  "lecteur": "read_parquet('{chemin}')"
+}
