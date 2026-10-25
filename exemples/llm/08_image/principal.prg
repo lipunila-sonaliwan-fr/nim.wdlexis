@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 08 — Recevoir la réponse sous forme d'image.
+&& Exemple LLM 08 - Recevoir la réponse sous forme d'image.
 &&
 &&   wdlexisrt exemples/llm/08_image/principal.prg modele.gguf
 &&

@@ -142,7 +142,7 @@ proc loadWebview(extra: openArray[string]): bool =
                   "ou indiquez son chemin dans la variable WDLEXIS_WEBVIEW"
         when defined(linux):
           wvError.add " (elle demande WebKitGTK 4.1 : paquet libwebkit2gtk-4.1-0)"
-        if detail.len > 0: wvError = "bibliothèque webview présente mais inutilisable — " & detail
+        if detail.len > 0: wvError = "bibliothèque webview présente mais inutilisable - " & detail
         return false
       template sym(field: untyped, name: string) =
         let p = lib.symAddr(name)

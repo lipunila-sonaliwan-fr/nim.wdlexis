@@ -1,7 +1,7 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026 (adaptation)
 # Portions dérivées de ggml / llama.cpp
 # The ggml authors (© 2023-2026) - LICENSES/MIT-ggml.txt
-# nimllm/quant — formats de poids GGML (F32, F16, BF16, Q4_0, Q4_1, Q5_0,
+# nimllm/quant - formats de poids GGML (F32, F16, BF16, Q4_0, Q4_1, Q5_0,
 # Q5_1, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K) : déquantification,
 # quantification et produits scalaires.
 #

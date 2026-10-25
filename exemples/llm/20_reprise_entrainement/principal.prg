@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 20 — Entraînement long : points de sauvegarde, reprise, suivi de
+&& Exemple LLM 20 - Entraînement long : points de sauvegarde, reprise, suivi de
 && la validation, journal CSV et accumulation de gradients.
 &&
 &&   wdlexisrt exemples/llm/20_reprise_entrainement/principal.prg [corpus.txt]

@@ -1,7 +1,7 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026 (adaptation)
 # Portions dérivées de ggml / llama.cpp
 # The ggml authors (© 2023-2026) - LICENSES/MIT-ggml.txt
-# nimllm/model — moteur d'inférence Transformer (architectures llama,
+# nimllm/model - moteur d'inférence Transformer (architectures llama,
 # mistral, qwen2, qwen3) écrit entièrement en Nim.
 #
 # * `LlmModel` : poids (mappés depuis le GGUF) + tokeniseur + configuration ;

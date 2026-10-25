@@ -29,7 +29,7 @@ async function ouvrir(browser, { url, html, binds = {}, lexisSide }) {
 (async () => {
   const browser = await chromium.launch();
 
-  console.log('— script window.lexis');
+  console.log('- script window.lexis');
   {
     const { page, recu } = await ouvrir(browser, { html: '<p id=x>x</p><script>function add(a,b){return a+b}; window.app={k:3,get(){return this.k}}; async function lent(){await new Promise(r=>setTimeout(r,50)); return {v:1}}</script>' });
     verifier(recu.some(a => a[0] === 'pret'), 'événement pret envoyé');
@@ -59,7 +59,7 @@ async function ouvrir(browser, { url, html, binds = {}, lexisSide }) {
     await page.close();
   }
 
-  console.log('— 01_bonjour');
+  console.log('- 01_bonjour');
   {
     const prg = fs.readFileSync(R + '/exemples/webview/01_bonjour/principal.prg', 'utf8');
     const html = prg.split('retourner [[')[1].split(']]')[0];
@@ -72,7 +72,7 @@ async function ouvrir(browser, { url, html, binds = {}, lexisSide }) {
     await page.close();
   }
 
-  console.log('— 02_lexis_vers_js');
+  console.log('- 02_lexis_vers_js');
   {
     const { page, recu } = await ouvrir(browser, { url: 'file://' + R + '/exemples/webview/02_lexis_vers_js/page.htm' });
     verifier(recu.some(a => a[0] === 'journal' && a[2] === 'page.htm chargée'), 'console.log de la page -> journal');
@@ -105,7 +105,7 @@ window.lexis._emettre("horloge",{"heure":"16:06:29","date":"2026-10-16"});`);
     await page.close();
   }
 
-  console.log('— 03_js_vers_lexis');
+  console.log('- 03_js_vers_lexis');
   {
     const taux = { normal: 20, intermediaire: 10, reduit: 5.5 };
     const factures = [];
@@ -145,7 +145,7 @@ window.lexis._emettre("horloge",{"heure":"16:06:29","date":"2026-10-16"});`);
     await page.close();
   }
 
-  console.log('— 04_application');
+  console.log('- 04_application');
   {
     let taches = [], prochain = 1;
     let pageRef;

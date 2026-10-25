@@ -1,5 +1,5 @@
 && Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
-&& Exemple LLM 10 — Faire produire un fichier (CSV, code source, configuration...).
+&& Exemple LLM 10 - Faire produire un fichier (CSV, code source, configuration...).
 &&
 &&   wdlexisrt exemples/llm/10_fichier/principal.prg modele.gguf
 

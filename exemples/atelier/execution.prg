@@ -142,7 +142,7 @@ procedure PAUSE(ev)
   ETAT_BOUTONS("pause")
   lpile:vider()
   pour chaque f dans ev.pile
-    lpile:ajouter(f.nom + "  —  " + fichier.nom(f.source) + ":" + f.ligne)
+    lpile:ajouter(f.nom + "  -  " + fichier.nom(f.source) + ":" + f.ligne)
   suivant
   MONTRER_CADRE(1)
   bas.valeur = 3
@@ -282,5 +282,5 @@ procedure ARGUMENTS
   s.arguments = a
   s.principal = rogner(p)
   ECRIRE_SESSION(s)
-  etat.libelle = "Arguments : " + sisinon(a = "", "aucun", a) + " — principal : " + FICHIER_PRINCIPAL()
+  etat.libelle = "Arguments : " + sisinon(a = "", "aucun", a) + " - principal : " + FICHIER_PRINCIPAL()
 retourner

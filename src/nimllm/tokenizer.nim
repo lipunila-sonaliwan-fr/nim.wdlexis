@@ -3,7 +3,7 @@
 # The ggml authors (© 2023-2026) - LICENSES/MIT-ggml.txt
 # Correspondance octets ↔ caractères Unicode du BPE niveau octet (fonction bytes_to_unicode de GPT-2)
 # OpenAI (© 2019) - LICENSES/MIT-OpenAI-GPT2.txt
-# nimllm/tokenizer — tokeniseurs compatibles llama.cpp :
+# nimllm/tokenizer - tokeniseurs compatibles llama.cpp :
 #
 # * **BPE** niveau octet (GPT-2, Llama 3, Qwen 2...) : `tokenizer.ggml.model = "gpt2"`
 # * **SPM** (SentencePiece, Llama 2, Mistral...) : `tokenizer.ggml.model = "llama"`

@@ -55,7 +55,7 @@ procedure GENERER_DIALOGUE
   gendlg = ui.fenetre{titre = "Générer l'application", largeur = 640, hauteur = 580, sombre = reglages.sombre}
   gendlg.surfermeture = @GEN_FERMETURE
   genctl = {}
-  gendlg:ajouter(ui.etiquette("Projet : " + fichier.nom(dossier) + "   —   principal : " + FICHIER_PRINCIPAL()))
+  gendlg:ajouter(ui.etiquette("Projet : " + fichier.nom(dossier) + "   -   principal : " + FICHIER_PRINCIPAL()))
   locale corps = gendlg:ajouter(ui.rangee())
   locale cg = corps:ajouter(ui.colonne())
   cg.poids = 1

@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 15 — Les bases de l'apprentissage : tenseurs, gradients et
+&& Exemple LLM 15 - Les bases de l'apprentissage : tenseurs, gradients et
 && optimiseur, sur deux petits problèmes (régression linéaire et XOR).
 &&
 &&   wdlexisrt exemples/llm/15_autograd/principal.prg

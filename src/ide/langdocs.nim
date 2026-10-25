@@ -70,15 +70,15 @@ proc apiSummary*(name: string, wantMethod = false, owner = ""): string =
   if es.len == 0 and owner.len > 0: es = apiLookup(name, wantMethod)
   if es.len == 0:
     if name.toLowerAscii in UiHandlers:
-      return name.toLowerAscii & " = @PROCEDURE — gestionnaire d'événement de l'interface (procedure P(ev) : ev.genre, ev.x, ev.y, ev.texte, ev.index, ev:arreter())"
+      return name.toLowerAscii & " = @PROCEDURE - gestionnaire d'événement de l'interface (procedure P(ev) : ev.genre, ev.x, ev.y, ev.texte, ev.index, ev:arreter())"
     if name.toLowerAscii == "sisinon":
-      return "sisinon(condition, si_vrai, si_faux) — valeur selon la condition ; seule la branche choisie est calculée"
+      return "sisinon(condition, si_vrai, si_faux) - valeur selon la condition ; seule la branche choisie est calculée"
     return ""
   var sigs: seq[string]
   for e in es:
     if e.signature notin sigs: sigs.add e.signature
   if sigs.len > 3: sigs.setLen(3)
-  sigs.join("  |  ") & "  —  " & es[0].doc
+  sigs.join("  |  ") & "  -  " & es[0].doc
 
 proc membersOf*(owner: string): seq[ApiDoc] =
   ## Fonctions « owner.f » d'un paquet.

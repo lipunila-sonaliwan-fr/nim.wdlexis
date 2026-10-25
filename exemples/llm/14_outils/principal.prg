@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 14 — Donner des « outils » au modèle (appel de fonctions).
+&& Exemple LLM 14 - Donner des « outils » au modèle (appel de fonctions).
 &&
 &&   wdlexisrt exemples/llm/14_outils/principal.prg modele.gguf
 &&

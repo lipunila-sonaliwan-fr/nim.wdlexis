@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 18 — Spécialiser un modèle existant (ex. Llama 3.2 1B Instruct) avec
+&& Exemple LLM 18 - Spécialiser un modèle existant (ex. Llama 3.2 1B Instruct) avec
 && LoRA, à partir d'un fichier de questions/réponses, puis utiliser le résultat.
 &&
 &&   wdlexisrt exemples/llm/18_lora/principal.prg modele.gguf [donnees.jsonl]

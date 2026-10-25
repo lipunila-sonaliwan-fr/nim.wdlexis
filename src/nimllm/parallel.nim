@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/parallel — pool de threads minimaliste (aucune dépendance externe).
+# nimllm/parallel - pool de threads minimaliste (aucune dépendance externe).
 #
 # Toutes les opérations lourdes (produits matriciels, attention...) passent par
 # `parallelFor`, qui découpe un intervalle `0..<n` en morceaux répartis sur

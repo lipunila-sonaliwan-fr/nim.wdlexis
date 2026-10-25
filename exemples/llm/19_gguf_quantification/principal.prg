@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 19 — Inspecter un fichier GGUF et le (re)quantifier.
+&& Exemple LLM 19 - Inspecter un fichier GGUF et le (re)quantifier.
 &&
 &&   wdlexisrt exemples/llm/19_gguf_quantification/principal.prg modele.gguf [type]
 &&

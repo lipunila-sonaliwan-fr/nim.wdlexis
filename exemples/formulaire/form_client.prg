@@ -1,4 +1,4 @@
-&& Formulaire « client » — généré par le concepteur de wdlexis+.
+&& Formulaire « client » - généré par le concepteur de wdlexis+.
 && Régénéré à chaque modification dans le concepteur : modifiez le dessin là-bas, pas ce fichier.
 && FORMCLIENT_OUVRIR() ouvre la fenêtre et renvoie ses contrôles, aussi rangés dans la
 && variable globale formclient (formclient.fenetre, formclient.titre…).

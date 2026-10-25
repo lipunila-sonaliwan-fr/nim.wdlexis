@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 13 — Résumer un document plus long que le contexte (« map-reduce »).
+&& Exemple LLM 13 - Résumer un document plus long que le contexte (« map-reduce »).
 &&
 &&   wdlexisrt exemples/llm/13_resume_long/principal.prg modele.gguf document.txt
 &&

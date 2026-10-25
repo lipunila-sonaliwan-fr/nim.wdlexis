@@ -1,4 +1,4 @@
-MIT License — mention reproduite pour la fonction bytes_to_unicode du dépôt openai/gpt-2 (publiée sous une « Modified MIT License », voir https://github.com/openai/gpt-2/blob/master/LICENSE)
+MIT License - mention reproduite pour la fonction bytes_to_unicode du dépôt openai/gpt-2 (publiée sous une « Modified MIT License », voir https://github.com/openai/gpt-2/blob/master/LICENSE)
 
 Software Copyright (c) 2019 OpenAI
 

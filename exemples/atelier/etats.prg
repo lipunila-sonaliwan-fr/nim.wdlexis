@@ -161,7 +161,7 @@ procedure ET_ENREGISTRER
   si uid <> nul
     ed:fixertexte(code, uid, vrai)
   finsi
-  etdlg.titre = "Éditeur d'états — etat_" + nom + ".prg"
+  etdlg.titre = "Éditeur d'états - etat_" + nom + ".prg"
   ET_ETAT_MESSAGE("Enregistré : etat_" + nom + ".prg  ·  rapport.debut(" + car(34) + nom + ".pdf" + car(34) + ")")
   si nouveau
     ARBRE_PROJET()
@@ -429,7 +429,7 @@ procedure ET_APERCU
     ET_ETAT_MESSAGE("Images illisibles : " + r.erreurs)
   finsi
   && visionneuse PDF (PDFium) ; à défaut, le chemin du fichier
-  locale f = ui.fenetre{titre = "Aperçu — " + etcanevas:nom() + ".pdf", largeur = 860, hauteur = 860, ;
+  locale f = ui.fenetre{titre = "Aperçu - " + etcanevas:nom() + ".pdf", largeur = 860, hauteur = 860, ;
                         sombre = reglages.sombre}
   locale v = f:ajouter(ui.pdf())
   v.poids = 1

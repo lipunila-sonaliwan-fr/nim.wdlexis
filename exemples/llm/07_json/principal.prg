@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 07 — Obtenir une réponse structurée en JSON (extraction d'informations).
+&& Exemple LLM 07 - Obtenir une réponse structurée en JSON (extraction d'informations).
 &&
 &&   wdlexisrt exemples/llm/07_json/principal.prg modele.gguf
 &&

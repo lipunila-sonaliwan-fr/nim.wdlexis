@@ -1,7 +1,7 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026 (adaptation)
 # Portions dérivées de ggml / llama.cpp :
 # The ggml authors (© 2023-2026) - LICENSES/MIT-ggml.txt
-# nimllm/nn — Transformer entraînable (architecture Llama) et adaptateurs LoRA.
+# nimllm/nn - Transformer entraînable (architecture Llama) et adaptateurs LoRA.
 #
 # * `newTransformer` : crée un modèle neuf initialisé aléatoirement ;
 # * `loadForTraining` : charge un GGUF existant, soit entièrement entraînable

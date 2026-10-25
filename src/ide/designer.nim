@@ -1088,7 +1088,7 @@ proc saveForm() =
     return
   let uid = docUid(path)
   if uid >= 0: discard editorSetText(dEditor, uid, code, modified = false)
-  dWin.caption = "Concepteur de formulaires — " & formFileName(name) & " — " & extractFilename(dCodePath)
+  dWin.caption = "Concepteur de formulaires - " & formFileName(name) & " - " & extractFilename(dCodePath)
   let missing = missingHandlers()
   if missing.len > 0:
     status("⚠ procédure(s) introuvable(s) dans le projet : " & missing.join(", "))

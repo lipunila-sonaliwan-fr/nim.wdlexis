@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 04 — Un assistant complet dans la console (de l'atelier ou du terminal).
+&& Exemple LLM 04 - Un assistant complet dans la console (de l'atelier ou du terminal).
 &&
 &&   wdlexisrt exemples/llm/04_chat_terminal/principal.prg modele.gguf
 &&

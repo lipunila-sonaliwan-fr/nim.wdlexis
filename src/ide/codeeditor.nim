@@ -772,7 +772,7 @@ proc drawWelcome(ed: CodeEditor, d: Drawing, t: Theme, colors: EditorColors) =
   let b = ed.bodyRect
   d.fillRect(b, colors.bg)
   let lines = ["wdlexis+ [S]tudio", "Développez naturellement vos applications métier",
-               "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr — metalab (at) sonaliwan.fr", "",
+               "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr - metalab (at) sonaliwan.fr", "",
                "Ctrl+N  nouveau fichier      Ctrl+O  ouvrir",
                "Ctrl+S  enregistrer          Ctrl+F  rechercher",
                "Ctrl+R  exécuter   F5  déboguer   F9  point d'arrêt   F10 / F11  pas à pas"]

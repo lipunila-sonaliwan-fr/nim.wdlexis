@@ -283,7 +283,7 @@ proc generationDialog*(root, mainRel: string, theme: Theme, appDir = getAppDir()
   var owner: Window
   guarded:
     owner = activeWindow
-    let win = newWindow("Générer l'application — " & info.name, 780, 700, genDispatch, theme, lkBorder)
+    let win = newWindow("Générer l'application - " & info.name, 780, 700, genDispatch, theme, lkBorder)
     win.resizable = true
     win.isModal = true
     win.modalFor = owner

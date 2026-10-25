@@ -1,5 +1,5 @@
 Lexis+ &
-wdlexis+ — l'atelier du langage Lexis+<br/>
+wdlexis+ - l'atelier du langage Lexis+<br/>
 © 2026 Jean‑Marc "jihem"Quéré, sonaliwan.fr<br/>
 SIRET 13033319800013<br/>
 Distribué sous licence CC BY‑NC‑SA 4.0.<br/>
@@ -10,12 +10,12 @@ contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
 
 [![](wdlexis.png)]()
 
-# wdlexis+ — l'atelier du langage Lexis+
+# wdlexis+ - l'atelier du langage Lexis+
 
-**Lexis+ — Développez naturellement vos applications métier**
+**Lexis+ - Développez naturellement vos applications métier**
 
 Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr<br/>
-SIRET 13033319800013 — contact : metalab (at) sonaliwan.fr<br/>
+SIRET 13033319800013 - contact : metalab (at) sonaliwan.fr<br/>
 
 wdlexis+ est le langage du serveur wdGestion V : instructions en français, procédures,
 tables et métatables, base de données DuckDB manipulée en SQL ou enregistrement

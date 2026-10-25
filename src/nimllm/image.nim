@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/image — images matricielles minimalistes et rendu SVG.
+# nimllm/image - images matricielles minimalistes et rendu SVG.
 #
 # * `Image` : tampon RVB 8 bits, écriture BMP (24 bits) et PPM ;
 # * `Canvas` : primitives de dessin (rectangles, cercles, polygones, traits) ;

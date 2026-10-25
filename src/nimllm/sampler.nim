@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/sampler — choix du token suivant à partir des logits.
+# nimllm/sampler - choix du token suivant à partir des logits.
 #
 # Chaîne appliquée (dans l'ordre) : pénalités de répétition -> biais ->
 # température -> top-k -> top-p -> min-p -> tirage aléatoire.

@@ -1,4 +1,4 @@
-&& État « facture » — généré par l'éditeur d'états de wdlexis+.
+&& État « facture » - généré par l'éditeur d'états de wdlexis+.
 && Régénéré à chaque modification dans l'éditeur : modifiez le dessin là-bas, pas ce fichier.
 &&   r = rapport.debut("facture.pdf")
 &&   r.ajoute("zone", {variable = valeur, ...})       zones de l'état : entete, suite, colonnes, ligne, total, pied
@@ -135,7 +135,7 @@ retourner [[
           "w": 180.0,
           "h": 7.0,
           "props": {
-            "texte": "Facture n° {numero} — {client} (suite)",
+            "texte": "Facture n° {numero} - {client} (suite)",
             "taille": "10.0",
             "gras": "true"
           }
@@ -476,7 +476,7 @@ retourner [[
           "w": 120.0,
           "h": 5.0,
           "props": {
-            "texte": "{societe} — SIRET {siret}",
+            "texte": "{societe} - SIRET {siret}",
             "taille": "7.5"
           }
         },

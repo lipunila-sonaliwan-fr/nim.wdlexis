@@ -1,7 +1,7 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026 (adaptation)
 # Portions dérivées de ggml / llama.cpp
 # The ggml authors (© 2023-2026) - LICENSES/MIT-ggml.txt
-# nimllm/gguf — lecture (mmap) et écriture de fichiers GGUF v2/v3.
+# nimllm/gguf - lecture (mmap) et écriture de fichiers GGUF v2/v3.
 #
 # GGUF est le format de fichier de llama.cpp : un en-tête de métadonnées
 # clé/valeur suivi des descriptions de tenseurs puis des données alignées.
@@ -156,7 +156,7 @@ proc openGguf*(path: string): GgufFile =
     let t = int(rd[uint32](r))
     if not isValidType(t):
       raise newException(GgufError, "type de tenseur inconnu (" & $t & ") pour " & ti.name &
-        " — formats IQ* non pris en charge")
+        " - formats IQ* non pris en charge")
     {.push warning[HoleEnumConv]: off.}
     ti.typ = GgmlType(t)
     {.pop.}
@@ -237,7 +237,7 @@ proc tensorF32*(g: GgufFile; name: string): seq[float32] =
 
 proc describe*(g: GgufFile; maxTensors = 10): string =
   # Résumé lisible (métadonnées + premiers tenseurs).
-  result.add "GGUF v" & $g.version & " — " & $g.kv.len & " métadonnées, " &
+  result.add "GGUF v" & $g.version & " - " & $g.kv.len & " métadonnées, " &
     $g.tensors.len & " tenseurs\n"
   for k, v in g.kv:
     result.add "  " & k & " = " & $v & "\n"

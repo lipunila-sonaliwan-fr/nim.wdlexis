@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 02 — Afficher la réponse au fil de l'eau (streaming) et mesurer la vitesse.
+&& Exemple LLM 02 - Afficher la réponse au fil de l'eau (streaming) et mesurer la vitesse.
 &&
 &&   wdlexisrt exemples/llm/02_flux/principal.prg modele.gguf
 

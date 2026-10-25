@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/chat — dialogue avec un modèle : contexte (prompt système),
+# nimllm/chat - dialogue avec un modèle : contexte (prompt système),
 # historique, pièces jointes, génération en flux et formats de réponse
 # (texte, Markdown, JSON, image SVG/BMP, audio WAV, fichier).
 

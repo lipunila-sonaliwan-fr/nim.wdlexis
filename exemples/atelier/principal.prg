@@ -39,7 +39,7 @@ etdlg = nul             && fenêtre de l'éditeur d'états
 etcanevas = nul         && son canevas (ui.etat)
 etctl = {}              && ses autres contrôles
 
-fen = ui.fenetre{titre = "wdlexis+ [Lexis+]", largeur = 1320, hauteur = 860, disposition = "bordure", ;
+fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.7.3", largeur = 1320, hauteur = 860, disposition = "bordure", ;
                  sombre = reglages.sombre}
 fen.surfermeture = @FERMETURE
 fen.surtouchebas = @TOUCHE_FENETRE      && F5, F9, F10, F11 depuis n'importe quel contrôle

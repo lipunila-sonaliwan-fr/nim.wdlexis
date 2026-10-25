@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 17 — Créer un nouveau modèle de langage de A à Z :
+&& Exemple LLM 17 - Créer un nouveau modèle de langage de A à Z :
 && données -> tokeniseur -> architecture -> pré-entraînement -> ajustement
 && au dialogue -> export GGUF -> conversation.
 &&

@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 09 — Recevoir la réponse sous forme de fichier audio (WAV).
+&& Exemple LLM 09 - Recevoir la réponse sous forme de fichier audio (WAV).
 &&
 &&   wdlexisrt exemples/llm/09_audio/principal.prg modele.gguf
 &&

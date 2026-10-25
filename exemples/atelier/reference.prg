@@ -121,7 +121,7 @@ fonction OPTION_MD(o)
   finsi
   locale k = rogner(gauche(o, p - 1))
   locale v = rogner(souschaine(o, p + 1))
-retourner "  - " + MDCODE(k) + sisinon(v = "", "", " — défaut " + MDCODE(v))
+retourner "  - " + MDCODE(k) + sisinon(v = "", "", " - défaut " + MDCODE(v))
 
 fonction PARAMETRES(sig)
   locale l = {}
@@ -149,16 +149,16 @@ fonction PARAMETRES(sig)
     finsi
     faire cas
     cas a = "..."
-      inserer(l, "- " + MDCODE("...") + " — nombre variable de valeurs")
+      inserer(l, "- " + MDCODE("...") + " - nombre variable de valeurs")
     cas commencepar(a, "{") et finitpar(a, "}")
       inserer(l, "- **Options** (table `{...}`" + sisinon(facultatif, ", facultative", "") + ") :")
       pour chaque o dans ARGUMENTS_TOP(souschaine(a, 2, #a - 2))
         inserer(l, OPTION_MD(o))
       suivant
     cas commencepar(a, "@")
-      inserer(l, "- " + MDCODE(a) + " — procédure passée par référence (`@NOM`)")
+      inserer(l, "- " + MDCODE(a) + " - procédure passée par référence (`@NOM`)")
     autrement
-      inserer(l, "- " + MDCODE(a) + sisinon(facultatif, " — *facultatif*", ""))
+      inserer(l, "- " + MDCODE(a) + sisinon(facultatif, " - *facultatif*", ""))
     fincas
   suivant
 retourner l
@@ -223,7 +223,7 @@ fonction FICHE_PAQUET(nom)
   inserer(md, "")
   locale fonctions = {}, methodes = {}
   pour chaque d dans lexis.documentation(nom)
-    locale l = "- " + MDCODE(d.signature) + " — " + MDTEXTE(decouper(d.description, ". ")[1])
+    locale l = "- " + MDCODE(d.signature) + " - " + MDTEXTE(decouper(d.description, ". ")[1])
     si d.methode
       inserer(methodes, l)
     sinon

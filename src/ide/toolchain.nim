@@ -924,7 +924,7 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
         else: (if t.isWindows: exeBase & ".exe" else: exeBase)
 
       # 2. transpilation du projet.
-      step(tag & " — transpilation du projet en C")
+      step(tag & " - transpilation du projet en C")
       let projetPath = work / "projet.c"
       writeFile(projetPath, projetC(info, s, t))
       hooks.log(lgOutput, "projet.c : " & formatSize(getFileSize(projetPath), includeSpace = true) &
@@ -935,7 +935,7 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
       checkCancel()
 
       # 3. compilation C.
-      step(tag & " — compilation C par Zig (" & $(m.files.len + 1) & " fichiers)")
+      step(tag & " - compilation C par Zig (" & $(m.files.len + 1) & " fichiers)")
       var cflags = @["-target", triple, "-c", "-w", "-O3"] & m.cflags & @["-I" & rtc / "include"]
       if t.isLinux: cflags.add "-fPIC"
       if t.isMac: cflags.add "-I" & rtc / "compat" / "darwin"
@@ -978,7 +978,7 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
       # 4. icône Windows (ressource liée à l'exécutable).
       var rcFile = ""
       if hasIcon and t.isWindows:
-        step(tag & " — icône Windows (.ico)")
+        step(tag & " - icône Windows (.ico)")
         writeFile(work / "app.ico", makeIco(iconSquare))
         rcFile = work / "app.rc"
         writeFile(rcFile, "1 ICON \"app.ico\"\n" &
@@ -991,7 +991,7 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
         stepDone("Icône Windows prête")
 
       # 5. édition des liens.
-      step(tag & " — édition des liens")
+      step(tag & " - édition des liens")
       let linked = work / outName
       let rsp = work / "objets.rsp"
       var rspText = ""
@@ -1023,7 +1023,7 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
       # 6. distribution.
       let distName = info.name & "-" & $t
       let stage = (if s.dist == dmFolder: outRoot / distName else: work / "stage" / distName)
-      step(tag & " — distribution (" & (if s.dist == dmFolder: "dossier" else:
+      step(tag & " - distribution (" & (if s.dist == dmFolder: "dossier" else:
                                       (if t.isWindows: "archive zip" else: "archive tar.gz")) & ")")
       removeDir(stage)
       createDir(stage)

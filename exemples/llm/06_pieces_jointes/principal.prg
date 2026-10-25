@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 06 — Poser une question accompagnée de pièces jointes.
+&& Exemple LLM 06 - Poser une question accompagnée de pièces jointes.
 &&
 &&   wdlexisrt exemples/llm/06_pieces_jointes/principal.prg modele.gguf
 &&

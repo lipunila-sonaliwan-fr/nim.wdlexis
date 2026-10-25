@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 16 — Entraîner son propre tokeniseur BPE (compatible llama.cpp).
+&& Exemple LLM 16 - Entraîner son propre tokeniseur BPE (compatible llama.cpp).
 &&
 &&   wdlexisrt exemples/llm/16_tokeniseur/principal.prg [corpus.txt]
 

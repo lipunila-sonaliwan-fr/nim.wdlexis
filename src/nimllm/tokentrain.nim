@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/tokentrain — entraînement d'un tokeniseur BPE niveau octet
+# nimllm/tokentrain - entraînement d'un tokeniseur BPE niveau octet
 # (même pré-découpage que Llama 3), compatible llama.cpp.
 
 import std/[tables, sets, heapqueue, sequtils]

@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 11 — Sous le capot : tokens, logits, échantillonnage manuel,
+&& Exemple LLM 11 - Sous le capot : tokens, logits, échantillonnage manuel,
 && complétion brute et gabarits de conversation.
 &&
 &&   wdlexisrt exemples/llm/11_bas_niveau/principal.prg modele.gguf

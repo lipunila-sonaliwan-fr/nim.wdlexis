@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/train — optimiseurs, planification du taux d'apprentissage,
+# nimllm/train - optimiseurs, planification du taux d'apprentissage,
 # jeux de données et boucle d'entraînement.
 
 import std/[math, random, strutils, json, times]

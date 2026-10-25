@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.6.0,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.7.3,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -16,7 +16,7 @@
     saisie, référence des fonctions intégrées et des paquets.
 
   Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
-  SIRET 13033319800013 — metalab (at) sonaliwan.fr
+  SIRET 13033319800013 - metalab (at) sonaliwan.fr
 
 ]#
 
@@ -143,10 +143,10 @@ proc relPath(p: string): string =
 
 proc updateTitle() =
   let uid = editorActiveUid(edId)
-  var t = AppName & " — Lexis+"
+  var t = AppName & " - Lexis+"
   if uid >= 0:
     let info = editorInfo(edId, uid)
-    t = (if info.dirty: "● " else: "") & info.title & "  —  " & AppName
+    t = (if info.dirty: "● " else: "") & info.title & "  -  " & AppName
   let r = root()
   if r.len > 0: t.add "  [" & extractFilename(r) & "]"
   if running.load(): t.add "  (en cours)"
@@ -538,7 +538,7 @@ proc onPaused(info: PauseInfo) =
   showPause(info, 0)
   tabBottom.value = "3"
   status("En pause : " & extractFilename(info.source) & " ligne " & $info.line &
-         " — F5 continuer, F10 pas principal, F11 pas à pas, Maj+F11 sortir")
+         " - F5 continuer, F10 pas principal, F11 pas à pas, Maj+F11 sortir")
 
 proc resume(mode: StepMode) =
   var wasPaused = false
@@ -670,7 +670,7 @@ proc doStop() =
     sleep(50)
     waited += 50
   if running.load():
-    status("Le programme ne répond pas encore à l'arrêt (appel bloquant en cours) — Arrêter à nouveau, ou fermez ses dialogues.")
+    status("Le programme ne répond pas encore à l'arrêt (appel bloquant en cours) - Arrêter à nouveau, ou fermez ses dialogues.")
     consoleAppend("\n[arrêt demandé : le programme est bloqué dans un appel qui ne rend pas la main " &
                   "(dialogue, réseau, fil...). Il s'arrêtera dès que cet appel se terminera.]\n")
 
@@ -848,7 +848,7 @@ proc mdParams(sig: string): seq[string] =
     if eq < 0: return "  - " & mdCode(o.strip())
     let k = o[0 ..< eq].strip()
     let d = o[eq + 1 .. ^1].strip()
-    "  - " & mdCode(k) & (if d.len > 0: " — défaut " & mdCode(d) else: "")
+    "  - " & mdCode(k) & (if d.len > 0: " - défaut " & mdCode(d) else: "")
   if named:
     result.add "- **Options nommées** (table `{...}`) :"
     for o in splitTop(sig[p + 1 ..< q], ','): result.add option(o)
@@ -860,17 +860,17 @@ proc mdParams(sig: string): seq[string] =
       optional = true
       a = a[1 .. ^2].strip()
     if a == "...":
-      result.add "- " & mdCode("...") & " — nombre variable de valeurs"
+      result.add "- " & mdCode("...") & " - nombre variable de valeurs"
     elif a.startsWith("{") and a.endsWith("}"):
       result.add "- **Options** (table `{...}`" & (if optional: ", facultative" else: "") & ") :"
       for o in splitTop(a[1 .. ^2], ','): result.add option(o)
     elif a.startsWith("@"):
-      result.add "- " & mdCode(a) & " — procédure passée par référence (`@NOM`)" &
+      result.add "- " & mdCode(a) & " - procédure passée par référence (`@NOM`)" &
         (if optional: ", *facultative*" else: "")
     elif a.endsWith("..."):
-      result.add "- " & mdCode(a) & " — valeurs supplémentaires"
+      result.add "- " & mdCode(a) & " - valeurs supplémentaires"
     else:
-      result.add "- " & mdCode(a) & (if optional: " — *facultatif*" else: "")
+      result.add "- " & mdCode(a) & (if optional: " - *facultatif*" else: "")
 
 proc mdDescription(doc: string): tuple[body: string, returns: string] =
   ## Sépare « renvoie … » du reste ; trois propositions ou plus (séparées par « ; »)
@@ -1001,7 +1001,7 @@ proc packageMarkdown(section: string, rows: seq[ApiDoc]): string =
   var fns, meths, vals: seq[string]
   for e in rows:
     if e.section != section: continue
-    let line = "- " & mdCode(e.signature) & " — " & mdInline(firstSentence(e.doc))
+    let line = "- " & mdCode(e.signature) & " - " & mdInline(firstSentence(e.doc))
     if e.isMethod: meths.add line
     elif e.signature.find({'(', '{'}) < 0: vals.add line
     else: fns.add line
@@ -1249,10 +1249,10 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.6.0\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.7.3\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
-      "⛶ https://sonaliwan.fr - ✉ metalab (at) sonaliwan.fr\n" &
+      "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" &
       "SIRET 13033319800013\n\n" &
       "Paquets : " & names.join(", ") & "\n" & $apiEntries().len & " fonctions documentées.",
       title = "À propos")
@@ -1462,7 +1462,7 @@ proc buildUi() =
   elif s.lastProject.len > 0 and dirExists(s.lastProject):
     startDir = s.lastProject
 
-  win = newWindow(AppName & " — Lexis+", 1320, 860, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
+  win = newWindow(AppName & " - Lexis+", 1320, 860, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
 
   let top = win.addChild(newSupercontrol(lkVertical))
   top.dock = dkTop

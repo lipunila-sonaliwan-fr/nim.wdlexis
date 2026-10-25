@@ -289,7 +289,7 @@ proc generateReportCode*(m: ReportModel): string =
   # « ]] » fermerait la chaîne longue : il ne peut venir que d'un texte (le JSON
   # mis en forme ne colle jamais deux crochets fermants).
   js = js.replace("]]", "]\\u005D")
-  result = "&& État « " & m.name & " » — généré par l'éditeur d'états de wdlexis+.\n" &
+  result = "&& État « " & m.name & " » - généré par l'éditeur d'états de wdlexis+.\n" &
            "&& Régénéré à chaque modification dans l'éditeur : modifiez le dessin là-bas, pas ce fichier.\n" &
            "&&   r = rapport.debut(\"" & m.name & ".pdf\")\n" &
            "&&   r.ajoute(\"zone\", {variable = valeur, ...})       zones de l'état : " &

@@ -42,10 +42,10 @@ procedure ANALYSER(force)
   symboles = lexis.structure(src)
   lstruct:vider()
   pour chaque s dans symboles
-    lstruct:ajouter(s.nom + "   — " + s.genre + ", ligne " + s.ligne)
+    lstruct:ajouter(s.nom + "   - " + s.genre + ", ligne " + s.ligne)
   suivant
   locale ms = arrondi((systeme.horloge() - t0) * 1000, 1)
-  etat.libelle = chaine(#pbs) + " problème(s) — analyse " + ms + " ms"
+  etat.libelle = chaine(#pbs) + " problème(s) - analyse " + ms + " ms"
 retourner
 
 fonction OPTIONS_ANALYSE(nom)
@@ -164,7 +164,7 @@ procedure AIDE_MOT
   finsi
   locale d = docsparnom[m]
   si d <> nul
-    etat.libelle = d.signature + "  —  " + d.description
+    etat.libelle = d.signature + "  -  " + d.description
   finsi
 retourner
 

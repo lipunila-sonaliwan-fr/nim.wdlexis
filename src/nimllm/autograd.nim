@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/autograd — tenseurs float32 avec différentiation automatique
+# nimllm/autograd - tenseurs float32 avec différentiation automatique
 # (mode inverse, « backpropagation »).
 #
 # Chaque opération crée un nouveau `Tensor` qui mémorise ses parents et une
@@ -170,7 +170,7 @@ type
 template fp(s: seq[float32]): F = cast[F](unsafeAddr s[0])
 
 proc linFwdTask(p: pointer; first, last, worker: int) {.nimcall, gcsafe.} =
-  # y[n, m] = Σk x[n, k] * w[m, k] — par blocs de 4 lignes de x.
+  # y[n, m] = Σk x[n, k] * w[m, k] - par blocs de 4 lignes de x.
   let c = cast[ptr LinCtx](p)
   let K = c.k
   let M = c.m

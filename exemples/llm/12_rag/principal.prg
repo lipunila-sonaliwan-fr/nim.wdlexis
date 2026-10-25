@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 12 — Questions sur vos documents (RAG : recherche + génération).
+&& Exemple LLM 12 - Questions sur vos documents (RAG : recherche + génération).
 &&
 &&   wdlexisrt exemples/llm/12_rag/principal.prg modele.gguf
 &&

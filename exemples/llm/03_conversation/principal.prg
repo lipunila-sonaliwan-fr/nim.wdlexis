@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 03 — Définir un contexte (prompt système), dialoguer sur plusieurs
+&& Exemple LLM 03 - Définir un contexte (prompt système), dialoguer sur plusieurs
 && tours, sauvegarder puis recharger la conversation.
 &&
 &&   wdlexisrt exemples/llm/03_conversation/principal.prg modele.gguf

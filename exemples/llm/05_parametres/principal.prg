@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 05 — Régler la génération : température, top-k/top-p/min-p,
+&& Exemple LLM 05 - Régler la génération : température, top-k/top-p/min-p,
 && pénalité de répétition, graine (reproductibilité), chaînes d'arrêt, longueur.
 &&
 &&   wdlexisrt exemples/llm/05_parametres/principal.prg modele.gguf

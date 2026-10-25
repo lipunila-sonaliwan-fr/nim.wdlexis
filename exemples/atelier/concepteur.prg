@@ -228,7 +228,7 @@ procedure CON_ENREGISTRER
   si uid <> nul
     ed:fixertexte(code, uid, vrai)
   finsi
-  condlg.titre = "Concepteur de formulaires — form_" + nom + ".prg — " + fichier.nom(concode)
+  condlg.titre = "Concepteur de formulaires - form_" + nom + ".prg - " + fichier.nom(concode)
   locale manquantes = CON_MANQUANTES()
   si #manquantes > 0
     CON_ETAT("⚠ procédure(s) introuvable(s) dans le projet : " + joindre(manquantes, ", "))

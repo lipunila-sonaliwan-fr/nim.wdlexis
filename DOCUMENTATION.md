@@ -1,5 +1,5 @@
 Lexis+ &
-wdlexis+ — l'atelier du langage Lexis+<br/>
+wdlexis+ - l'atelier du langage Lexis+<br/>
 © 2026 Jean‑Marc "jihem"Quéré, sonaliwan.fr<br/>
 SIRET 13033319800013<br/>
 Distribué sous licence CC BY‑NC‑SA 4.0.<br/>
@@ -12,7 +12,7 @@ contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
 
 # Lexis+ et l'atelier wdlexis+
 
-**Lexis+ — Développez naturellement vos applications métier**
+**Lexis+ - Développez naturellement vos applications métier**
 
 Ce document décrit le langage Lexis+ tel qu'il s'utilise sur le poste de travail
 avec l'atelier **wdlexis+** et le runtime **wdlexisrt** : le langage, la base de
@@ -678,7 +678,7 @@ retourner
 
 Les fonctions intégrées (chapitre 11) sont toujours disponibles, ainsi que les
 paquets `es` (entrées / sorties) et `systeme`. Les autres paquets s'utilisent
-directement par leur nom — `fichier.lire(chemin)`, `json.encoder(t)` — ou se
+directement par leur nom - `fichier.lire(chemin)`, `json.encoder(t)` - ou se
 rangent dans une variable : `ui = paquet("interface")`.
 
 ```lexis
@@ -1173,7 +1173,7 @@ programme). `systeme.quitter(code)` termine le programme avec un code de retour.
 | Pages, `envoyer`, `rediriger`, `statut`, `entete`, `deconnecter`, `REQUETE` | non disponibles (erreur de syntaxe explicite) |
 | Base configurée dans le JSON du serveur | `donnees.duckdb` du dossier du programme, ou `ouvrirbase()` |
 | Limites d'instructions et de durée par requête | pas de limite (bouton **Arrêter**) |
-| — | paquets (interface, fichiers, réseau...), `saisir()`, appels `f{...}`, itérateurs dans `pour chaque` |
+| - | paquets (interface, fichiers, réseau...), `saisir()`, appels `f{...}`, itérateurs dans `pour chaque` |
 
 ---
 
@@ -1277,7 +1277,7 @@ Fonctions intégrées de Lexis+
 
 ### Paquet `es`
 
-Entrées / sorties : console et fichiers — toujours disponible.
+Entrées / sorties : console et fichiers - toujours disponible.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1298,7 +1298,7 @@ Entrées / sorties : console et fichiers — toujours disponible.
 
 ### Paquet `systeme`
 
-Système d'exploitation — toujours disponible.
+Système d'exploitation - toujours disponible.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1321,7 +1321,7 @@ Système d'exploitation — toujours disponible.
 
 ### Paquet `fichier`
 
-Fichiers et dossiers (texte et binaire) — disponible par son nom (`fichier.…`) ou par `paquet("fichier")`.
+Fichiers et dossiers (texte et binaire) - disponible par son nom (`fichier.…`) ou par `paquet("fichier")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1354,7 +1354,7 @@ Fichiers et dossiers (texte et binaire) — disponible par son nom (`fichier.…
 
 ### Paquet `binaire`
 
-Données binaires — disponible par son nom (`binaire.…`) ou par `paquet("binaire")`.
+Données binaires - disponible par son nom (`binaire.…`) ou par `paquet("binaire")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1366,7 +1366,7 @@ Données binaires — disponible par son nom (`binaire.…`) ou par `paquet("bin
 
 ### Paquet `json`
 
-JSON — disponible par son nom (`json.…`) ou par `paquet("json")`.
+JSON - disponible par son nom (`json.…`) ou par `paquet("json")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1378,7 +1378,7 @@ JSON — disponible par son nom (`json.…`) ou par `paquet("json")`.
 
 ### Paquet `csv`
 
-Fichiers CSV — disponible par son nom (`csv.…`) ou par `paquet("csv")`.
+Fichiers CSV - disponible par son nom (`csv.…`) ou par `paquet("csv")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1389,7 +1389,7 @@ Fichiers CSV — disponible par son nom (`csv.…`) ou par `paquet("csv")`.
 
 ### Paquet `reseau`
 
-Sockets TCP/UDP — disponible par son nom (`reseau.…`) ou par `paquet("reseau")`.
+Sockets TCP/UDP - disponible par son nom (`reseau.…`) ou par `paquet("reseau")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1409,7 +1409,7 @@ Sockets TCP/UDP — disponible par son nom (`reseau.…`) ou par `paquet("reseau
 
 ### Paquet `http`
 
-Client HTTP/HTTPS — disponible par son nom (`http.…`) ou par `paquet("http")`.
+Client HTTP/HTTPS - disponible par son nom (`http.…`) ou par `paquet("http")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1422,7 +1422,7 @@ Client HTTP/HTTPS — disponible par son nom (`http.…`) ou par `paquet("http")
 
 ### Paquet `ftp`
 
-Client FTP — disponible par son nom (`ftp.…`) ou par `paquet("ftp")`.
+Client FTP - disponible par son nom (`ftp.…`) ou par `paquet("ftp")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1440,7 +1440,7 @@ Client FTP — disponible par son nom (`ftp.…`) ou par `paquet("ftp")`.
 
 ### Paquet `ssh`
 
-SSH (client OpenSSH) — disponible par son nom (`ssh.…`) ou par `paquet("ssh")`.
+SSH (client OpenSSH) - disponible par son nom (`ssh.…`) ou par `paquet("ssh")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1457,7 +1457,7 @@ SSH (client OpenSSH) — disponible par son nom (`ssh.…`) ou par `paquet("ssh"
 
 ### Paquet `sftp`
 
-SFTP : mêmes sessions que ssh — disponible par son nom (`sftp.…`) ou par `paquet("sftp")`.
+SFTP : mêmes sessions que ssh - disponible par son nom (`sftp.…`) ou par `paquet("sftp")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1465,7 +1465,7 @@ SFTP : mêmes sessions que ssh — disponible par son nom (`sftp.…`) ou par `p
 
 ### Paquet `sqlite`
 
-Bases SQLite — disponible par son nom (`sqlite.…`) ou par `paquet("sqlite")`.
+Bases SQLite - disponible par son nom (`sqlite.…`) ou par `paquet("sqlite")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1482,7 +1482,7 @@ Bases SQLite — disponible par son nom (`sqlite.…`) ou par `paquet("sqlite")`
 
 ### Paquet `firebird`
 
-Bases Firebird (client natif fbclient) — disponible par son nom (`firebird.…`) ou par `paquet("firebird")`.
+Bases Firebird (client natif fbclient) - disponible par son nom (`firebird.…`) ou par `paquet("firebird")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1509,7 +1509,7 @@ Bases Firebird (client natif fbclient) — disponible par son nom (`firebird.…
 
 ### Paquet `tache`
 
-Tâches coopératives — disponible par son nom (`tache.…`) ou par `paquet("tache")`.
+Tâches coopératives - disponible par son nom (`tache.…`) ou par `paquet("tache")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1529,7 +1529,7 @@ Tâches coopératives — disponible par son nom (`tache.…`) ou par `paquet("t
 
 ### Paquet `fil`
 
-Fils d'exécution du système (interpréteurs séparés, messages) — disponible par son nom (`fil.…`) ou par `paquet("fil")`.
+Fils d'exécution du système (interpréteurs séparés, messages) - disponible par son nom (`fil.…`) ou par `paquet("fil")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1545,7 +1545,7 @@ Fils d'exécution du système (interpréteurs séparés, messages) — disponibl
 
 ### Paquet `llm`
 
-Modèles de langage GGUF (Llama 3, Mistral, Qwen) : dialogue, pièces jointes, JSON, image, audio — disponible par son nom (`llm.…`) ou par `paquet("llm")`.
+Modèles de langage GGUF (Llama 3, Mistral, Qwen) : dialogue, pièces jointes, JSON, image, audio - disponible par son nom (`llm.…`) ou par `paquet("llm")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1609,7 +1609,7 @@ Modèles de langage GGUF (Llama 3, Mistral, Qwen) : dialogue, pièces jointes, J
 
 ### Paquet `gguf`
 
-Fichiers GGUF : métadonnées, tenseurs, quantification, fusion LoRA — disponible par son nom (`gguf.…`) ou par `paquet("gguf")`.
+Fichiers GGUF : métadonnées, tenseurs, quantification, fusion LoRA - disponible par son nom (`gguf.…`) ou par `paquet("gguf")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1632,7 +1632,7 @@ Fichiers GGUF : métadonnées, tenseurs, quantification, fusion LoRA — disponi
 
 ### Paquet `dessin`
 
-Images BMP/PPM/PNG, rendu SVG et dessin vectoriel — disponible par son nom (`dessin.…`) ou par `paquet("dessin")`.
+Images BMP/PPM/PNG, rendu SVG et dessin vectoriel - disponible par son nom (`dessin.…`) ou par `paquet("dessin")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1659,7 +1659,7 @@ Images BMP/PPM/PNG, rendu SVG et dessin vectoriel — disponible par son nom (`d
 
 ### Paquet `audio`
 
-Synthèse vocale, mélodies et fichiers WAV — disponible par son nom (`audio.…`) ou par `paquet("audio")`.
+Synthèse vocale, mélodies et fichiers WAV - disponible par son nom (`audio.…`) ou par `paquet("audio")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1679,7 +1679,7 @@ Synthèse vocale, mélodies et fichiers WAV — disponible par son nom (`audio.�
 
 ### Paquet `tenseur`
 
-Tenseurs à différentiation automatique et optimiseurs (apprentissage) — disponible par son nom (`tenseur.…`) ou par `paquet("tenseur")`.
+Tenseurs à différentiation automatique et optimiseurs (apprentissage) - disponible par son nom (`tenseur.…`) ou par `paquet("tenseur")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1732,7 +1732,7 @@ Tenseurs à différentiation automatique et optimiseurs (apprentissage) — disp
 
 ### Paquet `entrainement`
 
-Créer et entraîner des modèles de langage : tokeniseur, Transformer, LoRA, GGUF — disponible par son nom (`entrainement.…`) ou par `paquet("entrainement")`.
+Créer et entraîner des modèles de langage : tokeniseur, Transformer, LoRA, GGUF - disponible par son nom (`entrainement.…`) ou par `paquet("entrainement")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1761,7 +1761,7 @@ Créer et entraîner des modèles de langage : tokeniseur, Transformer, LoRA, GG
 
 ### Paquet `interface`
 
-Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `paquet("interface")` ; l'usage est d'écrire `ui = paquet("interface")`.
+Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paquet("interface")` ; l'usage est d'écrire `ui = paquet("interface")`.
 
 | Appel | Rôle |
 | --- | --- |
@@ -1913,7 +1913,7 @@ Interface graphique wdgui — disponible par son nom (`interface.…`) ou par `p
 ### Paquet `lexis`
 
 Le langage depuis Lexis+ : analyse, documentation et exécution de programmes
-(outils d'atelier) — disponible par son nom (`lexis.…`) ou par `paquet("lexis")`.
+(outils d'atelier) - disponible par son nom (`lexis.…`) ou par `paquet("lexis")`.
 Voir le chapitre 8.2.
 
 | Fonction | Description |
@@ -1936,7 +1936,7 @@ Voir le chapitre 8.2.
 
 ### Paquet `rapport`
 
-États PDF dessinés avec l'éditeur d'états (chapitre 8.4) — disponible par son nom (`rapport.…`).
+États PDF dessinés avec l'éditeur d'états (chapitre 8.4) - disponible par son nom (`rapport.…`).
 
 | Appel | Rôle |
 | --- | --- |
@@ -1950,7 +1950,7 @@ Voir le chapitre 8.2.
 
 ### Paquet `webview`
 
-Pages HTML / CSS / JavaScript dans une fenêtre native (bibliothèque webview chargée à l'exécution) — disponible par son nom (`webview.…`) ou par `paquet("webview")`. Voir le chapitre 5.1.
+Pages HTML / CSS / JavaScript dans une fenêtre native (bibliothèque webview chargée à l'exécution) - disponible par son nom (`webview.…`) ou par `paquet("webview")`. Voir le chapitre 5.1.
 
 | Appel | Rôle |
 | --- | --- |

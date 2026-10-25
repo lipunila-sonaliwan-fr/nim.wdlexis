@@ -1,5 +1,5 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-&& Exemple LLM 01 — La question la plus simple possible.
+&& Exemple LLM 01 - La question la plus simple possible.
 &&
 &&   wdlexisrt exemples/llm/01_bonjour/principal.prg chemin/vers/modele.gguf
 &&

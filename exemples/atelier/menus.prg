@@ -151,9 +151,12 @@ procedure MENU(ev)
   cas choix = "Référence des fonctions et paquets"
     gauche.valeur = 3
   cas choix = "À propos"
-    ui.alerte("wdlexis+ [Lexis+] — l'atelier Lexis+ écrit en Lexis+." + car(10) + ;
-              "Développez naturellement vos applications métier." + car(10) + car(10) + ;
-              "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr", "information", "À propos")
+    ui.alerte("wdlexis+ [S]tudio 1.7.3\nAtelier du langage Lexis+\n" +
+              "Développez naturellement vos applications métier\n\n" +
+              "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
+              "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" +
+              "SIRET 13033319800013"
+              , "information", "À propos")
   fincas
 retourner
 

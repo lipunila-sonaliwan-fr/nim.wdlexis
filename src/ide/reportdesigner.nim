@@ -802,7 +802,7 @@ method onKey*(c: ReportCanvas, e: KeyEvent): bool =
 
 const PaletteRows = [("ZONES", ""), ("zone", "▤"), ("entete", "▔"), ("pied", "▁"),
                      ("ÉLÉMENTS", ""), ("texte", "A"), ("champ", "{}"), ("rectangle", "▭"),
-                     ("ligne horizontale", "—"), ("ligne verticale", "│"), ("image", "▣"),
+                     ("ligne horizontale", "-"), ("ligne verticale", "│"), ("image", "▣"),
                      ("numéro de page", "#"), ("date", "▦")]
 
 proc rowH(t: Theme): float = t.lineHeight + 2
@@ -1097,7 +1097,7 @@ proc saveReport() =
     return
   let uid = editorUidOf(rEditor, path)
   if uid >= 0: discard editorSetText(rEditor, uid, code, modified = false)
-  rWin.caption = "Éditeur d'états — " & reportFileName(name)
+  rWin.caption = "Éditeur d'états - " & reportFileName(name)
   status("Enregistré : " & reportFileName(name) & "  ·  rapport.debut(\"" & name & ".pdf\")")
   if isNew and reportFileCreated != nil: reportFileCreated(path)
 
@@ -1241,7 +1241,7 @@ proc previewPdf() =
     return
   var vid: ControlId
   guarded:
-    let w = newWindow("Aperçu — " & name & ".pdf", 860, 860, nil, rTheme, lkVertical)
+    let w = newWindow("Aperçu - " & name & ".pdf", 860, 860, nil, rTheme, lkVertical)
     w.root.margin = 0
     let v = w.addChild(newPdfViewer())
     v.weight = 1

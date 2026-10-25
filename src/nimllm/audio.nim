@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/audio — production de fichiers audio WAV sans dépendance :
+# nimllm/audio - production de fichiers audio WAV sans dépendance :
 #
 # * `writeWav` / `readWavInfo` : fichiers PCM 16 bits ;
 # * `speak` : synthèse vocale **rudimentaire** par formants (français ou

@@ -1,7 +1,7 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026 (adaptation)
 # Décodage DEFLATE par codes de Huffman canoniques, structure inspirée de puff.c (distribution zlib)
 # © Mark Adker 2002-2013 - LICENSES/Zlib-puff.txt
-# nimllm/inflate — décompression DEFLATE / zlib (RFC 1950/1951) en pur Nim.
+# nimllm/inflate - décompression DEFLATE / zlib (RFC 1950/1951) en pur Nim.
 # Utilisée pour lire les images PNG et le texte des PDF joints.
 
 type

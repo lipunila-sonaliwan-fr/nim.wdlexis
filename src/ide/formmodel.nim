@@ -99,7 +99,7 @@ proc initPalette() =
           prop("multi", pkBool, "false")], @["surselection"]),
     entry("compteur", "Contrôles", "S", false, @[prop("valeur", pkFloat, "0"), prop("min", pkFloat, "0"),
           prop("max", pkFloat, "100")], @["surchangement"]),
-    entry("curseur", "Contrôles", "—", false, @[prop("valeur", pkFloat, "50"), prop("min", pkFloat, "0"),
+    entry("curseur", "Contrôles", "-", false, @[prop("valeur", pkFloat, "50"), prop("min", pkFloat, "0"),
           prop("max", pkFloat, "100")], @["surchangement"]),
     entry("plage", "Contrôles", "↔", false, @[prop("basse", pkFloat, "20"), prop("haute", pkFloat, "80"),
           prop("min", pkFloat, "0"), prop("max", pkFloat, "100")], @["surchangement"]),
@@ -583,7 +583,7 @@ proc generateCode*(m: FormModel): string =
   let fv = formVar(name)
   let r = m.root
   var o: seq[string]
-  o.add "&& Formulaire « " & name & " » — généré par le concepteur de wdlexis+."
+  o.add "&& Formulaire « " & name & " » - généré par le concepteur de wdlexis+."
   o.add "&& Régénéré à chaque modification dans le concepteur : modifiez le dessin là-bas, pas ce fichier."
   o.add "&& " & openProc(name) & "() ouvre la fenêtre et renvoie ses contrôles, aussi rangés dans la"
   o.add "&& variable globale " & fv & " (" & fv & ".fenetre, " & fv & "." &

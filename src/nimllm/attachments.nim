@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-# nimllm/attachments — pièces jointes transmises au modèle.
+# nimllm/attachments - pièces jointes transmises au modèle.
 #
 # Un LLM textuel (comme llama3.2 1B/3B) ne « voit » que du texte : chaque
 # pièce jointe est donc convertie en une description textuelle insérée dans
