@@ -81,6 +81,7 @@ type
 
   QueryResult* = object
     columns*: seq[string]
+    types*: seq[string]           # types DuckDB des colonnes (INTEGER, VARCHAR, LIST...)
     rows*: seq[seq[DbCell]]
     changed*: int64
 
@@ -92,6 +93,7 @@ type
     path*: string                 # chemin absolu, ou ":memoire:"
     conn: PConnection
     shared: SharedDb
+    lk: Lock                      # une requête à la fois sur une connexion (plusieurs fils)
 
 var
   api: Api
@@ -206,7 +208,19 @@ proc openConnection*(path: string, extraDirs: openArray[string] = []): Connectio
     withLock libLock:
       dec sh.refs
     fail("connexion à la base impossible : " & key)
-  Connection(path: (if mem: ":memoire:" else: key), conn: c, shared: sh)
+  result = Connection(path: (if mem: ":memoire:" else: key), conn: c, shared: sh)
+  initLock(result.lk)
+
+proc newSession*(c: Connection): Connection =
+  ## Nouvelle connexion sur la même base (même catalogue, mêmes bases attachées,
+  ## mais USE, SET et tables temporaires propres) : requêtes simultanées.
+  if c.isNil or c.conn.isNil: fail("base fermée")
+  var p: PConnection = nil
+  if api.connect(c.shared.db, addr p) != 0: fail("connexion à la base impossible")
+  withLock libLock:
+    inc c.shared.refs
+  result = Connection(path: c.path, conn: p, shared: c.shared)
+  initLock(result.lk)
 
 proc close*(c: Connection) =
   if c.isNil or c.conn.isNil: return
@@ -226,6 +240,13 @@ proc interrupt*(c: Connection) =
 
 const numericAsText = {6, 7, 8, 9, 16, 19, 32}   # entiers non signés, hugeint, decimal, uhugeint
 
+proc typeNameOf(id: int): string =
+  const names = ["INVALID", "BOOLEAN", "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "UTINYINT", "USMALLINT",
+                 "UINTEGER", "UBIGINT", "FLOAT", "DOUBLE", "TIMESTAMP", "DATE", "TIME", "INTERVAL", "HUGEINT",
+                 "VARCHAR", "BLOB", "DECIMAL", "TIMESTAMP_S", "TIMESTAMP_MS", "TIMESTAMP_NS", "ENUM", "LIST",
+                 "STRUCT", "MAP", "UUID", "UNION", "BIT", "TIME_TZ", "TIMESTAMP_TZ", "UHUGEINT", "ARRAY"]
+  if id >= 0 and id < names.len: names[id] else: "INCONNU"
+
 proc readResult(r: var DuckResult): QueryResult =
   let nc = int(api.columnCount(addr r))
   let nr = int(api.rowCount(addr r))
@@ -233,6 +254,7 @@ proc readResult(r: var DuckResult): QueryResult =
   for c in 0 ..< nc: result.columns.add $api.columnName(addr r, uint64(c))
   var types = newSeq[int](nc)
   for c in 0 ..< nc: types[c] = int(api.columnType(addr r, uint64(c)))
+  for c in 0 ..< nc: result.types.add typeNameOf(types[c])
   for row in 0 ..< nr:
     var line = newSeq[DbCell](nc)
     for c in 0 ..< nc:
@@ -265,8 +287,11 @@ proc readResult(r: var DuckResult): QueryResult =
     result.rows.add line
 
 proc exec*(c: Connection, sql: string, params: openArray[DbCell] = []): QueryResult =
-  ## Exécute une requête (paramètres « ? »). Lève DuckError.
+  ## Exécute une requête (paramètres « ? »). Lève DuckError. Sûr entre fils : les
+  ## requêtes d'une même connexion passent l'une après l'autre.
   if c.isNil or c.conn.isNil: fail("base fermée")
+  acquire(c.lk)
+  defer: release(c.lk)
   var r: DuckResult
   if params.len == 0:
     if api.query(c.conn, sql.cstring, addr r) != 0:

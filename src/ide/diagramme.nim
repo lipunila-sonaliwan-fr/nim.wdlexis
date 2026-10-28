@@ -60,6 +60,7 @@ type
     curX, curY: float
     hoverPort: tuple[id: string, row: int]
     needFit*: bool
+    fitMin*: float                 # zoom minimal de fit() (0 : 0,2) ; en dessous, cadré en haut à gauche
     fonts: Table[int, TTF_Font]             # (gras * 1000 + taille en px)
     texts: Table[string, tuple[tex: SDL_Texture, w, h: float]]
     fontFiles: seq[string]
@@ -281,10 +282,14 @@ proc fit*(c: DiagramCanvas) =
     c.needFit = true
     return
   let b = c.bounds
-  let z = clamp(min((c.rect.w - 40) / max(1.0, b.w), (c.rect.h - 40) / max(1.0, b.h)), 0.2, 1.0)
+  let zmin = if c.fitMin > 0: min(c.fitMin, 1.0) else: 0.2
+  let z = clamp(min((c.rect.w - 40) / max(1.0, b.w), (c.rect.h - 40) / max(1.0, b.h)), zmin, 1.0)
   c.zoom = z
   c.panX = (c.rect.w - b.w * z) / 2 - b.x * z
   c.panY = (c.rect.h - b.h * z) / 2 - b.y * z
+  # trop grand pour la vue : on montre le début (gauche, ou haut en mode « bas »)
+  if b.w * z > c.rect.w - 40: c.panX = 20 - b.x * z
+  if b.h * z > c.rect.h - 40: c.panY = 20 - b.y * z
   c.needFit = false
 
 proc layout*(c: DiagramCanvas, direction = "") =

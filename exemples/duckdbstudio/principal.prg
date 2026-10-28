@@ -8,12 +8,20 @@
 &&   principal.prg     fenêtre, menus, barre d'outils, réglages, démarrage
 &&   projet.prg        projet (duckstudio.json), historique, scripts
 &&   connecteurs.prg   greffons de connexion (connecteurs/*.json), attachement, catalogue
-&&   connexions.prg    concepteur de connexions (boîte de dialogue)
+&&   connexions.prg    concepteur de connexions (boîte de dialogue), mots de passe mémorisés
+&&   taches.prg        connexions numérotées, onglets (session, connexion), opérations longues
 &&   explorateur.prg   arbre des connexions, schémas, tables, vues, macros ; palette
 &&   requetes.prg      éditeur SQL, exécution, résultats, validation, export
 &&   profil.prg        plan d'exécution (EXPLAIN ANALYZE) en graphe et en tableau
 &&   expertise.prg     moteur de règles, recommandations, mutualisation
 &&   schema.prg        concepteur entité-relation, SQL <-> modèle, analyse d'impact
+&&   sqlast.prg        arbre syntaxique de DuckDB (json_serialize_sql), expressions exactes
+&&   pipelines.prg     concepteur de pipelines, pipeline <-> SQL (lot 2)
+&&   planificateur.prg travaux planifiés, dépendances, reprises, Gantt (lot 2)
+&&   mutualisation.prg empreintes des requêtes : jointures et grains communs (lot 2)
+&&   assistant.prg     assistant IA : règles, modèle local GGUF, serveur HTTP (lot 3)
+&&   bi.prg            tableau de bord BI (lot 3)
+&&   extensions.prg    extensions du projet : règles, onglets, menus (lot 3)
 &&   carto.prg         cartographie globale (sources, bases, tables, vues)
 &&   tableau.prg       tableau de bord technique
 &&   menus.prg         menus, raccourcis, à propos
@@ -40,7 +48,21 @@ analyse = ""                  && empreinte de la dernière validation
 noeudcourant = nul            && élément sélectionné dans l'explorateur
 recocourante = nul            && recommandation sélectionnée
 tablecourante = nul           && table sélectionnée dans le concepteur de schéma
-secrets = {}                  && secrets saisis pendant la session, par connexion (jamais enregistrés)
+derniereerreur = nul          && {sql, message} de la dernière erreur d'exécution (assistant)
+planif = nul                  && planificateur (lot 2)
+ia = nul                      && assistant (lot 3)
+bi = nul                      && tableau de bord BI (lot 3)
+INITIALISER_EXTENSIONS()      && extensions (lot 3)
+secrets = {}                  && secrets saisis pendant la session, par connexion (jamais dans le projet)
+onglets = {}                  && onglets de l'éditeur : uid -> {cnx, session, tache, resultat}
+taches = {}                   && opérations en cours : id -> {libelle, debut, session, arret}
+numtache = 0
+tachelongue = nul             && opération affichée dans la barre d'arrêt
+cnxdefaut = 0                 && connexion des nouveaux onglets (0 : moteur)
+outils = nul                  && contexte des outils (aperçu de pipeline…)
+majcombo = faux
+choixcnx = {0}                && liste « Connexion » de l'onglet : index -> numéro
+resultataffiche = nul         && résultat affiché dans l'onglet Résultats
 
 ouvrirbase(":memoire:")
 CHARGER_CONNECTEURS()
@@ -73,7 +95,21 @@ pied.ancrage = "bas"
 etat = pied:ajouter(ui.etiquette("Prêt"))
 etat.poids = 1
 lblcnx = pied:ajouter(ui.etiquette(""))
-lblcnx.largeurfixe = 360
+lblcnx.largeurfixe = 420
+
+&& barre d'arrêt : opérations de plus de 15 s (bouton ou touche Échap)
+barrearret = fen:ajouter(ui.rangee())
+barrearret.ancrage = "bas"
+barrearret.fond = "#FDE68A"
+lblarret = barrearret:ajouter(ui.etiquette(""))
+lblarret.poids = 1
+lblarret.couleur = "#78350F"
+barret = barrearret:ajouter(ui.bouton("■ Arrêter"))
+barret.surclic = @ARRETER_LONGUE
+barret.infobulle = "Interrompre cette opération (Échap)"
+btouttarret = barrearret:ajouter(ui.bouton("Tout arrêter"))
+btouttarret.surclic = @ARRETER_TOUT
+barrearret.visible = faux
 
 sep = fen:ajouter(ui.separateur{vertical = vrai, position = 0.235})
 
@@ -86,22 +122,21 @@ OUTIL(rexpl, "Requête", @EXPL_REQUETE, "SELECT sur l'élément sélectionné")
 OUTIL(rexpl, "Décrire", @EXPL_DECRIRE, "Colonnes et statistiques (SUMMARIZE)")
 OUTIL(rexpl, "Schéma", @EXPL_SCHEMA, "Concepteur de schéma sur ce schéma")
 OUTIL(rexpl, "↻", @RAFRAICHIR_TOUT, "Relire le catalogue des connexions")
-arbre = pexpl:ajouter(ui.arbre())
-arbre.ancrage = "centre"
+&& liste en haut, détail en bas, séparés par un séparateur déplaçable
+sepexpl = pexpl:ajouter(ui.separateur{vertical = faux, position = reglages.sepexpl})
+sepexpl.ancrage = "centre"
+arbre = sepexpl:ajouter(ui.arbre())
 arbre.surselection = @EXPL_CHOIX
 arbre.surdoubleclic = @EXPL_DOUBLE
-infoexpl = pexpl:ajouter(ui.markdown("Sélectionnez une connexion, une table ou une vue."))
-infoexpl.ancrage = "bas"
-infoexpl.hauteurfixe = 170
+infoexpl = sepexpl:ajouter(ui.markdown("Sélectionnez une connexion, une table ou une vue."))
 
 ppal = gauche:ajouterpage("Palette", "bordure")
-palette = ppal:ajouter(ui.arbre())
-palette.ancrage = "centre"
+seppal = ppal:ajouter(ui.separateur{vertical = faux, position = reglages.seppal})
+seppal.ancrage = "centre"
+palette = seppal:ajouter(ui.arbre())
 palette.surselection = @PALETTE_CHOIX
 palette.surdoubleclic = @PALETTE_UTILISER
-infopal = ppal:ajouter(ui.markdown("Double-cliquez un élément pour l'utiliser."))
-infopal.ancrage = "bas"
-infopal.hauteurfixe = 150
+infopal = seppal:ajouter(ui.markdown("Double-cliquez un élément pour l'utiliser."))
 CONSTRUIRE_PALETTE()
 
 phist = gauche:ajouterpage("Historique", "bordure")
@@ -114,6 +149,16 @@ cotedroit = sep:ajouter(ui.separateur{vertical = faux, position = 0.64})
 vues = cotedroit:ajouter(ui.onglets())
 
 preq = vues:ajouterpage("Requêtes", "bordure")
+rreq = preq:ajouter(ui.rangee())
+rreq.ancrage = "haut"
+rreq:ajouter(ui.etiquette("Connexion de l'onglet :"))
+cbcnx = rreq:ajouter(ui.combo())
+cbcnx.largeurfixe = 300
+cbcnx.surselection = @CNX_ONGLET
+cbcnx.infobulle = "Connexion par défaut des requêtes de cet onglet (USE) ; son numéro s'affiche sur l'onglet"
+lblreq = rreq:ajouter(ui.etiquette("Chaque onglet a sa session : plusieurs requêtes peuvent s'exécuter en même temps."))
+lblreq.poids = 1
+lblreq.couleur = "#6B7280"
 ed = preq:ajouter(ui.editeur{minicarte = faux, taille = reglages.police})
 ed.ancrage = "centre"
 ed.surchangement = @SQL_MODIFIE
@@ -134,6 +179,18 @@ CONSTRUIRE_CARTO(pcarto)
 ptab = vues:ajouterpage("Tableau de bord", "bordure")
 CONSTRUIRE_TABLEAU(ptab)
 
+ppipe = vues:ajouterpage("Pipelines", "bordure")
+CONSTRUIRE_PIPELINES(ppipe)
+
+pplanif = vues:ajouterpage("Planification", "bordure")
+CONSTRUIRE_PLANIF(pplanif)
+
+pbi = vues:ajouterpage("BI", "bordure")
+CONSTRUIRE_BI(pbi)
+
+ordrevues = {"Requêtes", "Schéma", "Profil", "Recommandations", "Cartographie", "Tableau de bord", "Pipelines", ;
+             "Planification", "BI"}
+
 bas = cotedroit:ajouter(ui.onglets())
 pres = bas:ajouterpage("Résultats", "bordure")
 rres = pres:ajouter(ui.rangee())
@@ -142,13 +199,16 @@ lblres = rres:ajouter(ui.etiquette("Aucun résultat"))
 lblres.poids = 1
 OUTIL(rres, "Compter", @COMPTER_RESULTAT, "Nombre exact de lignes de la dernière requête")
 OUTIL(rres, "Exporter…", @EXPORTER_RESULTAT, "COPY vers CSV, Parquet ou JSON")
-zoneres = pres:ajouter(ui.panneau{disposition = "bordure", defilement = "masque"})
+zoneres = pres:ajouter(ui.superconteneur("bordure"))
 zoneres.ancrage = "centre"
 grilleres = nul
 pmsg = bas:ajouterpage("Messages", "bordure")
 messages = pmsg:ajouter(ui.saisie{multiligne = vrai})
 messages.ancrage = "centre"
 messages.etat = "lecture"
+pia = bas:ajouterpage("Assistant", "bordure")
+CONSTRUIRE_ASSISTANT(pia)
+ordrebas = {"Résultats", "Messages", "Assistant"}
 
 && démarrage
 depart = systeme.args[1]
@@ -160,6 +220,7 @@ si depart = nul ou depart = "" ou non fichier.estdossier(depart)
   fichier.creerdossier(depart)
 finsi
 CHARGER_PROJET(fichier.absolu(depart))
+surveillance = ui.minuterie(1000, @SURVEILLER_TACHES)
 ui.executer()
 
 &&
@@ -170,7 +231,7 @@ fonction FICHIER_REGLAGES()
 retourner fichier.joindre(fichier.dossierperso(), ".duckdbstudio.json")
 
 fonction DS_LIRE_REGLAGES()
-  locale r = {sombre = faux, police = 13, projet = "", limite = 1000}
+  locale r = {sombre = faux, police = 13, projet = "", limite = 1000, sepexpl = 0.68, seppal = 0.70}
   locale p = FICHIER_REGLAGES()
   si fichier.existe(p)
     essayer
@@ -184,6 +245,11 @@ retourner r
 
 procedure DS_ECRIRE_REGLAGES
   reglages.projet = dossier
+  essayer
+    reglages.sepexpl = sepexpl.position
+    reglages.seppal = seppal.position
+  capturer e
+  finessayer
   essayer
     fichier.ecrire(FICHIER_REGLAGES(), json(reglages))
   capturer e
@@ -218,6 +284,14 @@ procedure JOURNAL(texte)
   messages.valeur = t + heure() + "  " + texte + car(10)
 retourner
 
+fonction INDEX_BAS(titre)
+  pour i = 1 a #ordrebas
+    si ordrebas[i] = titre
+      retourner i
+    finsi
+  suivant
+retourner 1
+
 procedure ERREUR(texte)
   JOURNAL("ERREUR : " + texte)
   STATUT("Erreur : " + gauche(remplacertexte(texte, car(10), " "), 160))
@@ -225,8 +299,10 @@ procedure ERREUR(texte)
 retourner
 
 procedure TOUCHE_FENETRE(ev)
-  && F5 / Ctrl+Entrée : exécuter ; F6 : profiler
-  si ev.touche = 1073741886
+  && F5 / Ctrl+Entrée : exécuter ; F6 : profiler ; Échap : arrêter
+  si ev.touche = 27
+    ARRETER_COURANTE()
+  sinonsi ev.touche = 1073741886
     EXECUTER_SQL()
   sinonsi ev.touche = 1073741887
     PROFILER()
@@ -234,6 +310,9 @@ procedure TOUCHE_FENETRE(ev)
 retourner
 
 procedure FERMETURE(ev)
+  pour chaque k, t dans taches
+    ARRETER_TACHE(t)
+  suivant
   ENREGISTRER_PROJET()
   DS_ECRIRE_REGLAGES()
   si condlg <> nul

@@ -314,6 +314,32 @@ proc prompt*(icon: IconId, message: string, defaultValue = "", title = "Input"):
     initialFocus(win, edit)
   if runModal(st) == drOk: edit.id.value else: defaultValue
 
+proc promptSecret*(icon: IconId, message: string, value: var string, remember: var bool,
+                   rememberLabel = "", title = "Input"): bool =
+  # Like promptOk, with a masked Edit (password) and, when `rememberLabel` is given,
+  # a check box under it (initialised with / returned in `remember`).
+  if not canBlock(): return false
+  let st = DialogState()
+  let t = dialogTheme()
+  let extra = t.controlHeight + t.spacing + (if rememberLabel.len > 0: t.controlHeight + t.spacing else: 0.0)
+  let sz = messageSize(t, message, extra)
+  var edit: Edit
+  var cb: CheckBox
+  guarded:
+    let win = newDialogWindow(st, title, sz.w, sz.h)
+    discard st.addButtonRow(win, [("Annuler", drCancel), ("OK", drOk)])
+    let col = messageBody(win, icon, message)
+    edit = col.addChild(newEdit(value, inputKind = ikPassword))
+    edit.anchor = 0
+    if rememberLabel.len > 0:
+      cb = col.addChild(newCheckBox(rememberLabel, remember))
+    initialFocus(win, edit)
+  result = runModal(st) == drOk
+  if result:
+    value = edit.id.value
+    if not cb.isNil:
+      guarded: remember = cb.checked.len > 0 and cb.checked[0]
+
 # file dialogs
 
 type

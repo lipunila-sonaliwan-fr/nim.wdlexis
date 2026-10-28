@@ -132,6 +132,13 @@ proc openFichier(L: Interp): Value =
   m.fn "absolu", proc (L: Interp, a: seq[Value]): seq[Value] = @[strV(absolutePath(L.checkStr(a, 1, "absolu")))]
   m.fn "dossiertemp", proc (L: Interp, a: seq[Value]): seq[Value] = @[strV(getTempDir())]
   m.fn "dossierperso", proc (L: Interp, a: seq[Value]): seq[Value] = @[strV(getHomeDir())]
+  m.fn "proteger", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Lecture et écriture réservées au propriétaire (0600 ; sans effet notable sous Windows).
+    let p = L.checkStr(a, 1, "proteger")
+    try:
+      setFilePermissions(p, {fpUserRead, fpUserWrite})
+      @[boolV(true)]
+    except OSError: @[boolV(false)]
   tableV(m)
 
 registerPackage PackageDef(name: "fichier", open: openFichier,
@@ -157,7 +164,8 @@ registerPackage PackageDef(name: "fichier", open: openFichier,
     "fichier.joindre(a, b, ...)", "Assemble des chemins.", "fichier.nom(chemin)", "Nom du fichier.",
     "fichier.dossier(chemin)", "Dossier parent.", "fichier.extension(chemin)", "Extension.",
     "fichier.absolu(chemin)", "Chemin absolu.",
-    "fichier.dossiertemp()", "Dossier temporaire.", "fichier.dossierperso()", "Dossier personnel."]))
+    "fichier.dossiertemp()", "Dossier temporaire.", "fichier.dossierperso()", "Dossier personnel.",
+    "fichier.proteger(chemin)", "Réserve le fichier à son propriétaire (droits 0600 sous Linux et macOS)."]))
 
 #
 # binaire : coder / decoder

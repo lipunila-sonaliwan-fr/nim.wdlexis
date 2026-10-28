@@ -48,6 +48,8 @@ type
     lastLen: int                 # nombre de lignes avant la dernière modification.
     path*: string
     title*: string
+    badge*: string               # pastille après le titre de l'onglet (ex. connexion utilisée).
+    badgeColor*: Color           # alpha 0 : couleur d'accent du thème.
     lines*: seq[string]
     line*, col*: int             # cursor (col = byte offset).
     ancLine*, ancCol*: int       # selection anchor.
@@ -644,7 +646,8 @@ proc notifyChange(ed: CodeEditor, trigger = "") =
 proc tabRects(ed: CodeEditor, d: Drawing): seq[Rect] =
   var x = ed.rect.x + 6
   for doc in ed.docs:
-    let w = min(240.0, d.textWidth(doc.title) + 52)
+    let bw = (if doc.badge.len > 0: d.textWidth(doc.badge) + 14 else: 0.0)
+    let w = min(240.0, d.textWidth(doc.title) + 52) + bw
     result.add rect(x, ed.rect.y + 5, w, tabBarH - 5)
     x += w + 2
 
@@ -905,7 +908,14 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
       d.fillRect(rect(tr.x + 8, tr.y, tr.w - 16, 2), t.accent)
     elif i == ed.hoverTab:
       d.fillRoundRect(rect(tr.x, tr.y, tr.w, tr.h + 6), 6, colors.tabActive.withAlpha(110))
-    d.textIn(rect(tr.x + 12, tr.y, tr.w - 36, tr.h), doc.title,
+    var bw = 0.0
+    if doc.badge.len > 0:
+      bw = d.textWidth(doc.badge) + 14
+      let bc = if doc.badgeColor.a == 0: t.accent else: doc.badgeColor
+      let br = rect(tr.x + tr.w - 30 - bw + 4, tr.y + (tr.h - 16) / 2 + 1, bw - 6, 16)
+      d.fillRoundRect(br, 8, bc)
+      d.textIn(br, doc.badge, hex"#FFFFFF", alCenter)
+    d.textIn(rect(tr.x + 12, tr.y, tr.w - 36 - bw, tr.h), doc.title,
              (if active: colors.tabTextActive else: colors.tabText))
     let cx = tr.x + tr.w - 16
     let cy = tr.y + tr.h / 2
@@ -1794,6 +1804,15 @@ proc editorSetLanguage*(id: ControlId, uid: int, lang: string) =
       if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
         d.lang = lang
         d.analyzed = false
+        markDirty(ed)
+
+proc editorSetBadge*(id: ControlId, uid: int, badge: string, color = Color()) =
+  ## Pastille affichée après le titre de l'onglet d'un document ("" : aucune).
+  withControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
+        d.badge = badge
+        d.badgeColor = color
         markDirty(ed)
 
 proc editorLanguage*(id: ControlId, uid: int): string =

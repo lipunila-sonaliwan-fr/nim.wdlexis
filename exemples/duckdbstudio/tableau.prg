@@ -92,7 +92,7 @@ procedure REMPLIR_TABLEAU(ev)
         suivant
       suivant
       vol += v
-      inserer(parcnx, {nom = c.nom, lignes = v})
+      inserer(parcnx, {nom = LIBELLE_CNX(c), lignes = v})
     finsi
   suivant
   && exécution

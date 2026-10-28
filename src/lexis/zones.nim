@@ -77,12 +77,12 @@ proc basePath*(L: Interp): string =
   let b = L.baseOf
   if b.conn.isNil: "" else: b.path
 
-proc connection(L: Interp): Connection =
+proc connection*(L: Interp): Connection =
   let b = L.baseOf
   if b.conn.isNil: L.openBase(L.programDir / "donnees.duckdb")
   b.conn
 
-proc toCell(v: Value): DbCell =
+proc toCell*(v: Value): DbCell =
   case v.kind
   of vkNil: DbCell(kind: ckNull)
   of vkBool: DbCell(kind: ckBool, b: v.b)
@@ -91,7 +91,7 @@ proc toCell(v: Value): DbCell =
   of vkStr: DbCell(kind: ckText, s: v.s)
   else: zerr("sql : valeur de type " & typeName(v) & " non prise en charge en paramètre")
 
-proc fromCell(c: DbCell): Value =
+proc fromCell*(c: DbCell): Value =
   case c.kind
   of ckNull: nilV
   of ckBool: boolV(c.b)

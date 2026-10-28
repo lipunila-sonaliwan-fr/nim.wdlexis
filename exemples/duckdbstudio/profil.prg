@@ -85,10 +85,29 @@ procedure PROFILER
 retourner
 
 procedure PROFILER_SQL(s)
+  && profil dans la session de l'onglet actif (sa connexion par défaut), interruptible
   globale dernierplan
+  locale o = ONGLET_ACTIF()
+  si o = nul
+    o = ONGLET_OUTILS()
+  finsi
+  si o.tache <> nul
+    STATUT("Une requête est déjà en cours dans cet onglet : Échap pour l'arrêter.")
+    retourner
+  finsi
+  o.tache = OPERATION_DEBUT("profil de " + RESUME(s), nul)
+  PASTILLE_ONGLET(o)
+  locale ses = PREPARER_ONGLET(o)
+  si ses = nul
+    OPERATION_FIN(o.tache)
+    o.tache = nul
+    PASTILLE_ONGLET(o)
+    retourner
+  finsi
+  o.tache.session = ses
   locale t0 = systeme.horloge()
   essayer
-    locale r = requete("EXPLAIN (ANALYZE, FORMAT JSON) " + s)
+    locale r = ses:requete("EXPLAIN (ANALYZE, FORMAT JSON) " + s)
     locale j = dejson(r[1].explain_value)
     locale duree = systeme.horloge() - t0
     && la racine porte les totaux ; son enfant EXPLAIN_ANALYZE contient le plan
@@ -112,8 +131,11 @@ procedure PROFILER_SQL(s)
     && expertise immédiate du plan
     ANALYSER_PLAN(dernierplan)
   capturer e
-    ERREUR(e)
+    ERREUR(sisinon(o.tache.arret, "profil interrompu par l'utilisateur", e))
   finessayer
+  OPERATION_FIN(o.tache)
+  o.tache = nul
+  PASTILLE_ONGLET(o)
 retourner
 
 procedure APLATIR_PLAN(n, parent, profondeur, ops)
@@ -194,12 +216,8 @@ procedure AFFICHER_PLAN(p)
                             arrondi(o.temps * 100 / tot), LIGNES_TEXTE(o.lignes), sisinon(o.lues > 0, LIGNES_TEXTE(o.lues), ""))
   suivant
   g:disposer("bas")
-  g:ajuster()
-  && plan profond : lisible plutôt qu'entier, centré sur l'opérateur le plus coûteux
-  locale z = g:zoom(1)
-  si z < 60
-    g:zoom(60 / z)
-  finsi
+  && plan profond : lisible plutôt qu'entier
+  g:ajuster(60)
   && histogramme : les 8 opérateurs les plus coûteux
   locale tri = copier(p.ops)
   trier(tri, @PLUS_LENT)
@@ -208,9 +226,6 @@ procedure AFFICHER_PLAN(p)
     prof.histo:libellecategorie(i, gauche(tri[i].nom, 14))
   suivant
   prof.histo:libelleserie(1, "ms")
-  si #tri > 0 et z < 60
-    g:selectionner(tri[1].id)
-  finsi
   prof.resume.libelle = "Latence " + arrondi(p.latence * 1000, 1) + " ms · CPU " + arrondi(p.cpu * 1000, 1) + ;
                         " ms · mémoire " + OCTETS(p.memoire) + " · lignes lues " + LIGNES_TEXTE(p.lues) + ;
                         sisinon(p.temporaire > 0, " · disque temporaire " + OCTETS(p.temporaire), "")

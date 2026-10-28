@@ -917,9 +917,18 @@ proc defineMethods() =
     let v = L.checkNum(a, 3, "ajouter")
     treeMapAdd(c.id, lbl, v)
   mfn "gantt", "ajoutertache", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ajoutertache(libelle, debut, duree, [avancement], [couleur], [detail])
+    let col = if arg(a, 6).kind == vkStr and a[5].s.len > 0: colorOf(a[5]) else: Color()
     @[anyV(ganttAddTask(L.self(a, "ajoutertache").id, L.checkStr(a, 2, "ajoutertache"),
                         start = L.checkNum(a, 3, "ajoutertache"), duration = L.checkNum(a, 4, "ajoutertache"),
-                        progress = L.optNum(a, 5, "ajoutertache", 0)))]
+                        progress = L.optNum(a, 5, "ajoutertache", 0), color = col,
+                        detail = L.optStr(a, 7, "ajoutertache", "")))]
+  mfn "gantt", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ganttDeleteAll(L.self(a, "vider").id)
+  mfn "gantt", "horaire", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ganttClockAxis(L.self(a, "horaire").id, optBool(a, 2, true))
+  mfn "gantt", "largeurlibelles", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ganttLabelWidth(L.self(a, "largeurlibelles").id, L.checkNum(a, 2, "largeurlibelles"))
   mfn "gantt", "fixeravancement", proc (L: Interp, a: seq[Value]): seq[Value] =
     ganttSetProgress(L.self(a, "fixeravancement").id, int(L.checkInt(a, 2, "fixeravancement")),
                      L.checkNum(a, 3, "fixeravancement"))
@@ -1281,6 +1290,13 @@ proc defineMethods() =
     if lang notin ["sql", "lexis", ""]: rtError("editeur:langage : « sql », « lexis » ou \"\" attendu")
     let uid = if arg(a, 3).kind == vkNil: -1 else: int(L.checkInt(a, 3, "langage"))
     editorSetLanguage(id, uid, lang)
+  mfn "editeur", "pastille", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:pastille(texte, [uid], [couleur]) : pastille après le titre de l'onglet ("" : aucune).
+    let id = L.edOf(a, "pastille")
+    let txt = L.optStr(a, 2, "pastille", "")
+    let uid = if arg(a, 3).kind == vkNil: -1 else: int(L.checkInt(a, 3, "pastille"))
+    let col = if arg(a, 4).kind == vkStr and a[3].s.len > 0: colorOf(a[3]) else: Color()
+    editorSetBadge(id, uid, txt, col)
   mfn "editeur", "noms", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Noms proposés par la complétion (SQL : « table » et « table.colonne »).
     let id = L.edOf(a, "noms")
@@ -1510,7 +1526,9 @@ proc defineMethods() =
     L.withDiagram(a, "disposer", c):
       c.layout(dir)
   mfn "diagramme", "ajuster", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let zmin = if arg(a, 2).kind == vkNil: 0.0 else: L.checkNum(a, 2, "ajuster") / 100
     L.withDiagram(a, "ajuster", c):
+      c.fitMin = zmin
       c.fit()
   mfn "diagramme", "zoom", proc (L: Interp, a: seq[Value]): seq[Value] =
     var r = 0.0
@@ -1665,6 +1683,99 @@ proc defineMethods() =
 proc optsArg(a: seq[Value], i: int): LTable =
   if arg(a, i).kind == vkTable: a[i - 1].t else: nil
 
+#
+# Minuterie : appelle une procédure à intervalle régulier (fil dédié), comme
+# un gestionnaire d'événement.
+#
+
+type
+  UiTimer = ref object of LUser
+    owner: Interp
+    handler: Value
+    period: int                   # millisecondes
+    repeat: bool
+    lock: Lock
+    stopped: bool
+    ticks: int
+    thr: ptr Thread[UiTimer]
+
+var timerMethods: LTable
+
+proc timerAlive(t: UiTimer): bool =
+  {.cast(gcsafe).}:
+    withLock t.lock:
+      if t.stopped: return false
+    withLock uiLock: result = t.owner in uiInterps
+    if result and t.owner.stopRequested(): result = false
+
+proc timerMain(t: UiTimer) {.thread.} =
+  {.cast(gcsafe).}:
+    while true:
+      var waited = 0
+      while waited < t.period:
+        let step = min(50, t.period - waited)
+        sleep(step)
+        waited += step
+        if not t.timerAlive(): return
+      let L = t.owner
+      var failed = false
+      L.enter()
+      try:
+        if t.timerAlive():
+          curCtx = Ctx()
+          var n = 0
+          withLock t.lock:
+            inc t.ticks
+            n = t.ticks
+          let ev = newLTable()
+          ev.set "tops", intV(n)
+          discard L.call(t.handler, @[tableV(ev)])
+      except LexisStop:
+        failed = true
+      except LexisError as e:
+        failed = true
+        L.onError(e.msg & "\n" & e.traceback)
+      except Exception as e:
+        failed = true
+        L.onError("erreur interne dans une minuterie : " & e.msg)
+      finally:
+        L.leave()
+      if failed or not t.repeat:
+        withLock t.lock: t.stopped = true
+        return
+
+proc checkTimer(L: Interp, a: seq[Value], fname: string): UiTimer =
+  let v = arg(a, 1)
+  if v.kind != vkUser or not (v.u of UiTimer): rtError("« " & fname & " » : appelez-la avec « : » (minuterie:" & fname & "())")
+  UiTimer(v.u)
+
+proc defineTimerMethods() =
+  timerMethods = newLib()
+  timerMethods.fn "arreter", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = L.checkTimer(a, "arreter")
+    withLock t.lock: t.stopped = true
+  timerMethods.fn "actif", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = L.checkTimer(a, "actif")
+    var r = false
+    withLock t.lock: r = not t.stopped
+    @[boolV(r)]
+  timerMethods.fn "tops", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = L.checkTimer(a, "tops")
+    var r = 0
+    withLock t.lock: r = t.ticks
+    @[intV(r)]
+
+proc newTimer(L: Interp, ms: int, h: Value, repeat: bool): Value =
+  if h.kind == vkNil: rtError("interface.minuterie(millisecondes, @PROCEDURE, [repeter]) : procédure attendue")
+  let t = UiTimer(owner: L, handler: h, period: max(10, ms), repeat: repeat)
+  initLock(t.lock)
+  t.thr = createShared(Thread[UiTimer])
+  createThread(t.thr[], timerMain, t)
+  L.closers.add proc () =
+    {.cast(gcsafe).}:
+      withLock t.lock: t.stopped = true
+  L.wrap(t, "interface.minuterie", timerMethods)
+
 proc openInterface(L: Interp): Value =
   if familyMethods.len == 0: defineMethods()
   ctlMeta = newLTable()
@@ -1673,6 +1784,8 @@ proc openInterface(L: Interp): Value =
   ctlMeta.set "__name", strV("interface.controle")
   ctlMeta.set "__eq", fnV("interface.eq", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[boolV(UiCtl(a[0].u).id == UiCtl(a[1].u).id)])
+  if timerMethods.isNil: defineTimerMethods()
+  discard L.userMeta("interface.minuterie", timerMethods)
   withLock uiLock: uiInterps.add L
   L.closers.add proc () =
     {.cast(gcsafe).}:
@@ -1707,8 +1820,9 @@ proc openInterface(L: Interp): Value =
     let txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
     var e: Control
     if optField(o, "multiligne", false): e = newMultilineEdit(txt)
-    elif optField(o, "indication", "").len > 0: e = newEdit(txt, placeholder = optField(o, "indication", ""))
-    else: e = newEdit(txt)
+    else:
+      e = newEdit(txt, placeholder = optField(o, "indication", ""),
+                  inputKind = (if optField(o, "motdepasse", false): ikPassword else: ikText))
     @[L.newCtl(e, "saisie")]
   ctor("cases", "cases"):
     newCheckBox(L.strs(a, 1, "cases"))
@@ -1872,6 +1986,11 @@ proc openInterface(L: Interp): Value =
     except CatchableError, IOError:
       result = @[boolV(false)]
   m.fn "fenetres", proc (L: Interp, a: seq[Value]): seq[Value] = @[intV(L.openWindows())]
+  m.fn "minuterie", proc (L: Interp, a: seq[Value]): seq[Value] =
+    var ok: bool
+    let ms = int(toInteger(arg(a, 1), ok))
+    if not ok: rtError("interface.minuterie : durée en millisecondes attendue")
+    @[L.newTimer(ms, arg(a, 2), optBool(a, 3, true))]
   m.fn "tracer", proc (L: Interp, a: seq[Value]): seq[Value] =
     L.uiState.trace = optBool(a, 1, true)
   m.fn "alerte", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1892,6 +2011,18 @@ proc openInterface(L: Interp): Value =
     var r = ""
     L.blocking: r = prompt(iconQuestion, msg, def)
     @[strV(r)]
+  m.fn "demandersecret", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # demandersecret(message, [{memoriser = libellé, coche = booléen, titre =}]) :
+    # saisie masquée ; nul si annulée, sinon {valeur, memoriser}.
+    let msg = L.tostr(arg(a, 1))
+    let o = optsArg(a, 2)
+    let lab = optField(o, "memoriser", "")
+    var rem = optField(o, "coche", false)
+    var v = ""
+    var ok = false
+    L.blocking: ok = promptSecret(iconQuestion, msg, v, rem, lab, optField(o, "titre", "Secret"))
+    if not ok: return @[nilV]
+    @[record({"valeur": strV(v), "memoriser": boolV(rem)})]
   m.fn "ouvrirfichier", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = optsArg(a, 1)
     var p = ""
@@ -1945,11 +2076,13 @@ const uiDocs = [
   "interface.executer()", "Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime).",
   "interface.quitter()", "Ferme toutes les fenêtres du programme.",
   "interface.fenetres()", "Nombre de fenêtres ouvertes.",
+  "interface.minuterie(millisecondes, @PROCEDURE, [repeter])", "Appelle la procédure (avec ev.tops) toutes les n millisecondes, comme un gestionnaire d'événement ; repeter = faux : une seule fois. Renvoie la minuterie : m:arreter(), m:actif(), m:tops().",
   "interface.icone(chemin)", "Icône des fenêtres du programme (PNG ou JPEG, carrée, 256 px conseillé) : barre de titre, barre des tâches, Dock. Rend faux si l'image est illisible. Sans effet sur les fenêtres de l'atelier quand le programme y est exécuté.",
   "interface.tracer([actif])", "Affiche dans la console chaque événement reçu (diagnostic).",
   "interface.etiquette(texte, [alignement])", "Libellé (alignement : gauche, centre, droite).",
   "interface.bouton(libelle, [{defaut=, annuler=}])", "Bouton.",
-  "interface.saisie(texte | {texte=, indication=, multiligne=})", "Champ de saisie.",
+  "interface.demandersecret(message, [{memoriser=, coche=, titre=}])", "Saisie masquée (mot de passe) avec case « mémoriser » facultative ; nul si annulée, sinon {valeur, memoriser}.",
+  "interface.saisie(texte | {texte=, indication=, multiligne=, motdepasse=})", "Champ de saisie (motdepasse = vrai : caractères masqués, copie interdite).",
   "interface.cases(option, ...)", "Cases à cocher ; valeur = masque de bits.",
   "interface.radio(option, ...)", "Boutons radio ; valeur = index choisi.",
   "interface.liste([multi])", "Liste.", "interface.combo(element, ...)", "Liste déroulante.",
@@ -1960,7 +2093,7 @@ const uiDocs = [
   "interface.image(chemin)", "Image.", "interface.codebarre(texte)", "Code-barres.",
   "interface.graphe([genre], [titre])", "Graphe : colonnes, lignes, aires, secteurs.",
   "interface.calendrier([\"AAAAMMJJ\"])", "Calendrier.", "interface.kanban()", "Kanban.",
-  "interface.mosaique()", "Mosaïque proportionnelle (treemap).", "interface.gantt()", "Gantt.",
+  "interface.mosaique()", "Mosaïque proportionnelle (treemap).", "interface.gantt()", "Gantt : g:ajoutertache(libelle, debut, duree, [avancement], [couleur], [detail]), g:fixeravancement(i, a), g:vider(), g:horaire([b]) (unités en heures, axe HH:MM), g:largeurlibelles(px) ; surselection : ev.index.",
   "interface.barremenu()", "Barre de menus.", "interface.onglets()", "Onglets.",
   "interface.separateur{vertical=, position=}", "Séparateur (deux enfants).",
   "interface.conteneur([disposition], [colonnes])", "Conteneur.", "interface.colonne()", "Conteneur vertical.",
@@ -2034,6 +2167,7 @@ const uiDocs = [
   "editeur:pressepapiers(texte)", "Copie un texte dans le presse-papiers.",
   "editeur:taillepolice(taille)", "Taille de la police.", "editeur:minicarte([b])", "Affiche ou masque la minicarte.",
   "editeur:langage([langage], [uid])", "Langage d'un document : « sql » (coloration, complétion et commentaires SQL) ou « lexis » ; \"\" : d'après l'extension (.sql). Sans argument : langage du document actif.",
+  "editeur:pastille(texte, [uid], [couleur])", "Pastille colorée après le titre de l'onglet d'un document (\"\" : aucune) ; couleur \"#RRGGBB\" (défaut : accent du thème).",
   "editeur:noms(liste)", "Noms proposés par la complétion ; en SQL, « table » et « table.colonne » (les colonnes sont proposées après « table. »).",
   "markdown:charger(chemin)", "Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut.",
   "markdown:ajouter(texte, ...)", "Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé.",
@@ -2064,7 +2198,7 @@ const uiDocs = [
   "diagramme:selection()", "{genre = noeud | lien | \"\", id, ligne}.", "diagramme:selectionner([id], [ligne])", "Sélectionne un nœud et l'amène dans la vue.",
   "diagramme:action()", "Dernière action de l'utilisateur (surchangement) : {action = deplace | lien | supprimer, id, de, a, deligne, aligne}.",
   "diagramme:disposer([direction])", "Disposition automatique en couches (droite ou bas), nœuds isolés en grille.",
-  "diagramme:ajuster()", "Cadre tout le diagramme dans la vue.", "diagramme:zoom([facteur])", "Multiplie le zoom ; renvoie le zoom en %.",
+  "diagramme:ajuster([zoom_min])", "Cadre tout le diagramme dans la vue ; zoom_min (en %) : un grand diagramme reste lisible, cadré sur son début.", "diagramme:zoom([facteur])", "Multiplie le zoom ; renvoie le zoom en %.",
   "diagramme:position(id, x, y)", "Place un nœud.", "diagramme:modifiable([b])", "Autorise ou non le déplacement et la création de liens.",
   "interface.paletteetat(etat)", "Palette de l'éditeur d'états : zones et éléments à glisser sur l'état, ou à cliquer.",
   "etat:nom()", "Nom de l'état.", "etat:code()", "Texte de etat_<nom>.prg (fonction ETAT_<NOM>).",

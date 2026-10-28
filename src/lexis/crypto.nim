@@ -161,3 +161,85 @@ proc mdpAleatoire*(longueur = 16): string =
       # rejet pour éviter le biais du modulo
       if x.int < (256 div alphabet.len) * alphabet.len and result.len < n:
         result.add alphabet[x.int mod alphabet.len]
+
+# Chiffrement authentifié simple (secrets locaux) : flux SHA-256 en mode compteur,
+# puis HMAC-SHA256 du nonce et du chiffré (chiffrer-puis-authentifier).
+# Format : "lx1:" + base64(nonce 16 | chiffré | étiquette 32).
+
+proc hmacSha256*(cle, m: openArray[byte]): Empreinte =
+  var k: seq[byte]
+  if cle.len > 64: k = @(sha256(cle)) else: k = @cle
+  k.setLen(64)
+  var ipad, opad: seq[byte]
+  for i in 0 .. 63:
+    ipad.add(k[i] xor 0x36)
+    opad.add(k[i] xor 0x5c)
+  let interne = sha256(ipad & @m)
+  sha256(opad & @interne)
+
+proc flux(cleChiffre: Empreinte, nonce: openArray[byte], data: var seq[byte]) =
+  var bloc = 0'u64
+  var i = 0
+  while i < data.len:
+    var m = @cleChiffre & @nonce
+    for s in 0 .. 7: m.add byte((bloc shr (8 * s)) and 0xff)
+    let ks = sha256(m)
+    for j in 0 .. 31:
+      if i + j >= data.len: break
+      data[i + j] = data[i + j] xor ks[j]
+    i += 32
+    inc bloc
+
+proc clesDerivees(cle: string): (Empreinte, Empreinte) =
+  (sha256(octets("lexis-chiffre:" & cle)), sha256(octets("lexis-mac:" & cle)))
+
+const b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+proc versB64(d: openArray[byte]): string =
+  var i = 0
+  while i < d.len:
+    let n = d.len - i
+    let v = (d[i].uint32 shl 16) or (if n > 1: d[i+1].uint32 shl 8 else: 0) or (if n > 2: d[i+2].uint32 else: 0)
+    result.add b64[int((v shr 18) and 63)]
+    result.add b64[int((v shr 12) and 63)]
+    result.add(if n > 1: b64[int((v shr 6) and 63)] else: '=')
+    result.add(if n > 2: b64[int(v and 63)] else: '=')
+    i += 3
+
+proc depuisB64(s: string): seq[byte] =
+  var acc = 0'u32
+  var nb = 0
+  for ch in s:
+    if ch == '=' or ch in Whitespace: continue
+    let p = b64.find(ch)
+    if p < 0: raise newException(ValueError, "base64")
+    acc = (acc shl 6) or p.uint32
+    nb += 6
+    if nb >= 8:
+      nb -= 8
+      result.add byte((acc shr nb) and 0xff)
+
+proc chiffrer*(clair, cle: string): string =
+  let (kc, km) = clesDerivees(cle)
+  var nonce: array[16, byte]
+  if not urandom(nonce): raise newException(OSError, "générateur aléatoire indisponible")
+  var d = octets(clair)
+  flux(kc, nonce, d)
+  let corps = @nonce & d
+  "lx1:" & versB64(corps & @(hmacSha256(km, corps)))
+
+proc dechiffrer*(texte, cle: string, clair: var string): bool =
+  ## faux si le texte est altéré, mal formé ou si la clé est mauvaise
+  if not texte.startsWith("lx1:"): return false
+  var d: seq[byte]
+  try: d = depuisB64(texte[4 .. ^1])
+  except ValueError: return false
+  if d.len < 48: return false
+  let (kc, km) = clesDerivees(cle)
+  let corps = d[0 ..< d.len - 32]
+  if not egaliteConstante(hmacSha256(km, corps), d[d.len - 32 .. ^1]): return false
+  var c = corps[16 .. ^1]
+  flux(kc, corps[0 ..< 16], c)
+  clair = newString(c.len)
+  for i, b in c: clair[i] = char(b)
+  true

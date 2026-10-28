@@ -372,6 +372,31 @@ suivant
 Toujours des paramètres `?` (avec `avec`), jamais de valeurs collées dans le
 texte SQL.
 
+Pendant qu'une requête s'exécute, l'interpréteur est libéré : les autres
+gestionnaires d'événements et les minuteries continuent de tourner, l'interface
+reste disponible. `interromprebase()` interrompt la requête en cours de la base
+du programme (elle échoue alors avec « INTERRUPT »).
+
+**Sessions SQL : requêtes simultanées.** `sessionsql()` ouvre une nouvelle
+connexion sur la même base : mêmes tables et mêmes bases attachées, mais `USE`,
+`SET` et tables temporaires propres. Chaque session exécute une requête à la
+fois ; plusieurs sessions travaillent en même temps.
+
+```lexis
+s = sessionsql()
+lignes = s:requete("select count(*) as n from ventes where ville = ?", "Lyon")
+s:lancer("select * from grosse_table", @FIN)      && en arrière-plan
+? s:occupee(), s:duree()                          && vrai, secondes écoulées
+s:annuler()                                       && interrompt la requête
+
+procedure FIN(ev)
+  && ev.ok, ev.message, ev.duree, ev.sql, ev.lignes, ev.colonnes, ev.types, ev.changees
+  ? sisinon(ev.ok, #ev.lignes + " ligne(s)", ev.message)
+retourner
+```
+
+`s:fermer()` ferme la session (elle l'est aussi à la fin du programme).
+
 ### 4.2 Enregistrement par enregistrement (zones, à la manière de dBase)
 
 ```lexis
@@ -1154,11 +1179,13 @@ code sont en Lexis+.
 
 ### 8.5 DuckDB Studio, un atelier SQL écrit en Lexis+
 
-`exemples/duckdbstudio` est un atelier de conception, d'administration et
-d'optimisation autour de DuckDB, bâti comme l'atelier Lexis+ : explorateur des
-connexions à gauche (avec une palette d'outils et l'historique), vues en
-onglets à droite (**Requêtes**, **Schéma**, **Profil**, **Recommandations**,
-**Cartographie**, **Tableau de bord**), résultats et messages en bas.
+`exemples/duckdbstudio` est un atelier de conception, d'administration,
+d'optimisation et d'exploitation autour de DuckDB, bâti comme l'atelier
+Lexis+ : explorateur des connexions à gauche (avec une palette d'outils et
+l'historique), vues en onglets à droite (**Requêtes**, **Schéma**, **Profil**,
+**Recommandations**, **Cartographie**, **Tableau de bord**, **Pipelines**,
+**Planification**, **BI**, plus celles des extensions), résultats, messages et
+**Assistant** en bas.
 
 ```
 wdlexisrt exemples/duckdbstudio/principal.prg [dossier_du_projet]
@@ -1179,21 +1206,69 @@ fédérée).
 | `projet.prg` | projet (`duckstudio.json`), historique, scripts |
 | `connecteurs.prg` | greffons, attachement, introspection et cache du catalogue (`.duckstudio/`) |
 | `connexions.prg` | concepteur de connexions (paramètres, options, aperçu de l'ATTACH, test et ping) |
+| `taches.prg` | connexions numérotées, onglets (connexion, session, résultat), opérations en cours et arrêt |
 | `explorateur.prg` | arbre connexions / schémas / tables / vues / macros ; palette |
 | `requetes.prg` | éditeur SQL, exécution, résultats, validation pendant la frappe, export |
 | `profil.prg` | `EXPLAIN (ANALYZE, FORMAT JSON)` en graphe, tableau et histogramme |
-| `expertise.prg` | moteur de règles : recommandations Critique / Important / Opportunité, mutualisation, gains estimés |
+| `expertise.prg` | moteur de règles : recommandations Critique / Important / Opportunité, gains estimés |
+| `mutualisation.prg` | empreintes syntaxiques des requêtes : jointures communes, grains d'agrégation partagés |
 | `schema.prg` | concepteur entité-relation, modèle → SQL et script → modèle, analyse d'impact |
+| `sqlast.prg` | arbre syntaxique de DuckDB (`json_serialize_sql`) et réécriture exacte des expressions |
+| `pipelines.prg` | concepteur de pipelines, pipeline → SQL et SQL → pipeline, aperçu par étape |
+| `planificateur.prg` | travaux planifiés, dépendances, reprises, journal, Gantt |
+| `bi.prg` | tableau de bord BI (graphiques, indicateurs, mosaïques, tableaux) |
+| `assistant.prg` | assistant : règles intégrées, modèle local GGUF ou serveur compatible OpenAI |
+| `extensions.prg` | extensions du projet (`extensions/*.prg`) : règles, onglets, menus |
 | `carto.prg` | cartographie des sources, tables et vues (dépendances fédérées) |
 | `tableau.prg` | tableau de bord technique |
 | `menus.prg`, `demo.prg` | menus et raccourcis ; base de démonstration |
 
-Il s'appuie sur trois briques natives : le mode SQL de `ui.editeur`
-(`ed:langage("sql")`, `ed:noms(...)` pour la complétion des tables et colonnes),
-le contrôle `ui.diagramme` (schéma, plan d'exécution, cartographie) et la
-fonction `requete`. Les mots de passe saisis ne sont jamais écrits dans le
-projet : ils sont redemandés à la connexion suivante. Voir `LISEZMOI.md` dans le
-dossier de l'exemple.
+**Pipelines.** Un pipeline est un graphe d'étapes — sources (table, fichier,
+requête), transformations (filtre, colonnes, colonne calculée, agrégation,
+jointure, union, tri, limite, dédoublonnage, SQL libre), cibles (table, fichier,
+vue) — dessiné dans un `ui.diagramme`. La génération fusionne chaque chaîne
+d'étapes en un bloc `SELECT … FROM … WHERE … GROUP BY … HAVING … ORDER BY …
+LIMIT` dans l'ordre des clauses SQL ; une étape partagée devient une expression
+de table commune (`WITH`). Dans l'autre sens, un script est analysé par DuckDB
+lui-même (`json_serialize_sql`) et découpé de la même façon : l'aller-retour
+SQL → pipeline → SQL redonne le même texte. Chaque expression est réécrite par
+DuckDB (`json_deserialize_sql`) : rien n'est perdu, quelles que soient les
+fonctions employées.
+
+**Planification.** Un travail exécute un pipeline, une requête ou un script ;
+il est déclenché à la main, toutes les N minutes, chaque jour à heure fixe ou
+après d'autres travaux, attend ses dépendances, et retente après un échec. Une
+`ui.minuterie` examine les échéances ; les exécutions sont journalisées et
+affichées dans un `ui.gantt` horaire.
+
+**Assistant.** Sans modèle, il explique plans et erreurs, propose une forme
+normalisée et des conseils de réécriture, et génère un modèle à partir d'une
+description (`clients : nom, ville ; commandes : date date, montant decimal ->
+clients`). Avec un modèle GGUF local (paquet `llm`) ou un serveur compatible
+OpenAI (Ollama, llama.cpp, LM Studio…), il reçoit le schéma, la requête, le plan
+et l'erreur : jamais les données. La clé d'API reste dans une variable
+d'environnement.
+
+**Extensions.** Les fichiers `.prg` du dossier `extensions/` du projet sont
+chargés par `lexis.charger` (après confirmation, la première fois) ; chaque
+fonction `EXTENSION_xxx()` déclare ses règles d'expertise, son onglet et ses
+entrées du menu *Extensions*. Modèle commenté : *Extensions ▸ Nouvelle
+extension…* (`modeles/extension.txt`).
+
+**Onglets et requêtes simultanées.** Les connexions sont numérotées (`2 ·
+ventes`). Chaque onglet de requêtes a sa connexion par défaut (liste au-dessus
+de l'éditeur, numéro dans la pastille de l'onglet) et sa propre `sessionsql()` :
+`USE` est appliqué avant chaque exécution, et plusieurs onglets exécutent leurs
+requêtes en même temps (pastille orange pendant l'exécution) ; chaque onglet
+garde son dernier résultat. L'interface reste disponible pendant les opérations
+longues ; au-delà de 15 s, une barre d'arrêt apparaît (« ■ Arrêter », touche
+Échap).
+
+Les mots de passe ne sont jamais écrits dans le projet. Sur demande (case
+*Mémoriser sur ce poste*), ils sont gardés chiffrés dans
+`~/.duckdbstudio/secrets.json` (droits 0600, clé locale aléatoire) ; sinon ils
+sont redemandés à la connexion suivante. Voir `LISEZMOI.md` dans le dossier de
+l'exemple.
 
 ## 9. Le runtime
 
@@ -1297,8 +1372,10 @@ Fonctions intégrées de Lexis+
 | `appeler(@proc, ...)` | Appelle une procédure référencée. |
 | `json(v)` | Texte JSON d'une valeur. |
 | `dejson(s)` | Valeur d'un texte JSON (clefs d'objets en majuscules). |
-| `requete(sql, ...)` | Liste des lignes d'une requête DuckDB (paramètres « ? »). |
+| `requete(sql, ...)` | Liste des lignes d'une requête DuckDB (paramètres « ? ») ; l'interpréteur est libéré pendant l'exécution. |
 | `valeursql(sql, ...)` | Première valeur de la première ligne, ou nul. |
+| `sessionsql()` | Nouvelle session SQL (sa propre connexion sur la base) : `s:requete(sql, ...)`, `s:lancer(sql, @FIN, [params])`, `s:annuler()`, `s:occupee()`, `s:duree()`, `s:sql()`, `s:fermer()` (voir 4.1). |
+| `interromprebase()` | Interrompt la requête en cours de la base du programme. |
 | `ouvrirbase(chemin)` | Ouvre une base DuckDB (":memoire:" pour une base en mémoire) ; par défaut donnees.duckdb du dossier du programme. |
 | `fermerbase()` | Ferme la base et les zones. |
 | `base()` | Chemin de la base ouverte ("" si aucune). |
@@ -1306,6 +1383,8 @@ Fonctions intégrées de Lexis+
 | `hachermdp(mdp)` | Empreinte PBKDF2-SHA256 salée d'un mot de passe. |
 | `verifiermdp(mdp, empreinte)` | Vérifie un mot de passe (temps constant). |
 | `mdpaleatoire([n])` | Mot de passe aléatoire (16 caractères par défaut). |
+| `chiffrer(texte, cle)` | Chiffre et authentifie un texte (flux SHA-256 en mode compteur, HMAC-SHA256, nonce aléatoire) ; résultat `"lx1:…"` en base64. |
+| `dechiffrer(texte, cle)` | Texte d'origine d'un `chiffrer()`, ou nul si la clé est mauvaise ou le texte altéré. |
 | `uuid()` | Identifiant unique aléatoire. |
 | `fdf([alias])` | Fin de fichier de la zone (EOF). |
 | `ddf([alias])` | Début de fichier (BOF). |
@@ -1394,6 +1473,7 @@ Fichiers et dossiers (texte et binaire) - disponible par son nom (`fichier.…`)
 | `fichier.absolu(chemin)` | Chemin absolu. |
 | `fichier.dossiertemp()` | Dossier temporaire. |
 | `fichier.dossierperso()` | Dossier personnel. |
+| `fichier.proteger(chemin)` | Réserve le fichier à son propriétaire (droits 0600 sous Linux et macOS). |
 
 ### Paquet `binaire`
 
@@ -1812,11 +1892,13 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.executer()` | Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime). |
 | `interface.quitter()` | Ferme toutes les fenêtres du programme. |
 | `interface.fenetres()` | Nombre de fenêtres ouvertes. |
+| `interface.minuterie(millisecondes, @PROCEDURE, [repeter])` | Appelle la procédure (avec `ev.tops`, le nombre d'appels) toutes les n millisecondes, comme un gestionnaire d'événement (sur son propre fil, sérialisé avec les autres) ; `repeter = faux` : une seule fois. Renvoie la minuterie : `m:arreter()`, `m:actif()`, `m:tops()`. Elle s'arrête avec le programme, ou si la procédure lève une erreur. |
 | `interface.icone(chemin)` | Icône des fenêtres du programme (PNG ou JPEG, carrée, 256 px conseillé) : barre de titre, barre des tâches, Dock. Rend faux si l'image est illisible. Sans effet sur les fenêtres de l'atelier quand le programme y est exécuté. |
 | `interface.tracer([actif])` | Affiche dans la console chaque événement reçu (diagnostic). |
 | `interface.etiquette(texte, [alignement])` | Libellé (alignement : gauche, centre, droite). |
 | `interface.bouton(libelle, [{defaut=, annuler=}])` | Bouton. |
-| `interface.saisie(texte \| {texte=, indication=, multiligne=})` | Champ de saisie. |
+| `interface.saisie(texte \| {texte=, indication=, multiligne=, motdepasse=})` | Champ de saisie ; `motdepasse = vrai` : caractères masqués, copie interdite. |
+| `interface.demandersecret(message, [{memoriser=, coche=, titre=}])` | Boîte de saisie masquée (mot de passe), avec une case à cocher facultative (`memoriser` : son libellé) ; nul si annulée, sinon `{valeur, memoriser}`. |
 | `interface.cases(option, ...)` | Cases à cocher ; valeur = masque de bits. |
 | `interface.radio(option, ...)` | Boutons radio ; valeur = index choisi. |
 | `interface.liste([multi])` | Liste. |
@@ -1836,7 +1918,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.calendrier(["AAAAMMJJ"])` | Calendrier. |
 | `interface.kanban()` | Kanban. |
 | `interface.mosaique()` | Mosaïque proportionnelle (treemap). |
-| `interface.gantt()` | Gantt. |
+| `interface.gantt()` | Diagramme de Gantt : `g:ajoutertache(libelle, debut, duree, [avancement], [couleur], [detail])` (renvoie le numéro de la tâche ; `couleur` `"#RRGGBB"`, `detail` écrit au bout de la barre), `g:fixeravancement(i, a)`, `g:vider()`, `g:horaire([b])` (unités en heures, axe gradué en HH:MM), `g:largeurlibelles(px)` ; `surselection` : `ev.index`. |
 | `interface.barremenu()` | Barre de menus. |
 | `interface.onglets()` | Onglets. |
 | `interface.separateur{vertical=, position=}` | Séparateur (deux enfants). |
@@ -1935,6 +2017,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `c:detruire()` | Retire le contrôle (et son contenu) de sa fenêtre. |
 | `editeur:fixertexte(texte, [uid], [enregistre])` | Remplace le texte d'un document (annulable) ; `enregistre = vrai` le marque enregistré. |
 | `editeur:langage([langage], [uid])` | Langage d'un document : `"sql"` (coloration, complétion et commentaires `--` SQL) ou `"lexis"` ; `""` : d'après l'extension (`.sql` = SQL). Sans argument : langage du document actif. |
+| `editeur:pastille(texte, [uid], [couleur])` | Pastille affichée après le titre de l'onglet (`""` : aucune) ; couleur `"#RRGGBB"`, par défaut celle du thème. |
 | `editeur:noms(liste)` | Noms proposés par la complétion ; en SQL, `"table"` et `"table.colonne"` (les colonnes sont proposées après `table.`). |
 | `interface.diagramme([{modifiable=, direction=}])` | Canevas de diagramme (nœuds et liens) : glisser un nœud le déplace, glisser le fond déplace la vue, la molette zoome ; en mode `modifiable`, glisser depuis la pastille d'un bord (titre ou ligne) vers un autre nœud crée un lien (`surchangement`, `d:action()`), Suppr demande une suppression. `direction` : `droite` (défaut) ou `bas`. `surselection` : `ev.texte` = id du nœud, `"lien:<id>"` ou `""` ; `ev.index` = ligne. |
 | `diagramme:noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=}` | Ajoute ou met à jour un nœud. `lignes` : textes ou `{texte=, detail=, marque=}` (marque : PK, FK…) ; `forme` : `table` (défaut) ou `boite` ; `pastille` : texte en haut à droite ; `jauge` : 0 à 1 ; sans `x`/`y`, placé à droite de l'existant. |
@@ -1942,7 +2025,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `diagramme:supprimer(id)`, `:vider()`, `:noeuds()`, `:liens()` | Supprime un nœud (et ses liens) ou un lien ; tout ; liste `{id, titre, x, y, largeur, hauteur}` ; liste `{id, de, a, deligne, aligne, libelle}`. |
 | `diagramme:selection()`, `:selectionner([id], [ligne])` | `{genre = noeud \| lien \| "", id, ligne}` ; sélectionne un nœud et l'amène dans la vue. |
 | `diagramme:action()` | Dernière action de l'utilisateur (`surchangement`) : `{action = deplace \| lien \| supprimer, id, de, a, deligne, aligne}`. |
-| `diagramme:disposer([direction])`, `:ajuster()`, `:zoom([facteur])`, `:position(id, x, y)`, `:modifiable([b])` | Disposition automatique en couches ; tout dans la vue ; zoom (renvoie le %) ; place un nœud ; autorise ou non les modifications. |
+| `diagramme:disposer([direction])`, `:ajuster([zoom_min])`, `:zoom([facteur])`, `:position(id, x, y)`, `:modifiable([b])` | Disposition automatique en couches ; tout dans la vue (`zoom_min` en % : un grand diagramme reste lisible, cadré sur son début) ; zoom (renvoie le %) ; place un nœud ; autorise ou non les modifications. |
 | `interface.concepteur{projet=, fichier= \| nom=}` | Canevas du concepteur de formulaires (aperçu réel, glisser-déposer, repères, poignées) ; `fichier` : un `form_<nom>.prg` à rouvrir, `nom` : un formulaire neuf. `surselection` : élément sélectionné ; `surchangement` : dessin modifié à la souris ou au clavier. |
 | `interface.palette(concepteur)` | Palette du concepteur (glisser ou cliquer pour ajouter). |
 | `concepteur:nom()`, `concepteur:code()`, `concepteur:codeassocie([chemin])` | Nom du formulaire ; texte de `form_<nom>.prg` ; fichier de code associé. |
@@ -1970,6 +2053,8 @@ Voir le chapitre 8.2.
 
 | Fonction | Description |
 | --- | --- |
+| `lexis.charger(chemin)` | Charge les procédures et fonctions d'un fichier `.prg` dans le programme en cours (extensions, greffons) ; renvoie la liste de leurs noms. Le fichier ne doit contenir que des procédures ; recharger le même fichier remplace ses procédures, un nom déjà défini ailleurs est refusé. |
+| `lexis.procedure(nom)` | Référence d'une procédure ou d'une fonction par son nom (nul si elle n'existe pas), à passer à `appeler(ref, ...)`. |
 | `lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])` | Analyse un texte comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste `{ligne, colonne, longueur, genre, message}` ; `genre` : erreur, avertissement, info ; `projet` : dossier dont les procédures sont connues. |
 | `lexis.structure(source)` | Procédures, fonctions et globales définies : liste de `{nom, genre, ligne, colonne}`. |
 | `lexis.documentation([paquet])` | Liste de `{paquet, signature, nom, proprietaire, methode, description}`. |
