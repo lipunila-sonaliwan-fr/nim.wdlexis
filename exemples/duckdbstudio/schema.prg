@@ -55,7 +55,7 @@ procedure SCHEMA_SOURCES
     locale cat = catalogue[majuscule(c.nom)]
     si cat <> nul
       pour chaque s dans cat.schemas
-        sch.source:ajouter(c.nom + " · " + s.nom)
+        sch.source:ajouter(LIBELLE_CNX(c) + " · " + s.nom)
         inserer(sch.sources, {cnx = c, schema = s.nom})
         si modele <> nul et modele.clef = c.nom + "." + s.nom
           sch.source:selectionner(#sch.sources)
@@ -220,7 +220,7 @@ procedure AFFICHER_MODELE(disposer)
   si disposer et places < #modele.tables + #modele.vues
     d:disposer("droite")
   finsi
-  d:ajuster()
+  d:ajuster(50)
 retourner
 
 procedure SCHEMA_DISPOSER(ev)

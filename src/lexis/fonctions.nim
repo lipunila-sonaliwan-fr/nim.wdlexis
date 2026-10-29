@@ -8,7 +8,7 @@
 
 import std/[strutils, math, json, times, uri, algorithm, random, sysrand, tables]
 from std/unicode import Rune, toUpper, toLower, runeLen, toRunes, `$`
-import api, zones, crypto
+import api, zones, crypto, sqlsession
 
 #
 # Outils
@@ -341,15 +341,21 @@ proc openBase(L: Interp): Value =
   def "requete":
     if a.len == 0: rtError("requete : texte SQL attendu")
     var r: QueryResult
-    try: r = L.query(L.tostrArg(a, 1), a[1 .. ^1])
+    try: r = L.queryReleased(L.tostrArg(a, 1), a[1 .. ^1])
     except ZoneError as e: rtError(e.msg)
     rowsToValue(r)
   def "valeursql":
     if a.len == 0: rtError("valeursql : texte SQL attendu")
     var r: QueryResult
-    try: r = L.query(L.tostrArg(a, 1), a[1 .. ^1])
+    try: r = L.queryReleased(L.tostrArg(a, 1), a[1 .. ^1])
     except ZoneError as e: rtError(e.msg)
     r.firstValue
+  def "sessionsql":
+    try: L.newSqlSession()
+    except DuckError as e: rtError("sessionsql : " & e.msg)
+  def "interromprebase":
+    L.interruptBase()
+    nilV
   def "ouvrirbase":
     try: L.openBase(L.tostrArg(a, 1))
     except DuckError as e: rtError("ouvrirbase : " & e.msg)
@@ -371,6 +377,11 @@ proc openBase(L: Interp): Value =
     boolV(verifierMdp(L.tostrArg(a, 1), (if arg(a, 2).kind == vkStr: arg(a, 2).s else: "")))
   def "mdpaleatoire": strV(mdpAleatoire(int(L.optInt(a, 1, "mdpaleatoire", 16))))
   def "uuid": strV(uuid4())
+  def "chiffrer":
+    strV(chiffrer(L.tostrArg(a, 1), L.tostrArg(a, 2)))
+  def "dechiffrer":
+    var clair = ""
+    if dechiffrer(L.tostrArg(a, 1), L.tostrArg(a, 2), clair): strV(clair) else: nilV
 
   # ----------------------------------------------------------- zones de travail
   def "fdf": boolV(L.zoneArg(a, 1).eof)
@@ -475,8 +486,10 @@ registerPackage PackageDef(name: "base", global: true, open: openBase,
     "appeler(@proc, ...)", "Appelle une procédure référencée.",
     "json(v)", "Texte JSON d'une valeur.",
     "dejson(s)", "Valeur d'un texte JSON (clefs d'objets en majuscules).",
-    "requete(sql, ...)", "Liste des lignes d'une requête DuckDB (paramètres « ? »).",
+    "requete(sql, ...)", "Liste des lignes d'une requête DuckDB (paramètres « ? ») ; pendant que DuckDB travaille, l'interface et les autres gestionnaires restent actifs.",
     "valeursql(sql, ...)", "Première valeur de la première ligne, ou nul.",
+    "sessionsql()", "Nouvelle session SQL sur la base du programme (sa propre connexion : USE, SET et tables temporaires propres) : s:requete(sql, ...) ; s:lancer(sql, @FIN, [params]) exécute en arrière-plan puis appelle FIN(ev) (ev.ok, ev.lignes, ev.colonnes, ev.types, ev.message, ev.duree, ev.changees) ; s:annuler(), s:occupee(), s:duree(), s:sql(), s:fermer(). Plusieurs sessions travaillent en même temps.",
+    "interromprebase()", "Interrompt la requête en cours sur la connexion principale (depuis un autre gestionnaire : un bouton Arrêter).",
     "ouvrirbase(chemin)", "Ouvre une base DuckDB (\":memoire:\" pour une base en mémoire) ; par défaut donnees.duckdb du dossier du programme.",
     "fermerbase()", "Ferme la base et les zones.",
     "base()", "Chemin de la base ouverte (\"\" si aucune).",
@@ -484,6 +497,8 @@ registerPackage PackageDef(name: "base", global: true, open: openBase,
     "hachermdp(mdp)", "Empreinte PBKDF2-SHA256 salée d'un mot de passe.",
     "verifiermdp(mdp, empreinte)", "Vérifie un mot de passe (temps constant).",
     "mdpaleatoire([n])", "Mot de passe aléatoire (16 caractères par défaut).",
+    "chiffrer(texte, cle)", "Chiffre et authentifie un texte (flux SHA-256 en mode compteur + HMAC-SHA256, nonce aléatoire) : « lx1:… » en base64.",
+    "dechiffrer(texte, cle)", "Texte d'origine d'un chiffrer(), ou nul si la clé est mauvaise ou le texte altéré.",
     "uuid()", "Identifiant unique aléatoire.",
     "fdf([alias])", "Fin de fichier de la zone (EOF).",
     "ddf([alias])", "Début de fichier (BOF).",

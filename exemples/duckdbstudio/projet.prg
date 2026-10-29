@@ -6,7 +6,8 @@
 && demandés à l'attachement et gardés en mémoire pendant la session.
 
 fonction DS_PROJET_VIDE()
-retourner {version = 1, connexions = {}, historique = {}, positions = {}, ignorees = {}}
+retourner {version = 2, connexions = {}, historique = {}, positions = {}, ignorees = {}, pipelines = {}, ;
+           travaux = {}, executions = {}, bi = {}, extensions = {}}
 
 fonction FICHIER_PROJET()
 retourner fichier.joindre(dossier, "duckstudio.json")
@@ -53,15 +54,16 @@ procedure CHARGER_PROJET(d)
       finessayer
     finsi
   suivant
-  && connexions sans secret : attachées tout de suite
+  && connexions sans secret, ou dont les secrets sont mémorisés : attachées tout de suite
   pour chaque c dans projet.connexions
-    si non A_DES_SECRETS(c)
+    si non A_DES_SECRETS(c) ou SECRETS_CONNUS(c)
       ATTACHER(c, faux)
     finsi
   suivant
   REMPLIR_EXPLORATEUR()
   REMPLIR_HISTORIQUE()
   NOMS_COMPLETION()
+  PROJET_CHARGE()
   && scripts du projet
   locale ouverts = 0
   pour chaque nom dans fichier.liste(dossier, faux)
@@ -73,6 +75,8 @@ procedure CHARGER_PROJET(d)
   si ouverts = 0
     NOUVELLE_REQUETE()
   finsi
+  PASTILLES()
+  ONGLET_CHOISI()
   si #projet.connexions = 0
     STATUT("Projet vide : créez une connexion (+ Connexion) ou une base de démonstration (Fichier).")
   sinon
@@ -81,13 +85,26 @@ procedure CHARGER_PROJET(d)
   DS_ECRIRE_REGLAGES()
 retourner
 
+procedure PROJET_CHARGE
+  && vues des lots 2 et 3 : pipelines, planification, BI, extensions
+  REMPLIR_PIPELINES()
+  PLANIF_CHARGER()
+  BI_CHARGER()
+  EXTENSIONS_CHARGER(faux)
+retourner
+
 procedure ENREGISTRER_PROJET
   si dossier = ""
     retourner
   finsi
   && les secrets ne quittent pas la mémoire
-  locale copie = {version = projet.version, connexions = {}, historique = projet.historique, ;
-                  positions = projet.positions, ignorees = projet.ignorees}
+  locale copie = {}
+  pour chaque k, v dans projet
+    si k <> "CONNEXIONS"
+      copie[k] = v
+    finsi
+  suivant
+  copie.connexions = {}
   pour chaque c dans projet.connexions
     locale p = {}
     pour chaque k, v dans c.parametres
@@ -95,7 +112,7 @@ procedure ENREGISTRER_PROJET
         p[k] = v
       finsi
     suivant
-    inserer(copie.connexions, {nom = c.nom, description = c.description, type = c.type, ;
+    inserer(copie.connexions, {num = c.num, nom = c.nom, description = c.description, type = c.type, ;
                                parametres = p, options = c.options})
   suivant
   essayer
@@ -167,13 +184,17 @@ procedure NOUVELLE_REQUETE
   locale uid = ed:nouveau("requete" + nbrequetes + ".sql")
   ed:langage("sql", uid)
   ed:fixertexte("-- Requête " + nbrequetes + " : F5 ou ▶ Exécuter (la sélection, sinon tout le script)" + car(10), uid, vrai)
+  PASTILLE_ONGLET(ONGLET(uid))
+  ONGLET_CHOISI()
   vues.valeur = 1
 retourner
 
 procedure OUVRIR_SCRIPT
   locale p = ui.ouvrirfichier{titre = "Ouvrir un script SQL", dossier = dossier, filtre = "SQL|*.sql|Tous les fichiers|*"}
   si p <> nul
-    ed:ouvrir(p)
+    locale u = ed:ouvrir(p)
+    PASTILLE_ONGLET(ONGLET(u))
+    ONGLET_CHOISI()
     vues.valeur = 1
   finsi
 retourner

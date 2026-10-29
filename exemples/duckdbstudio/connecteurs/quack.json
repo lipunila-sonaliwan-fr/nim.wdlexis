@@ -5,7 +5,7 @@
   "sigle": "QK",
   "couleur": "#FB923C",
   "mode": "catalogue",
-  "version_min": "2.0",
+  "version_min": "1.5.5",
   "extension": "quack",
   "parametres": [
     {

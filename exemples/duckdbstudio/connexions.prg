@@ -16,7 +16,7 @@ procedure CONNEXION_DIALOGUE(c, type)
     type = c.type
   finsi
   condlg = ui.fenetre{titre = sisinon(c = nul, "Nouvelle connexion", "Connexion « " + sisinon(c = nul, "", c.nom) + " »"), ;
-                      largeur = 680, hauteur = 700, disposition = "bordure", sombre = reglages.sombre}
+                      largeur = 680, hauteur = 760, disposition = "bordure", sombre = reglages.sombre}
   condlg.surfermeture = @CON_FERMETURE
   locale haut = condlg:ajouter(ui.cadre("Connexion", "grille"))
   haut.ancrage = "haut"
@@ -74,7 +74,8 @@ procedure CON_PARAMETRES
     si c <> nul et c.type = k.type
       v = VALEUR_PARAM(c, p.nom)
     finsi
-    locale s = ui.saisie{texte = chaine(v), indication = sisinon(p.defaut = nul, "", chaine(p.defaut))}
+    locale s = ui.saisie{texte = chaine(v), indication = sisinon(p.defaut = nul, "", chaine(p.defaut)), ;
+                         motdepasse = p.secret = vrai}
     s.surchangement = @CON_APERCU
     si p.fichier = vrai ou p.dossier = vrai
       locale ligne = g:ajouter(ui.superconteneur("horizontal"))
@@ -116,6 +117,13 @@ procedure CON_PARAMETRES
       conctl.options:cocher(i, coche)
     suivant
     conctl.options.surchangement = @CON_APERCU
+  finsi
+  && mots de passe : mémorisés sur ce poste si souhaité (chiffrés, jamais dans le projet)
+  conctl.memoriser = nul
+  si A_DES_SECRETS({type = k.type})
+    conctl.memoriser = conctl.zone:ajouter(ui.cases("Mémoriser les mots de passe sur ce poste (chiffrés, hors du projet)"))
+    conctl.memoriser:cocher(1, c <> nul et SECRETS_MEMORISES(c.nom))
+    conctl.memoriser.infobulle = "Gardés dans " + FICHIER_SECRETS() + " ; décochez pour les oublier"
   finsi
   conctl.zone:ajouter(ui.etiquette("Instruction d'attachement"))
   conctl.apercu = conctl.zone:ajouter(ui.markdown(""))
@@ -235,6 +243,9 @@ procedure CON_ENREGISTRER(ev)
     finsi
   suivant
   si conctl.edition <> nul
+    si minuscule(conctl.edition.nom) <> minuscule(c.nom)
+      OUBLIER_SECRETS(conctl.edition.nom)
+    finsi
     DETACHER(conctl.edition)
     catalogue[majuscule(conctl.edition.nom)] = nul
     pour i = 1 a #projet.connexions
@@ -242,8 +253,13 @@ procedure CON_ENREGISTRER(ev)
         projet.connexions[i] = c
       finsi
     suivant
+    c.num = conctl.edition.num
   sinon
+    c.num = NUMERO_LIBRE()
     inserer(projet.connexions, c)
+  finsi
+  si conctl.memoriser <> nul
+    MEMORISER_SECRETS(c, conctl.memoriser:coche(1))
   finsi
   locale r = ATTACHER(c, vrai)
   ENREGISTRER_PROJET()
@@ -271,6 +287,7 @@ procedure SUPPRIMER_CONNEXION(c)
     retourner
   finsi
   DETACHER(c)
+  OUBLIER_SECRETS(c.nom)
   catalogue[majuscule(c.nom)] = nul
   locale l = {}
   pour chaque x dans projet.connexions
@@ -282,4 +299,139 @@ procedure SUPPRIMER_CONNEXION(c)
   ENREGISTRER_PROJET()
   REMPLIR_EXPLORATEUR()
   NOMS_COMPLETION()
+retourner
+
+&&
+&& Mots de passe mémorisés sur ce poste (facultatif)
+&&
+&& Fichier ~/.duckdbstudio/secrets.json, réservé à l'utilisateur (0600) : une entrée par
+&& projet et par connexion, chiffrée et authentifiée (chiffrer()) avec la clé locale
+&& ~/.duckdbstudio/cle (aléatoire, 0600). Le projet (duckstudio.json) n'en contient
+&& jamais : on peut le partager sans risque. Protection contre une lecture fortuite ou
+&& un partage du dossier, pas contre quelqu'un qui accède au compte de l'utilisateur.
+
+fonction DOSSIER_LOCAL()
+  locale d = fichier.joindre(fichier.dossierperso(), ".duckdbstudio")
+  si non fichier.estdossier(d)
+    fichier.creerdossier(d)
+  finsi
+retourner d
+
+fonction FICHIER_SECRETS()
+retourner fichier.joindre(DOSSIER_LOCAL(), "secrets.json")
+
+fonction CLE_LOCALE()
+  globale clelocale
+  si clelocale <> nul
+    retourner clelocale
+  finsi
+  locale p = fichier.joindre(DOSSIER_LOCAL(), "cle")
+  si fichier.existe(p)
+    clelocale = rogner(fichier.lire(p))
+  finsi
+  si clelocale = nul ou longueur(clelocale) < 32
+    clelocale = mdpaleatoire(64)
+    fichier.ecrire(p, clelocale)
+  finsi
+  fichier.proteger(p)
+retourner clelocale
+
+fonction LIRE_SECRETS_LOCAUX()
+  && {version, entrees = {CLEF -> texte chiffré}}
+  locale p = FICHIER_SECRETS()
+  si fichier.existe(p)
+    essayer
+      locale t = dejson(fichier.lire(p))
+      si t <> nul et t.entrees <> nul
+        retourner t
+      finsi
+    capturer e
+      JOURNAL("Mots de passe mémorisés illisibles : " + e)
+    finessayer
+  finsi
+retourner {version = 1, entrees = {}}
+
+procedure ECRIRE_SECRETS_LOCAUX(t)
+  locale p = FICHIER_SECRETS()
+  essayer
+    fichier.ecrire(p, json(t))
+    fichier.proteger(p)
+  capturer e
+    ERREUR("enregistrement des mots de passe impossible : " + e)
+  finessayer
+retourner
+
+fonction CLEF_SECRET(nom)
+retourner majuscule(dossier + "|" + nom)
+
+fonction SECRETS_MEMORISES(nom)
+  locale t = LIRE_SECRETS_LOCAUX()
+retourner t.entrees[CLEF_SECRET(nom)] <> nul
+
+procedure CHARGER_SECRETS_LOCAUX
+  && au chargement du projet : secrets mémorisés de ses connexions
+  locale t = LIRE_SECRETS_LOCAUX()
+  pour chaque c dans projet.connexions
+    locale v = t.entrees[CLEF_SECRET(c.nom)]
+    si v <> nul
+      locale clair = dechiffrer(v, CLE_LOCALE())
+      si clair = nul
+        JOURNAL("Mots de passe mémorisés de « " + c.nom + " » illisibles (clé locale changée ?) : ignorés.")
+      sinon
+        secrets[majuscule(c.nom)] = dejson(clair)
+      finsi
+    finsi
+  suivant
+retourner
+
+procedure MEMORISER_SECRETS(c, oui)
+  si non oui
+    OUBLIER_SECRETS(c.nom)
+    retourner
+  finsi
+  locale s = secrets[majuscule(c.nom)]
+  si s = nul
+    retourner
+  finsi
+  locale propres = {}
+  locale n = 0
+  pour chaque k, v dans s
+    si v <> nul et v <> "" et v <> "••••••"
+      propres[k] = v
+      n += 1
+    finsi
+  suivant
+  si n = 0
+    retourner
+  finsi
+  locale t = LIRE_SECRETS_LOCAUX()
+  t.entrees[CLEF_SECRET(c.nom)] = chiffrer(json(propres), CLE_LOCALE())
+  ECRIRE_SECRETS_LOCAUX(t)
+  JOURNAL("Mots de passe de « " + c.nom + " » mémorisés sur ce poste.")
+retourner
+
+procedure OUBLIER_SECRETS(nom)
+  locale t = LIRE_SECRETS_LOCAUX()
+  si t.entrees[CLEF_SECRET(nom)] <> nul
+    t.entrees[CLEF_SECRET(nom)] = nul
+    ECRIRE_SECRETS_LOCAUX(t)
+    JOURNAL("Mots de passe de « " + nom + " » oubliés.")
+  finsi
+retourner
+
+procedure OUBLIER_TOUS_SECRETS
+  && menu : oublie les mots de passe mémorisés des connexions du projet
+  si non ui.confirmer("Oublier les mots de passe mémorisés sur ce poste pour les connexions de ce projet ?")
+    retourner
+  finsi
+  locale t = LIRE_SECRETS_LOCAUX()
+  locale n = 0
+  pour chaque c dans projet.connexions
+    si t.entrees[CLEF_SECRET(c.nom)] <> nul
+      t.entrees[CLEF_SECRET(c.nom)] = nul
+      n += 1
+    finsi
+  suivant
+  ECRIRE_SECRETS_LOCAUX(t)
+  STATUT(n + " connexion(s) : mots de passe oubliés sur ce poste.")
 retourner

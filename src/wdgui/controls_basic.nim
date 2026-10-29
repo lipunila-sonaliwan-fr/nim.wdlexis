@@ -348,6 +348,8 @@ type
     scrollX*, scrollY*: float
     rightMargin*: float
     followCursor: bool
+    barDrag: bool           # multiligne : ascenseur saisi.
+    barOffset: float
 
 proc newEdit*(text = "", inputKind = ikText, multiline = false, placeholder = ""): Edit =
   result = Edit(text: text, inputKind: inputKind, multiline: multiline, placeholder: placeholder)
@@ -385,6 +387,22 @@ proc textArea(c: Edit): Rect =
   let r = c.rect
   if c.multiline: rect(r.x + 8, r.y + 5, max(0.0, r.w - 16 - c.rightMargin), max(0.0, r.h - 10))
   else: rect(r.x + 8, r.y + 2, max(0.0, r.w - 16 - c.rightMargin), max(0.0, r.h - 4))
+
+proc contentH(c: Edit, t: Theme): float = float(c.lineRanges.len) * t.lineHeight
+
+proc maxScrollY(c: Edit, t: Theme): float = max(0.0, c.contentH(t) - c.textArea.h)
+
+proc barTrack(c: Edit): Rect =
+  let r = c.rect
+  rect(r.x + r.w - 12, r.y + 3, 9, max(0.0, r.h - 6))
+
+proc barThumb(c: Edit, t: Theme): Rect =
+  let tr = c.barTrack
+  let lp = clamp(tr.h * c.textArea.h / max(1.0, c.contentH(t)), min(20.0, tr.h), tr.h)
+  let ms = c.maxScrollY(t)
+  rect(tr.x, tr.y + (tr.h - lp) * (if ms > 0: clamp(c.scrollY / ms, 0.0, 1.0) else: 0.0), tr.w, lp)
+
+proc hasBar(c: Edit, t: Theme): bool = c.multiline and c.maxScrollY(t) > 0.5
 
 proc lineY(c: Edit, t: Theme, z: Rect, i: int): float =
   if c.multiline: z.y + float(i) * t.lineHeight - c.scrollY
@@ -496,6 +514,11 @@ method draw*(c: Edit, d: Drawing, t: Theme) =
     let y = c.lineY(t, z, li)
     d.fillRect(rect(z.x - c.scrollX + cx, y + (lh - th) / 2 - 1, 1.5, th + 2), c.style.text.get(t.text))
   d.popClip()
+  if c.hasBar(t):
+    let tr = c.barTrack
+    let tb = c.barThumb(t)
+    d.fillRoundRect(tr, 4.5, withAlpha(t.textSecondary, if c.barDrag: 34 else: 18))
+    d.fillRoundRect(tb, 4.5, withAlpha(t.textSecondary, if c.barDrag: 210 else: 130))
 
 method onText*(c: Edit, s: string) =
   if c.state != csActive: return
@@ -583,6 +606,20 @@ method onKey*(c: Edit, e: KeyEvent): bool =
 method onMouse*(c: Edit, e: MouseEvent) =
   if c.win == nil or c.win.drawing == nil or e.button notin {mbLeft, mbNone}: return
   let t = c.win.theme
+  if c.barDrag or (e.action == maPress and c.hasBar(t) and c.barTrack.shrink(-2, 0).containsPoint(e.x, e.y)):
+    let tr = c.barTrack
+    let tb = c.barThumb(t)
+    case e.action
+    of maPress:
+      c.barDrag = true
+      c.barOffset = if e.y >= tb.y and e.y <= tb.y + tb.h: e.y - tb.y else: tb.h / 2
+    of maRelease:
+      c.barDrag = false
+      return
+    else: discard
+    let frac = clamp((e.y - c.barOffset - tr.y) / max(1.0, tr.h - tb.h), 0.0, 1.0)
+    c.scrollY = frac * c.maxScrollY(t)
+    return
   case e.action
   of maPress:
     let p = c.posFromXY(c.win.drawing, t, e.x, e.y)

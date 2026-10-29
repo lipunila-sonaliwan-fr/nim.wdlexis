@@ -31,7 +31,7 @@ procedure CARTO_FILTRES
   carto.filtre:vider()
   carto.filtre:ajouter("Toutes les connexions")
   pour chaque c dans projet.connexions
-    carto.filtre:ajouter(c.nom)
+    carto.filtre:ajouter(LIBELLE_CNX(c))
   suivant
   si v = nul ou v < 1 ou v > #projet.connexions + 1
     v = 1
@@ -81,7 +81,7 @@ procedure REMPLIR_CARTO
       pour chaque s dans cat.schemas
         ntab += #s.tables
       suivant
-      d:noeud{id = idc, titre = c.nom, soustitre = sisinon(con = nul, c.type, con.libelle), forme = "boite", ;
+      d:noeud{id = idc, titre = LIBELLE_CNX(c), soustitre = sisinon(con = nul, c.type, con.libelle), forme = "boite", ;
               couleur = sisinon(con = nul, "#334155", con.couleur), pastille = sisinon(con = nul, "", con.sigle), ;
               lignes = {{texte = "schémas", detail = "" + #cat.schemas}, {texte = "tables", detail = "" + ntab}}}
       carto.objets[idc] = {genre = "connexion", cnx = c}
@@ -139,7 +139,7 @@ procedure REMPLIR_CARTO
     finsi
   suivant
   d:disposer("droite")
-  d:ajuster()
+  d:ajuster(50)
   carto.resume.libelle = #projet.connexions + " connexion(s) · " + nt + " table(s) · " + nv + " vue(s) · " + ;
                          nl + " dépendance(s) · " + LIGNES_TEXTE(volume) + " lignes"
 retourner

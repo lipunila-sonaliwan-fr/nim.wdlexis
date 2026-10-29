@@ -17,9 +17,9 @@ requête 2 ou 4, et enfin *Analyser*.
 | Domaine | Fonctions |
 | --- | --- |
 | Connexions | greffons JSON (`connecteurs/`), concepteur (paramètres, options, aperçu de l'ATTACH, test, ping, nombre d'objets), attachement au démarrage, catalogue mis en cache dans `.duckstudio/` |
-| Explorateur | connexions ▸ schémas ▸ tables (volumétrie) / vues / macros, fiche de l'objet (colonnes, clés, définition), *Requête*, *Décrire* (SUMMARIZE), *Schéma* ; palette (sources, modèles SQL, flux) ; historique |
+| Explorateur | séparateur déplaçable entre l'arbre et la fiche (de même pour la palette) ; connexions numérotées ▸ schémas ▸ tables (volumétrie) / vues / macros, fiche de l'objet (colonnes, clés, définition), *Requête*, *Décrire* (SUMMARIZE), *Schéma* ; palette (sources, modèles SQL, flux) ; historique |
 | Éditeur SQL | coloration SQL, complétion des tables et des colonnes (`table.` ▸ colonnes), commentaires `--`, validation pendant la frappe (analyseur de DuckDB), plusieurs scripts en onglets, exécution de la sélection ou du script (F5, Ctrl+R), erreurs soulignées |
-| Résultats | grille typée (∅ pour NULL), limite réglable, comptage exact, export CSV / Parquet / JSON (COPY) |
+| Résultats | grille typée (∅ pour NULL) avec ascenseurs, un résultat par onglet, limite réglable, comptage exact, export CSV / Parquet / JSON (COPY) |
 | Profil | `EXPLAIN (ANALYZE, FORMAT JSON)` : graphe des opérateurs (temps, part, lignes, conditions), tableau, histogramme, latence, CPU, mémoire, disque temporaire |
 | Expertise | règles sur le plan (balayages complets, produits cartésiens, jointures explosives, tris, débordements), sur le catalogue (volumétrie, clés absentes, structures redondantes, colonnes inutilisées, compression) et sur l'historique (requêtes répétées, agrégations répétées : mutualisation, gain et ROI estimés) ; niveaux Critique / Important / Opportunité ; correction SQL générée dans une nouvelle requête ; recommandations ignorées mémorisées |
 | Schéma | modèle entité-relation (PK, FK, vues et leurs dépendances), disposition automatique et positions mémorisées, clé étrangère tirée à la souris, inspecteur de table (colonnes, types, PK, requis, défaut), renommage propagé, **Modèle → SQL** (CREATE dans l'ordre des dépendances) et **Script → modèle** (le script est rejoué dans une base jetable : l'analyseur est celui de DuckDB), analyse d'impact (clés, vues, historique, scripts du projet) avant suppression |
@@ -33,7 +33,8 @@ requête 2 ou 4, et enfin *Analyser*.
 | `principal.prg` | fenêtre, barre d'outils, réglages (`~/.duckdbstudio.json`), démarrage |
 | `projet.prg` | projet (`duckstudio.json`), historique (500 requêtes), scripts |
 | `connecteurs.prg` | greffons, gabarits d'ATTACH, extensions, attachement, introspection, cache |
-| `connexions.prg` | boîte de connexion |
+| `connexions.prg` | boîte de connexion, mots de passe mémorisés sur le poste |
+| `taches.prg` | connexions numérotées, onglets (connexion, session, résultat), opérations en cours et arrêt |
 | `explorateur.prg` | arbre, fiches, palette |
 | `requetes.prg` | découpage des scripts, exécution, résultats, validation, export |
 | `profil.prg` | profil d'exécution |

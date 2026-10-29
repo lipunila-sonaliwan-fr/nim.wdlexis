@@ -24,10 +24,11 @@
 # genre, portee}. Le programme attend alors x:continuer(), x:pas(), x:passer() ou
 # x:sortir() ; x:pause() l'interrompt à la prochaine instruction.
 
-import std/[locks, strutils, os, sets, algorithm]
+import std/[locks, strutils, os, sets, algorithm, tables]
 from std/unicode import runeLen
 import ../lexis/[api, zones]
 from ../lexis/lexer import SyntaxError
+from ../lexis/parser import Program, parseChunk
 import ../ide/[lexislang, lexislint, langdocs]
 from pkg_systeme import LexisExit
 import pkg_interface    # openWindows, closeAllWindows : fenêtres du programme exécuté.
@@ -497,6 +498,24 @@ proc openLexis(L: Interp): Value =
   discard L.userMeta("execution", execMethods)
 
   let m = newLib()
+  m.fn "charger", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Charge les procédures d'un fichier .prg dans le programme en cours
+    # (extensions) ; renvoie la liste de leurs noms. Instructions en tête refusées.
+    let path = L.checkStr(a, 1, "charger")
+    var src = ""
+    try: src = L.readSource(path)
+    except IOError, OSError: rtError("lexis.charger : lecture impossible de « " & path & " »")
+    var prog: Program
+    try: prog = parseChunk(src, path)
+    except SyntaxError as e: rtError("lexis.charger : " & e.msg)
+    try: discard L.registerProgram(prog, false)
+    except SyntaxError as e: rtError("lexis.charger : " & e.msg)
+    let t = newLTable()
+    for i, p in prog.procs: t.rawSet(intV(i + 1), strV(p.name))
+    @[tableV(t)]
+  m.fn "procedure", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Référence d'une procédure par son nom (nul si inconnue) : appeler(ref, ...).
+    @[L.procs.getOrDefault(L.checkStr(a, 1, "procedure").toUpperAscii, nilV)]
   m.fn "verifier", proc (L: Interp, a: seq[Value]): seq[Value] =
     let src = L.checkStr(a, 1, "verifier")
     let o = if arg(a, 2).kind == vkTable: a[1].t else: nil
@@ -535,6 +554,8 @@ proc openLexis(L: Interp): Value =
   tableV(m)
 
 const lexisDocs = [
+  "lexis.charger(chemin)", "Charge les procédures et fonctions d'un fichier .prg dans le programme en cours (extensions, greffons) ; renvoie la liste de leurs noms. Le fichier ne doit contenir que des procédures ; recharger le même fichier remplace ses procédures.",
+  "lexis.procedure(nom)", "Référence d'une procédure ou d'une fonction par son nom (nul si elle n'existe pas) : appeler(ref, ...).",
   "lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])", "Analyse un texte Lexis+ comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste des problèmes {ligne, colonne, longueur, genre, message}. genre : erreur, avertissement, info ; projet : dossier dont les procédures sont connues.",
   "lexis.structure(source)", "Procédures, fonctions et variables globales définies dans un texte : liste de {nom, genre, ligne, colonne}.",
   "lexis.documentation([paquet])", "Documentation des fonctions intégrées et des paquets : liste de {paquet, signature, nom, proprietaire, methode, description}.",

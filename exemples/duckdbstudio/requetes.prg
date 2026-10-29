@@ -95,30 +95,67 @@ retourner EST_REQUETE(s) ou contient({"show", "describe", "summarize", "explain"
 &&
 
 procedure EXECUTER_SQL
+  locale o = ONGLET_ACTIF()
+  si o = nul
+    retourner
+  finsi
   locale sel = ed:selection()
   locale texte = sisinon(sel <> nul et rogner(sel) <> "", sel, ed:texte())
-  EXECUTER_TEXTE(texte)
+  EXECUTER_TEXTE(texte, o.uid)
 retourner
 
-procedure EXECUTER_TEXTE(texte)
+procedure EXECUTER_TEXTE(texte, uid)
+  && exécute un script dans la session de l'onglet uid (par défaut : l'onglet actif) ;
+  && l'interface reste disponible et les autres onglets peuvent exécuter en même temps
+  locale o = sisinon(uid = nul, ONGLET_ACTIF(), ONGLET(uid))
+  si o = nul
+    retourner
+  finsi
+  si o.tache <> nul
+    STATUT("Une requête est déjà en cours dans cet onglet (depuis " + EN_COURS(o.tache) + ") : Échap pour l'arrêter.")
+    retourner
+  finsi
   locale l = DECOUPER_SQL(texte)
   si #l = 0
     STATUT("Rien à exécuter.")
     retourner
   finsi
+  && réservé tout de suite : un second clic pendant la préparation est refusé
+  o.tache = OPERATION_DEBUT(sisinon(o.uid = nul, "aperçu", "« " + TITRE_DOC(o.uid) + " »") + ;
+                            " (" + LIBELLE_CNX(CNX_NUM(o.cnx)) + ")", nul)
+  PASTILLE_ONGLET(o)
+  locale s = PREPARER_ONGLET(o)
+  si s = nul
+    OPERATION_FIN(o.tache)
+    o.tache = nul
+    PASTILLE_ONGLET(o)
+    retourner
+  finsi
+  o.tache.session = s
+  STATUT("Exécution " + o.tache.libelle + "…")
   locale t0 = systeme.horloge()
   locale nok = 0
   pour i = 1 a #l
-    locale r = EXECUTER_UNE(l[i].sql, i = #l)
+    si OPERATION_ARRETEE(o.tache)
+      sortir
+    finsi
+    locale r = EXECUTER_UNE(l[i].sql, i = #l, o)
     si r
       nok += 1
     sinon
       sortir
     finsi
   suivant
+  locale arretee = OPERATION_ARRETEE(o.tache)
+  OPERATION_FIN(o.tache)
+  o.tache = nul
+  PASTILLE_ONGLET(o)
   ENREGISTRER_PROJET()
-  si nok = #l
-    STATUT(nok + " instruction(s) exécutée(s) en " + arrondi((systeme.horloge() - t0) * 1000) + " ms")
+  si arretee
+    STATUT("Exécution arrêtée : " + nok + " instruction(s) sur " + #l + " exécutée(s).")
+  sinonsi nok = #l
+    STATUT(nok + " instruction(s) exécutée(s) en " + arrondi((systeme.horloge() - t0) * 1000) + " ms" + ;
+           sisinon(o.uid = nul ou o.uid = ed:actif(), "", " — onglet « " + TITRE_DOC(o.uid) + " »"))
   finsi
   && une instruction de définition (CREATE, DROP, ATTACH…) change le catalogue
   pour chaque x dans l
@@ -129,35 +166,55 @@ procedure EXECUTER_TEXTE(texte)
   suivant
 retourner
 
-fonction EXECUTER_UNE(s, afficher)
-  && exécute une instruction ; affiche son résultat si afficher ; vrai si réussie
+fonction EXECUTER_UNE(s, afficher, o)
+  && exécute une instruction dans la session de l'onglet o (par défaut : contexte des
+  && outils) ; affiche son résultat si afficher ; vrai si réussie
+  si o = nul
+    o = ONGLET_OUTILS()
+  finsi
+  si o.session = nul
+    si PREPARER_ONGLET(o) = nul
+      retourner faux
+    finsi
+  finsi
+  locale ses = o.session
   locale t0 = systeme.horloge()
   locale limite = sisinon(reglages.limite = nul, 1000, reglages.limite)
   essayer
     si EST_REQUETE(s)
-      locale colonnes = requete("DESCRIBE " + s)
-      locale lignes = requete("SELECT " + PROJECTION(colonnes) + " FROM (" + s + ") AS _r LIMIT " + (limite + 1))
+      locale colonnes = ses:requete("DESCRIBE " + s)
+      locale lignes = ses:requete("SELECT " + PROJECTION(colonnes) + " FROM (" + s + ") AS _r LIMIT " + (limite + 1))
       locale duree = systeme.horloge() - t0
       HISTORISER(s, duree, #lignes, vrai, "")
       JOURNAL(sisinon(#lignes > limite, limite + "+", chaine(#lignes)) + " ligne(s) en " + arrondi(duree * 1000, 1) + " ms : " + RESUME(s))
       si afficher
-        AFFICHER_RESULTAT(s, colonnes, lignes, duree, limite)
+        AFFICHER_RESULTAT(s, colonnes, lignes, duree, limite, o)
       finsi
     sinon
-      locale lignes = requete(s)
+      locale lignes = ses:requete(s)
       locale duree = systeme.horloge() - t0
       HISTORISER(s, duree, #lignes, vrai, "")
       JOURNAL("OK en " + arrondi(duree * 1000, 1) + " ms : " + RESUME(s))
       si afficher et RENVOIE_LIGNES(s) et #lignes > 0
-        AFFICHER_RESULTAT(s, nul, lignes, duree, limite)
+        AFFICHER_RESULTAT(s, nul, lignes, duree, limite, o)
       sinonsi afficher
-        lblres.libelle = "OK : " + RESUME(s) + " (" + arrondi(duree * 1000, 1) + " ms)"
+        o.resultat = {texte = "OK : " + RESUME(s) + " (" + arrondi(duree * 1000, 1) + " ms)", sql = s}
+        si o.uid = nul ou o.uid = ed:actif()
+          MONTRER_RESULTAT(o)
+        finsi
       finsi
     finsi
   capturer e
+    locale arret = o.tache <> nul et o.tache.arret
+    si arret
+      e = "requête interrompue par l'utilisateur (" + EN_COURS(o.tache) + ")"
+    finsi
+    derniereerreur = {sql = s, message = e}
     HISTORISER(s, systeme.horloge() - t0, 0, faux, e)
     ERREUR(e + car(10) + "    dans : " + RESUME(s))
-    SIGNALER_ERREUR(s, e)
+    si non arret
+      SIGNALER_ERREUR(s, e, o.uid)
+    finsi
     retourner faux
   finessayer
 retourner vrai
@@ -198,13 +255,11 @@ fonction RESUME(s)
   fintantque
 retourner gauche(t, 110)
 
-procedure AFFICHER_RESULTAT(s, colonnes, lignes, duree, limite)
-  globale grilleres, dernierresultat
-  si grilleres <> nul
-    grilleres:detruire()
+procedure AFFICHER_RESULTAT(s, colonnes, lignes, duree, limite, o)
+  && le résultat est gardé par son onglet ; affiché tout de suite si l'onglet est actif
+  si o = nul
+    o = ONGLET_ACTIF()
   finsi
-  grilleres = zoneres:ajouter(ui.grille())
-  grilleres.ancrage = "centre"
   && colonnes : DESCRIBE (ordre et types), sinon les clefs des lignes
   locale noms = {}
   locale types = {}
@@ -223,12 +278,51 @@ procedure AFFICHER_RESULTAT(s, colonnes, lignes, duree, limite)
       suivant
     suivant
   finsi
+  locale res = {sql = s, noms = noms, types = types, lignes = lignes, duree = duree, limite = limite}
+  si o = nul
+    MONTRER_TABLEAU(res)
+    retourner
+  finsi
+  o.resultat = res
+  si o.uid = nul ou o.uid = ed:actif()
+    MONTRER_RESULTAT(o)
+  sinon
+    JOURNAL("Résultat prêt dans l'onglet « " + TITRE_DOC(o.uid) + " » (" + #lignes + " ligne(s))")
+  finsi
+retourner
+
+procedure MONTRER_RESULTAT(o)
+  globale resultataffiche
+  locale res = o.resultat
+  si res = nul
+    retourner
+  finsi
+  resultataffiche = res
+  si res.texte <> nul
+    lblres.libelle = res.texte
+    retourner
+  finsi
+  MONTRER_TABLEAU(res)
+retourner
+
+procedure MONTRER_TABLEAU(res)
+  globale grilleres, dernierresultat, resultataffiche
+  resultataffiche = res
+  si grilleres <> nul
+    grilleres:detruire()
+  finsi
+  grilleres = zoneres:ajouter(ui.grille())
+  grilleres.ancrage = "centre"
+  locale noms = res.noms
+  locale types = res.types
   pour i = 1 a #noms
     locale num = contient({"INTEGER", "BIGINT", "SMALLINT", "TINYINT", "HUGEINT", "DOUBLE", "FLOAT", "REAL", "UBIGINT", "UINTEGER"}, ;
                           majuscule(types[i])) ou commencepar(majuscule(types[i]), "DECIMAL")
     grilleres:ajoutercolonne{nom = "c" + i, titre = noms[i] + sisinon(types[i] = "", "", "  " + minuscule(types[i])), ;
                              genre = sisinon(num, "nombre", "texte"), largeur = 150}
   suivant
+  locale lignes = res.lignes
+  locale limite = res.limite
   locale n = min(#lignes, limite)
   pour j = 1 a n
     locale r = lignes[j]
@@ -239,9 +333,9 @@ procedure AFFICHER_RESULTAT(s, colonnes, lignes, duree, limite)
     suivant
     grilleres:ajouterligne(cel)
   suivant
-  dernierresultat = {sql = s, colonnes = noms, nombre = #lignes}
+  dernierresultat = {sql = res.sql, colonnes = noms, nombre = #lignes}
   lblres.libelle = sisinon(#lignes > limite, "Plus de " + limite + " lignes (affichage limité)", #lignes + " ligne(s)") + ;
-                   " · " + #noms + " colonne(s) · " + arrondi(duree * 1000, 1) + " ms"
+                   " · " + #noms + " colonne(s) · " + arrondi(res.duree * 1000, 1) + " ms"
   bas.valeur = 1
 retourner
 
@@ -250,13 +344,27 @@ procedure COMPTER_RESULTAT(ev)
     STATUT("Exécutez d'abord une requête SELECT.")
     retourner
   finsi
+  locale o = ONGLET_ACTIF()
+  si o = nul ou o.tache <> nul
+    STATUT("Une requête est déjà en cours dans cet onglet.")
+    retourner
+  finsi
+  locale s = PREPARER_ONGLET(o)
+  si s = nul
+    retourner
+  finsi
+  o.tache = OPERATION_DEBUT("comptage « " + TITRE_DOC(o.uid) + " »", s)
+  PASTILLE_ONGLET(o)
   locale t0 = systeme.horloge()
   essayer
-    locale n = valeursql("SELECT count(*) FROM (" + dernierresultat.sql + ") AS _r")
-    lblres.libelle = n + " ligne(s) au total (comptées en " + arrondi((systeme.horloge() - t0) * 1000, 1) + " ms)"
+    locale r = s:requete("SELECT count(*) AS n FROM (" + dernierresultat.sql + ") AS _r")
+    lblres.libelle = r[1].n + " ligne(s) au total (comptées en " + arrondi((systeme.horloge() - t0) * 1000, 1) + " ms)"
   capturer e
-    ERREUR(e)
+    ERREUR(sisinon(o.tache.arret, "comptage interrompu", e))
   finessayer
+  OPERATION_FIN(o.tache)
+  o.tache = nul
+  PASTILLE_ONGLET(o)
 retourner
 
 procedure EXPORTER_RESULTAT(ev)
@@ -271,14 +379,28 @@ procedure EXPORTER_RESULTAT(ev)
   locale ext = minuscule(fichier.extension(p))
   locale fmt = sisinon(ext = ".csv", "csv, HEADER", sisinon(ext = ".json", "json", "parquet"))
   locale src = sisinon(EST_REQUETE(dernierresultat.sql), dernierresultat.sql, "SELECT 1")
+  locale o = ONGLET_ACTIF()
+  si o = nul ou o.tache <> nul
+    STATUT("Une requête est déjà en cours dans cet onglet.")
+    retourner
+  finsi
+  locale s = PREPARER_ONGLET(o)
+  si s = nul
+    retourner
+  finsi
+  o.tache = OPERATION_DEBUT("export vers " + fichier.nom(p), s)
+  PASTILLE_ONGLET(o)
   essayer
     locale t0 = systeme.horloge()
-    requete("COPY (" + src + ") TO " + LITTERAL(p) + " (FORMAT " + fmt + ")")
+    s:requete("COPY (" + src + ") TO " + LITTERAL(p) + " (FORMAT " + fmt + ")")
     JOURNAL("Export : " + p + " (" + arrondi((systeme.horloge() - t0) * 1000) + " ms)")
     STATUT("Exporté : " + p)
   capturer e
-    ERREUR(e)
+    ERREUR(sisinon(o.tache.arret, "export interrompu", e))
   finessayer
+  OPERATION_FIN(o.tache)
+  o.tache = nul
+  PASTILLE_ONGLET(o)
 retourner
 
 procedure RAFRAICHIR_CATALOGUES
@@ -323,7 +445,7 @@ fonction DIAGNOSTICS_SQL(texte)
   pour chaque ins dans DECOUPER_SQL(texte)
     si EST_REQUETE(ins.sql)
       essayer
-        locale j = dejson(valeursql("SELECT json_serialize_sql(?)", ins.sql))
+        locale j = dejson(valeursql("SELECT json_serialize_sql(?::VARCHAR)", ins.sql))
         si j.error = vrai
           locale p = valeur(sisinon(j.position = nul, "0", j.position))
           locale lc = LIGNE_COLONNE(texte, ins.debut + p)
@@ -336,15 +458,21 @@ fonction DIAGNOSTICS_SQL(texte)
   suivant
 retourner d
 
-procedure SIGNALER_ERREUR(s, e)
+procedure SIGNALER_ERREUR(s, e, uid)
   && erreur d'exécution : soulignée au début de l'instruction dans l'éditeur
-  locale texte = ed:texte()
-  locale p = position(s, texte)
-  si p > 0
-    locale lc = LIGNE_COLONNE(texte, p)
-    ed:diagnostics({{ligne = lc.ligne, colonne = lc.colonne, longueur = longueur(PREMIER_MOT(s)), genre = "erreur", ;
-                     message = remplacertexte(e, car(10), " ")}})
+  si uid = nul
+    uid = ed:actif()
   finsi
+  essayer
+    locale texte = ed:texte(uid)
+    locale p = position(s, texte)
+    si p > 0
+      locale lc = LIGNE_COLONNE(texte, p)
+      ed:diagnostics({{ligne = lc.ligne, colonne = lc.colonne, longueur = longueur(PREMIER_MOT(s)), genre = "erreur", ;
+                       message = remplacertexte(e, car(10), " ")}}, uid)
+    finsi
+  capturer x
+  finessayer
 retourner
 
 procedure SQL_SIGNAL(ev)

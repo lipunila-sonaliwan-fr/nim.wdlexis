@@ -30,7 +30,7 @@ procedure REMPLIR_EXPLORATEUR
   noeudsarbre = {}
   pour chaque c dans projet.connexions
     locale k = CONNECTEUR(c.type)
-    locale etiq = c.nom + "  [" + sisinon(k = nul, "?", k.sigle) + "]" + ;
+    locale etiq = LIBELLE_CNX(c) + "  [" + sisinon(k = nul, "?", k.sigle) + "]" + ;
                   sisinon(attachees[minuscule(ALIAS(c))] = vrai, "", "  (non connectée)")
     locale base = {"Connexions", etiq}
     AJOUTER_NOEUD(base, {genre = "connexion", cnx = c})
@@ -72,6 +72,8 @@ procedure REMPLIR_EXPLORATEUR
     finsi
   suivant
   arbre:deplier({"Connexions"})
+  REMPLIR_COMBO_CNX()
+  PASTILLES()
 retourner
 
 fonction NOEUD_COURANT(ev)
@@ -192,7 +194,8 @@ retourner { ;
   {"Modèles", {"Table", "Vue", "Vue matérialisée", "Macro", "Fonction", "Index"}}, ;
   {"Flux", {"Import", "Export", "Jointure", "Filtre", "Agrégation", "Tri", "Union", "Fenêtres analytiques", ;
             "Transformation", "Fusion (MERGE)"}}, ;
-  {"Orchestration", {"Job", "Workflow", "Déclencheur", "Planificateur"}}, ;
+  {"Orchestration", {"Pipeline", "Job", "Workflow", "Déclencheur", "Planificateur"}}, ;
+  {"Analyse", {"Assistant", "Élément BI", "Extensions"}}, ;
   {"Optimisation", {"Profiling", "Analyse volumétrique", "Analyse mémoire", "Analyse coût", "Recommandations"}}}
 
 procedure CONSTRUIRE_PALETTE
@@ -265,9 +268,16 @@ procedure PALETTE_CHOIX(ev)
          "```" + car(10) + MODELE_SQL(nom) + car(10) + "```"
   sinonsi contient({"Profiling", "Analyse volumétrique", "Analyse mémoire", "Analyse coût", "Recommandations"}, nom)
     md = md + "Double-clic : lance l'analyse."
+  sinonsi nom = "Pipeline" ou nom = "Workflow"
+    md = md + "Double-clic : nouveau pipeline (sources, transformations, cibles), ou onglet Pipelines → SQL → pipeline pour partir d'un script."
+  sinonsi nom = "Job" ou nom = "Déclencheur" ou nom = "Planificateur"
+    md = md + "Double-clic : nouveau travail planifié (pipeline, requête ou script ; manuel, périodique, quotidien ou chaîné)."
+  sinonsi nom = "Assistant"
+    md = md + "Double-clic : ouvre l'assistant (explication de plan, réécriture, texte → SQL, génération de modèle)."
+  sinonsi nom = "Élément BI"
+    md = md + "Double-clic : élément de tableau de bord BI sur la dernière requête exécutée."
   sinon
-    md = md + "Orchestration (jobs, workflows, déclencheurs, planification) : prévue au lot 2 du projet, " + ;
-         "avec le concepteur de flux."
+    md = md + "Double-clic : gestionnaire des extensions du projet."
   finsi
   infopal.valeur = md
 retourner
@@ -290,7 +300,18 @@ procedure PALETTE_UTILISER(ev)
     PROFILER()
   cas nom = "Analyse volumétrique" ou nom = "Analyse mémoire" ou nom = "Recommandations"
     ANALYSER_TOUT()
-  autrement
-    STATUT(nom + " : prévu au lot 2 (concepteur de flux et ordonnanceur).")
+  cas nom = "Pipeline" ou nom = "Workflow"
+    vues.valeur = INDEX_VUE("Pipelines")
+    PIPE_NOUVEAU(nul)
+  cas nom = "Job" ou nom = "Déclencheur" ou nom = "Planificateur"
+    vues.valeur = INDEX_VUE("Planification")
+    PLANIF_NOUVEAU(nul)
+  cas nom = "Assistant"
+    bas.valeur = INDEX_BAS("Assistant")
+    ia.question:focus()
+  cas nom = "Élément BI"
+    BI_DEPUIS_RESULTAT(nul)
+  cas nom = "Extensions"
+    EXT_GESTIONNAIRE()
   fincas
 retourner

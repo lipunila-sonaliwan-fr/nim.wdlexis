@@ -433,11 +433,32 @@ procedure ANALYSER_PLAN(p)
 retourner
 
 procedure ANALYSER_TOUT
+  && une seule analyse à la fois (l'interface reste disponible pendant les requêtes)
+  si OPERATION_EN_COURS("analyse du projet")
+    STATUT("L'analyse du projet est déjà en cours.")
+    retourner
+  finsi
+  locale tache = OPERATION_DEBUT("analyse du projet", nul)
+  essayer
+    ANALYSER_TOUT_SUITE()
+  capturer e
+    ERREUR("Analyse : " + sisinon(tache.arret, "interrompue par l'utilisateur", e))
+  finessayer
+  OPERATION_FIN(tache)
+retourner
+
+procedure ANALYSER_TOUT_SUITE
   locale l = REGLES_PLAN(dernierplan)
   pour chaque r dans REGLES_CATALOGUE()
     inserer(l, r)
   suivant
   pour chaque r dans REGLES_HISTORIQUE()
+    inserer(l, r)
+  suivant
+  pour chaque r dans REGLES_EMPREINTES()
+    inserer(l, r)
+  suivant
+  pour chaque r dans REGLES_EXTENSIONS()
     inserer(l, r)
   suivant
   AFFICHER_RECOS(l)

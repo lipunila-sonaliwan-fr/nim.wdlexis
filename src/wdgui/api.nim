@@ -545,11 +545,19 @@ proc treeMapDeleteAll*(id: ControlId) =
     tm.elements.setLen(0)
     tm.selection = -1
 
-proc ganttAddTask*(id: ControlId, caption: string, start, duration: float, progress = 0.0): int =
+proc ganttAddTask*(id: ControlId, caption: string, start, duration: float, progress = 0.0,
+                   color = Color(), detail = ""): int =
   result = -1
   withControl(id, Gantt, g):
-    g.tasks.add GanttTask(caption: caption, start: start, duration: duration, progress: progress)
+    g.tasks.add GanttTask(caption: caption, start: start, duration: duration, progress: progress,
+                          color: color, detail: detail)
     result = g.tasks.len
+
+proc ganttClockAxis*(id: ControlId, on: bool) =
+  withControl(id, Gantt, g): g.clockAxis = on
+
+proc ganttLabelWidth*(id: ControlId, w: float) =
+  withControl(id, Gantt, g): g.labelWidth = max(40.0, w)
 
 proc ganttSetProgress*(id: ControlId, task: int, progress: float) =
   withControl(id, Gantt, g):

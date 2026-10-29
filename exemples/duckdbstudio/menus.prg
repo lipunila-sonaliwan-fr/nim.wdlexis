@@ -6,14 +6,19 @@ retourner { ;
   {"Fichier", {"Nouvelle requête", "Ouvrir un script…", "Enregistrer le script", "-", ;
                "Ouvrir un projet…", "Enregistrer le projet", "Créer la base de démonstration", "-", "Quitter"}}, ;
   {"Connexion", {"Nouvelle connexion…", "Modifier la connexion…", "Tester la connexion", ;
-                 "Supprimer la connexion", "-", "Relire tous les catalogues"}}, ;
-  {"Requête", {"Exécuter (F5)", "Profiler (F6)", "Compter les lignes du résultat", "Exporter le résultat…", ;
-               "-", "Commenter / décommenter", "Effacer l'historique"}}, ;
+                 "Supprimer la connexion", "-", "Relire tous les catalogues", "-", ;
+                 "Oublier les mots de passe mémorisés"}}, ;
+  {"Requête", {"Exécuter (F5)", "Profiler (F6)", "Arrêter (Échap)", "Compter les lignes du résultat", ;
+               "Exporter le résultat…", "-", "Fermer l'onglet", "Commenter / décommenter", "Effacer l'historique"}}, ;
   {"Conception", {"Schéma de la connexion sélectionnée", "Script → modèle", "Modèle → SQL", ;
                   "Nouvelle table", "Analyse d'impact"}}, ;
   {"Analyse", {"Analyser le projet", "Générer la correction", "Rétablir les recommandations ignorées"}}, ;
-  {"Affichage", {"Requêtes", "Schéma", "Profil", "Recommandations", "Cartographie", "Tableau de bord", "-", ;
-                 "Thème sombre / clair"}}, ;
+  {"Outils", {"Nouveau pipeline", "Pipeline depuis le script SQL", "Exécuter le pipeline", "-", ;
+              "Nouveau travail planifié", "Démarrer / arrêter le planificateur", "-", ;
+              "Élément BI depuis le résultat", "Actualiser la BI", "-", "Assistant", "Réglages de l'assistant…"}}, ;
+  {"Extensions", {"Gestionnaire d'extensions…", "Nouvelle extension…", "Recharger les extensions", "-"}}, ;
+  {"Affichage", {"Requêtes", "Schéma", "Profil", "Recommandations", "Cartographie", "Tableau de bord", ;
+                 "Pipelines", "Planification", "BI", "-", "Thème sombre / clair"}}, ;
   {"Aide", {"Raccourcis clavier", "Connecteurs disponibles", "À propos"}}}
 
 procedure CONSTRUIRE_MENUS(m)
@@ -38,8 +43,42 @@ procedure MENU(ev)
   si ev.chemin <> nul
     choix = ev.chemin[#ev.chemin]
   finsi
+  si MENU_EXTENSION(choix)
+    retourner
+  finsi
   locale c = CONNEXION_SELECTIONNEE()
   faire cas
+  && Outils (lots 2 et 3)
+  cas choix = "Nouveau pipeline"
+    PIPE_NOUVEAU(nul)
+  cas choix = "Pipeline depuis le script SQL"
+    PIPE_DEPUIS_EDITEUR(nul)
+  cas choix = "Exécuter le pipeline"
+    PIPE_EXECUTER(nul)
+  cas choix = "Nouveau travail planifié"
+    vues.valeur = INDEX_VUE("Planification")
+    PLANIF_NOUVEAU(nul)
+  cas choix = "Démarrer / arrêter le planificateur"
+    PLANIF_BASCULER(nul)
+    vues.valeur = INDEX_VUE("Planification")
+  cas choix = "Élément BI depuis le résultat"
+    BI_DEPUIS_RESULTAT(nul)
+  cas choix = "Actualiser la BI"
+    BI_ACTUALISER(nul)
+    vues.valeur = INDEX_VUE("BI")
+  cas choix = "Assistant"
+    bas.valeur = INDEX_BAS("Assistant")
+    ia.question:focus()
+  cas choix = "Réglages de l'assistant…"
+    IA_REGLAGES(nul)
+  cas choix = "Gestionnaire d'extensions…"
+    EXT_GESTIONNAIRE()
+  cas choix = "Nouvelle extension…"
+    EXT_NOUVELLE(nul)
+  cas choix = "Recharger les extensions"
+    EXTENSIONS_CHARGER(vrai)
+  cas choix = "Pipelines" ou choix = "Planification" ou choix = "BI"
+    vues.valeur = INDEX_VUE(choix)
   && Fichier
   cas choix = "Nouvelle requête"
     NOUVELLE_REQUETE()
@@ -79,6 +118,12 @@ procedure MENU(ev)
     finsi
   cas choix = "Relire tous les catalogues"
     RAFRAICHIR_TOUT()
+  cas choix = "Oublier les mots de passe mémorisés"
+    OUBLIER_TOUS_SECRETS()
+  cas commencepar(choix, "Arrêter")
+    ARRETER_COURANTE()
+  cas choix = "Fermer l'onglet"
+    FERMER_ONGLET(ed:actif())
   && Requête
   cas commencepar(choix, "Exécuter")
     EXECUTER_SQL()

@@ -1,0 +1,84 @@
+&& Extension DuckDB Studio « {NOM} »
+&&
+&& Une extension est un fichier .prg du dossier extensions/ du projet. Elle ne
+&& contient que des procédures et des fonctions ; DuckDB Studio appelle chaque
+&& fonction EXTENSION_xxx() qu'il y trouve et lit ce qu'elle déclare :
+&&   nom, version, description
+&&   regles    = @F   F(contexte) renvoie une liste de recommandations (RECO(...)) ;
+&&                    contexte : {objets, historique, plan, connexions}
+&&   vue       = @P   P(page) construit un onglet nommé titrevue
+&&   menus     = {{libelle = "...", action = @P}}   entrées du menu Extensions
+&& Toutes les procédures de DuckDB Studio sont utilisables (requete, RECO, JOURNAL,
+&& STATUT, TOUS_LES_OBJETS, QUALIFIE, LIGNES_TEXTE...). Après modification :
+&& menu Extensions ▸ Recharger les extensions.
+
+fonction EXTENSION_{CODE}()
+retourner {nom = "{NOM}", version = "1.0", description = "Règles maison, volumétrie en mosaïque", ;
+           regles = @{CODE}_REGLES, vue = @{CODE}_VUE, titrevue = "Volumétrie", ;
+           menus = {{libelle = "Compter exactement les lignes des tables", action = @{CODE}_COMPTER}}}
+
+fonction {CODE}_REGLES(ctx)
+  locale l = {}
+  pour chaque o dans ctx.objets
+    locale n = minuscule(o.nom)
+    && tables de travail oubliées
+    si o.genre = "table" et (commencepar(n, "tmp_") ou commencepar(n, "test") ou finitpar(n, "_old") ou finitpar(n, "_bak"))
+      inserer(l, RECO("Opportunité", "Gouvernance", "Table de travail « " + QUALIFIE(o) + " »", ;
+        "Son nom indique une table temporaire ou de sauvegarde : elle occupe de la place et brouille le catalogue.", ;
+        "stockage", "La supprimer si elle n'est plus utile.", "DROP TABLE " + QUALIFIE(o) + ";"))
+    finsi
+    && colonnes *_id sans clé étrangère
+    si o.genre = "table" et o.objet.colonnes <> nul
+      pour chaque c dans o.objet.colonnes
+        si finitpar(minuscule(c.nom), "_id") et #o.objet.fk = 0
+          inserer(l, RECO("Opportunité", "Modélisation", "Colonne « " + o.nom + "." + c.nom + " » sans clé étrangère", ;
+            "Son nom suggère une référence vers une autre table, mais aucune contrainte ne la déclare : " + ;
+            "le concepteur de schéma et l'analyse d'impact l'ignorent.", "intégrité", ;
+            "Déclarer la clé étrangère (concepteur de schéma : tirer la colonne vers la table cible).", nul))
+        finsi
+      suivant
+    finsi
+  suivant
+retourner l
+
+procedure {CODE}_VUE(page)
+  globale {CODE}_mosaique
+  globale {CODE}_m
+  {CODE}_m = nul
+  locale haut = page:ajouter(ui.rangee())
+  haut.ancrage = "haut"
+  locale b = haut:ajouter(ui.bouton("Actualiser"))
+  b.surclic = @{CODE}_ACTUALISER
+  haut:ajouter(ui.etiquette("Lignes par table (toutes connexions)"))
+  {CODE}_mosaique = page:ajouter(ui.panneau{disposition = "bordure", defilement = "masque"})
+  {CODE}_mosaique.ancrage = "centre"
+  {CODE}_ACTUALISER(nul)
+retourner
+
+procedure {CODE}_ACTUALISER(ev)
+  globale {CODE}_m
+  si {CODE}_m <> nul
+    {CODE}_m:detruire()
+  finsi
+  locale m = {CODE}_mosaique:ajouter(ui.mosaique())
+  m.ancrage = "centre"
+  {CODE}_m = m
+  pour chaque o dans TOUS_LES_OBJETS()
+    si o.genre = "table" et o.objet.lignes <> nul et o.objet.lignes > 0
+      m:ajouter(o.nom + " (" + LIGNES_TEXTE(o.objet.lignes) + ")", o.objet.lignes)
+    finsi
+  suivant
+retourner
+
+procedure {CODE}_COMPTER(ev)
+  pour chaque o dans TOUS_LES_OBJETS()
+    si o.genre = "table"
+      essayer
+        JOURNAL(QUALIFIE(o) + " : " + valeursql("SELECT count(*) FROM " + QUALIFIE(o)) + " ligne(s)")
+      capturer e
+        JOURNAL(QUALIFIE(o) + " : " + e)
+      finessayer
+    finsi
+  suivant
+  bas.valeur = 2
+retourner

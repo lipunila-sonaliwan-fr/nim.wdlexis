@@ -224,12 +224,25 @@ fonction VERSION_DUCKDB()
   finsi
 retourner v
 
+fonction NOMBRE_VERSION(s)
+  && « 5-dev123 » -> 5 : chiffres de tête seulement
+  locale r = ""
+  pour i = 1 a longueur(s)
+    locale ch = souschaine(s, i, 1)
+    si non contient("0123456789", ch)
+      sortir
+    finsi
+    r = r + ch
+  suivant
+retourner sisinon(r = "", 0, valeur(r))
+
 fonction VERSION_SUFFISANTE(minimum)
+  && compare majeur.mineur.correctif (1.5.5 <= 1.5.6-dev… <= 2.0)
   locale a = decouper(VERSION_DUCKDB(), ".")
   locale b = decouper(minimum, ".")
-  pour i = 1 a 2
-    locale x = valeur(a[i])
-    locale y = sisinon(i <= #b, valeur(b[i]), 0)
+  pour i = 1 a 3
+    locale x = sisinon(i <= #a, NOMBRE_VERSION(a[i]), 0)
+    locale y = sisinon(i <= #b, NOMBRE_VERSION(b[i]), 0)
     si x > y
       retourner vrai
     sinonsi x < y
@@ -245,24 +258,55 @@ procedure CHARGER_EXTENSION(k)
   essayer
     requete("LOAD " + k.extension)
   capturer e
-    && pas encore installée : téléchargement depuis le dépôt DuckDB (réseau nécessaire)
-    requete(sisinon(k.installer <> nul, k.installer, "INSTALL " + k.extension))
+    && pas encore installée : téléchargement depuis le dépôt DuckDB (réseau nécessaire) ;
+    && à défaut, dépôt communautaire (extensions publiées hors du dépôt principal)
+    essayer
+      requete(sisinon(k.installer <> nul, k.installer, "INSTALL " + k.extension))
+    capturer e2
+      si k.installer <> nul
+        erreur e2
+      finsi
+      requete("INSTALL " + k.extension + " FROM community")
+    finessayer
     requete("LOAD " + k.extension)
   finessayer
 retourner
 
 fonction DEMANDER_SECRETS(c)
   locale k = CONNECTEUR(c.type)
+  && saisie masquée ; « Mémoriser » : gardés chiffrés sur ce poste (hors du projet)
+  locale memo = faux
+  locale n = 0
   pour chaque p dans k.parametres
     si p.secret = vrai et VALEUR_PARAM(c, p.nom) = ""
-      locale v = ui.demander(p.libelle + " de la connexion « " + c.nom + " » :", "")
-      si v = nul
+      locale r = ui.demandersecret(p.libelle + " de la connexion « " + LIBELLE_CNX(c) + " » :", ;
+                                   {memoriser = "Mémoriser sur ce poste (chiffré, hors du projet)", coche = memo, ;
+                                    titre = "Connexion " + c.nom})
+      si r = nul
         retourner faux
       finsi
+      memo = r.memoriser
       si secrets[majuscule(c.nom)] = nul
         secrets[majuscule(c.nom)] = {}
       finsi
-      secrets[majuscule(c.nom)][majuscule(p.nom)] = v
+      secrets[majuscule(c.nom)][majuscule(p.nom)] = r.valeur
+      n += 1
+    finsi
+  suivant
+  si n > 0 et memo
+    MEMORISER_SECRETS(c, vrai)
+  finsi
+retourner vrai
+
+fonction SECRETS_CONNUS(c)
+  && tous les paramètres secrets de c ont une valeur (saisie ou mémorisée)
+  locale k = CONNECTEUR(c.type)
+  si k = nul
+    retourner faux
+  finsi
+  pour chaque p dans k.parametres
+    si p.secret = vrai et VALEUR_PARAM(c, p.nom) = ""
+      retourner faux
     finsi
   suivant
 retourner vrai
@@ -282,6 +326,8 @@ fonction ATTACHER(c, interactif)
   finsi
   locale alias = ALIAS(c)
   locale t0 = systeme.horloge()
+  && suivie : au-delà de 15 s, la barre d'arrêt permet de l'interrompre
+  locale tache = OPERATION_DEBUT("connexion " + sisinon(c.num = nul, c.nom, LIBELLE_CNX(c)), nul)
   essayer
     CHARGER_EXTENSION(k)
     DETACHER(c)
@@ -310,9 +356,11 @@ fonction ATTACHER(c, interactif)
     attachees[minuscule(alias)] = vrai
     locale ms = arrondi((systeme.horloge() - t0) * 1000, 1)
     INTROSPECTER(c)
+    OPERATION_FIN(tache)
     retourner {ok = vrai, message = "connectée en " + ms + " ms", ms = ms}
   capturer e
-    retourner {ok = faux, message = e, ms = 0}
+    OPERATION_FIN(tache)
+    retourner {ok = faux, message = sisinon(tache.arret, "connexion interrompue par l'utilisateur", e), ms = 0}
   finessayer
 retourner nul
 
