@@ -33,7 +33,7 @@ procedure ACCUEIL_NOUVELLE_CLIC(ev)
 finprocedure
 
 procedure ACCUEIL_TROUVER_CLIC(ev)
-  && surclic de trouver : comme « find » d'HyperCard
+  && surclic de trouver : comme « find » des applications orientées cartes
   locale t = rogner(formaccueil.recherche.valeur)
   si t = ""
     formaccueil.resultat.libelle = "Tapez un texte à trouver."

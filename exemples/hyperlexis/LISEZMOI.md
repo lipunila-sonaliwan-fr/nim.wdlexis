@@ -1,6 +1,6 @@
 # HyperLexis
 
-Atelier de piles de cartes pour Lexis+, dans l'esprit d'HyperCard / LiveCode,
+Atelier de piles de cartes pour Lexis+, dans l'esprit des Plateformes Applicatives Orientées Cartes (PAOC),
 écrit en Lexis+ : palette d'outils, inspecteur de propriétés, scripts Lexis+,
 bascule en direct entre Conception et Exécution. Les piles sont des projets
 wdlexis+ (wdlexisrt, atelier, concepteur de formulaires, wdlexisgen).

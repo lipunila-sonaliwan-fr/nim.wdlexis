@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_conception.prg : mode Conception.
 &&
 && Le canevas et la palette d'outils sont ceux du concepteur de formulaires de

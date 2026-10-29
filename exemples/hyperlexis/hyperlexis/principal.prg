@@ -1,7 +1,7 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 &&
 && HyperLexis : un environnement de programmation visuelle à la manière de
-&& HyperCard et de LiveCode, écrit en Lexis+.
+&& Plateforme applicative orientée cartes (PAOC), écrit en Lexis+.
 &&
 &&   wdlexisrt principal.prg [dossier_de_la_pile]
 &&
@@ -37,7 +37,7 @@ hlc.fen = ui.fenetre{titre = "HyperLexis", largeur = 1440, hauteur = 900, dispos
 hlc.fen.surfermeture = @HL_FERMETURE
 hlc.fen.surtouchebas = @HL_TOUCHE
 
-&& en haut, comme LiveCode : la barre de menus, et juste dessous la barre de boutons
+&& en haut : la barre de menus, et juste dessous la barre de boutons
 hlc.entete = hlc.fen:ajouter(ui.superconteneur("vertical"))
 hlc.entete.ancrage = "haut"
 hlc.entete.espacement = 0

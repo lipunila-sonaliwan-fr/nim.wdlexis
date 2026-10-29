@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_menus.prg : menus, raccourcis, aide, pile d'exemple.
 
 fonction HL_MENUS()
@@ -145,10 +145,12 @@ procedure HL_MENU(ev)
   cas choix = "Raccourcis clavier"
     ui.alerte(HL_TEXTE_RACCOURCIS(), "information", "Raccourcis clavier")
   cas choix = "À propos"
-    ui.alerte("HyperLexis " + hl.version + NL() + "Atelier de piles de cartes pour Lexis+ (wdlexis+)" + NL() + NL() + ;
-              "Dans l'esprit d'HyperCard et de LiveCode : palette d'outils, inspecteur," + NL() + ;
-              "bascule Conception / Exécution, scripts en Lexis+." + NL() + NL() + ;
-              "Les piles sont des projets wdlexis+ : wdlexisrt, atelier, wdlexisgen.", "information", "À propos")
+    ui.alerte("HyperLexis " + hl.version + NL() + "Atelier de piles de cartes pour Lexis+ (wdlexis+)" + NL() + NL() +
+              "Développez naturellement vos applications métier"+ NL() + NL() +
+              "Tous droits réservés 2026 - Jean-Marc QUÉRÉ" + NL() +
+              "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr" + NL() +
+              "SIRET 13033319800013"
+              , "information", "À propos")
   fincas
 finprocedure
 
@@ -418,7 +420,7 @@ procedure HL_CREER_EXEMPLE(p)
   inserer(sa, "finprocedure")
   inserer(sa, "")
   inserer(sa, "procedure ACCUEIL_TROUVER_CLIC(ev)")
-  inserer(sa, "  && surclic de trouver : comme « find » d'HyperCard")
+  inserer(sa, "  && surclic de trouver : comme « find » des applications orientées cartes")
   inserer(sa, "  locale t = rogner(formaccueil.recherche.valeur)")
   inserer(sa, "  si t = " + Q() + Q())
   inserer(sa, "    formaccueil.resultat.libelle = " + Q() + "Tapez un texte à trouver." + Q())

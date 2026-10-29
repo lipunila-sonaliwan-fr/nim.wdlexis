@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_cartes.prg : cartes et modèles.
 &&
 && Une carte = {nom, modele}. Le modèle est un formulaire form_<modele>.prg

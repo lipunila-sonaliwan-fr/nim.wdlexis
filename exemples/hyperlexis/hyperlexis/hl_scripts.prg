@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_scripts.prg : scripts (éditeur de code natif ui.editeur), analyse pendant
 && la frappe (lexis.verifier), procédures des événements.
 
@@ -199,7 +199,7 @@ retourner "surclic"
 finfonction
 
 procedure HL_MODIFIER_SCRIPT
-  && LiveCode « Edit Script » : la procédure de l'événement principal de l'objet
+  && « Edit Script » : la procédure de l'événement principal de l'objet
   si hl.canevas = nul
     retourner
   finsi

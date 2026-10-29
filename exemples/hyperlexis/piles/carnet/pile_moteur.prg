@@ -10,7 +10,7 @@
 && formulaire form_<modele>.prg dessiné avec le concepteur (format commun avec
 && wdlexis+), dont les événements appellent les procédures de
 && script_<modele>.prg. Plusieurs cartes peuvent partager un modèle (comme les
-&& cartes d'un même fond HyperCard) : chacune garde alors ses propres données
+&& cartes d'un même fond) : chacune garde alors ses propres données
 && (le contenu de ses champs).
 &&
 && La carte est construite par la fonction FORM<MODELE>_OUVRIR() du formulaire,
@@ -645,8 +645,8 @@ procedure FIXER_DONNEE(cle, v)
 finprocedure
 
 fonction TROUVER(quoi)
-  && comme « find » d'HyperCard : à partir de la carte suivante, la première
-  && carte dont un champ contient le texte (sans tenir compte de la casse)
+  && comme « find » des applications orientées cartes : à partir de la carte suivante,
+  && la première carte dont un champ contient le texte (sans tenir compte de la casse)
   MOTEUR_VERIFIER()
   locale t = minuscule(chaine(quoi))
   si t = ""

@@ -9,7 +9,11 @@ wdlexisrt
 /rtc
 /exemples/atelier/distribution
 /exemples/bonjour/distribution
-exemples/etats/facture.pdf
+/exemples/etats/facture.pdf
 /exemples/duckdbstudio/distribution
+/DuckDB 2.0.0
+/exemples/atelier/.wdlexis
+/exemples/duckdbstudio/.wdlexis
+/exemples/etats/.wdlexis
 /exemples/hyperlexis/hyperlexis/distribution
 /exemples/hyperlexis/piles/carnet/.wdlexis

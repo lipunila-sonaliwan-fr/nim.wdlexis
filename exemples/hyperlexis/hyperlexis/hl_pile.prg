@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_pile.prg : ouverture et enregistrement des piles.
 &&
 && Une pile est un dossier de projet wdlexis+ :

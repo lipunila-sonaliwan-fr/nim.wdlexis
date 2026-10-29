@@ -1,7 +1,7 @@
 # HyperLexis — atelier de piles de cartes pour Lexis+
 
 HyperLexis est un environnement de programmation visuelle dans l'esprit
-d'**HyperCard** et de **LiveCode**, écrit en **Lexis+** et exécuté par le
+des Plateformes Applicatives Orientées Cartes (PAOC), écrit en **Lexis+** et exécuté par le
 runtime de wdlexis+. On y dessine des **cartes** avec une **palette d'outils**,
 on règle chaque objet dans un **inspecteur de propriétés**, on écrit ses
 **scripts** en Lexis+, et l'on **bascule à tout moment entre le mode Conception
@@ -37,8 +37,7 @@ wdlexisrt hyperlexis/principal.prg --exemple ~/piles/carnet   # crée la pile d'
 | **Script de la pile** | procédures communes et procédures appelées par le moteur | `script_pile.prg` |
 
 Plusieurs cartes peuvent partager un modèle, comme les fiches d'un carnet
-d'adresses sur un même fond HyperCard : le dessin est commun, le contenu des
-champs est propre à chaque carte. Une carte « à part » a simplement son propre
+d'adresses sur un même fond : le dessin est commun, le contenu des champs est propre à chaque carte. Une carte « à part » a simplement son propre
 modèle (bouton **+ Carte**).
 
 ## 2. L'écran
@@ -58,7 +57,7 @@ modèle (bouton **+ Carte**).
 └ barre d'état ────────────────────────────────────────────┴╎┴──────────────── mode · carte n / N ─┘
 ```
 
-En haut, comme dans LiveCode, la barre de menus et, juste dessous, la barre de
+En haut, la barre de menus et, juste dessous, la barre de
 boutons. Au centre, deux pages : **Interface** (la carte) et **Script**
 (l'éditeur de code) ; dessous, **Messages** et **Problèmes**. À droite, une
 colonne à onglets réunit **Inspecteur**, **Pile**, **Outils** et **Cartes**. Le
@@ -69,8 +68,7 @@ ou de mode, *Script* quand on crée ou ouvre une procédure.
 - **Inspecteur** : objets de la carte, propriétés, contenu, événements
   (section 3).
 - **Pile** : titre, taille des cartes (appliquée à tous les modèles), couleur de
-  fond, barre de navigation et persistance des données de l'application —
-  l'inspecteur de la pile, comme le *Stack Inspector* de LiveCode.
+  fond, barre de navigation et persistance des données de l'application —  l'inspecteur de la pile.
 - **Outils** : la palette d'outils (tous les contrôles du paquet `interface`) ;
   on glisse un outil sur la carte de la page *Interface*. Le mode se choisit avec
   les boutons ✎ Conception / ▶ Exécution de la barre (ou Ctrl+E).
@@ -129,7 +127,7 @@ carte affichée.
 
 ### La boîte de messages
 
-Onglet *Messages* (Ctrl+M). Comme celle d'HyperCard, elle exécute une commande
+Onglet *Messages* (Ctrl+M). Elle exécute une commande
 ou évalue une expression Lexis+ dans la pile en cours ; ↑ / ↓ rappellent les
 commandes, un double-clic sur une ligne du journal la recopie.
 

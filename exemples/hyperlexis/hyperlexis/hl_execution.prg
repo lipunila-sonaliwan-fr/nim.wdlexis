@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_execution.prg : mode Exécution (la pile fonctionne dans la fenêtre de
 && l'atelier), boîte de messages, pile autonome, génération de l'application.
 &&
@@ -249,7 +249,7 @@ procedure HL_CREER_MANQUANTES(l)
 finprocedure
 
 &&
-&& Boîte de messages (comme celle d'HyperCard) : une commande ou une expression
+&& Boîte de messages : une commande ou une expression
 && Lexis+, exécutée dans la pile (ALLER_CARTE("suivante"), NOMBRE_CARTES()...)
 &&
 

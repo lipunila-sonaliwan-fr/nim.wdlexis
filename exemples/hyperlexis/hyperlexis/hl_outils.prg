@@ -1,4 +1,4 @@
-&& CC BY-NC-SA 4.0 - HyperLexis, atelier de piles pour Lexis+ (wdlexis+)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && hl_outils.prg : outils communs (textes, noms, littéraux Lexis+, dessin des
 && formulaires au format du concepteur, blocs marqués des scripts).
 
