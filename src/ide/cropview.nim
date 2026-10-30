@@ -195,3 +195,9 @@ proc cropClear*(id: ControlId) =
 
 proc cropValue*(id: ControlId): Crop =
   readControl(id, CropView, c): result = c.crop
+
+
+method dispose*(c: CropView) =
+  if c.tex != nil: SDL_DestroyTexture(c.tex)
+  c.tex = nil
+  c.texDirty = true

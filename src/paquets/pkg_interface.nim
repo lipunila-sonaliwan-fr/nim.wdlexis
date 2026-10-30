@@ -30,7 +30,7 @@
 # Les valeurs nommées (dispositions, ancrages, icônes...) s'écrivent en
 # français ; les noms anglais de wdgui sont aussi acceptés.
 
-import std/[strutils, tables, os, locks, options, math]
+import std/[strutils, tables, os, locks, options, math, algorithm]
 import ../wdgui
 import ../lexis/api
 import ../ide/compat
@@ -45,7 +45,11 @@ from ../ide/diagramme import DiagramCanvas, DiaNode, DiaLink, DiaRow, newDiagram
 from ../ide/etats import ReportModel, newReport, parseReportCode, generateReportCode, reportFileName
 from ../ide/formmodel import FormModel, DNode, PropKind, newModel, parseModel, generateCode, loadCustomPalette,
   addCustomEntry, allNodes, getProp, handlerFor, setHandler, eventsOf, isContainerKind, findEntry, isIdent
-from ../ide/lexislint import Diagnostic, Severity
+from ../ide/lexislint import Diagnostic, Severity, ProjectIndex, Location, indexProject
+from ../ide/blueprint import DocHost, newDocHost, bpHostInUse, bpOpen, bpClose, bpRebuildDetails, bpHandleEvent,
+  bpSetProjectProcs, bpInsertApi, bpShowLine, bpCodeChanged, bpGotoLine, bpStatus, bpCommand, bpLocate, bpOpenEntity
+from ../ide/formmodel import isFormFile
+from ../ide/etats import isReportFile
 from ../ide/imagedecode import decodeImageFile
 from std/unicode import runeOffset
 
@@ -503,6 +507,8 @@ proc eventName(ev: Event): string =
   if k.len > 2 and k.startsWith("ev") and k[2] in {'A'..'Z'}: k = k[2 .. ^1]
   frenchEvent(k.toLowerAscii)
 
+proc bpNativeEvent(ev: var Event): bool
+
 proc scriptHandler(ev: var Event) {.nimcall, gcsafe.} =
   # Gestionnaire de toutes les fenêtres du programme. wdgui l'appelle pour la
   # cible puis pour chacun de ses parents (ev.current) ; on exécute à chaque
@@ -519,6 +525,9 @@ proc scriptHandler(ev: var Event) {.nimcall, gcsafe.} =
             break
         if not L.isNil: break
     if L.isNil or L.stopRequested(): return
+    if bpNativeEvent(ev):
+      ev.stopPropagation()
+      return
     let kindName = eventName(ev)
     L.enter()
     try:
@@ -659,7 +668,113 @@ proc edOf(L: Interp, a: seq[Value], fname: string): ControlId =
   c.id
 
 proc uidArg(L: Interp, a: seq[Value], i: int, id: ControlId, fname: string): int =
-  if arg(a, i).kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, i, fname))
+  # Par défaut : document actif, ou code représenté par la vue blueprint active.
+  if arg(a, i).kind == vkNil: editorCodeUid(id) else: int(L.checkInt(a, i, fname))
+
+#
+# Vue blueprint (ui.blueprint) : une par programme, comme dans l'atelier natif.
+#
+
+var bpHost: Control                    # DocHost du programme (nil : aucun)
+var bpEd: Control                      # son éditeur
+var bpLock: Lock
+var bpDefs: Table[string, tuple[path: string, line: int]]   # procédures du projet (majuscules)
+initLock(bpLock)
+
+const natureNames = [dkText: "texte", dkCode: "code", dkForm: "formulaire", dkReport: "etat", dkBlueprint: "blueprint"]
+
+proc natureOf(s: string): DocKind =
+  case s.toLowerAscii
+  of "code", "lexis": dkCode
+  of "formulaire", "form": dkForm
+  of "etat", "état", "report": dkReport
+  of "texte", "text", "": dkText
+  else: rtError("nature attendue : code, formulaire, etat ou texte")
+
+proc kindForPath(path: string): DocKind =
+  if path.toLowerAscii.endsWith(".prg"):
+    if isFormFile(path): dkForm
+    elif isReportFile(path): dkReport
+    else: dkCode
+  else: dkText
+
+proc bpEdId(): ControlId =
+  if bpEd.isNil: NoControl else: bpEd.id
+
+proc bpSignal(text: string, index = 0) =
+  ## Événement « surselection » de la vue (ev.texte) livré au programme.
+  {.cast(gcsafe).}:
+    if not bpHost.isNil: bpHost.emit(evSelection, index = index, text = text)
+
+proc bpOpenView(srcUid: int): int =
+  ## Ouvre (ou active) la vue blueprint du document de code srcUid ; -1 si impossible.
+  result = -1
+  let id = bpEdId()
+  if int(id) <= 0 or srcUid < 0: return
+  var k = editorKind(id, srcUid)
+  if k == dkBlueprint: return srcUid
+  let info = editorInfo(id, srcUid)
+  if k == dkText and (info.path.len > 0 or info.title.toLowerAscii.endsWith(".prg")):
+    k = kindForPath(if info.path.len > 0: info.path else: info.title)
+    editorSetKind(id, srcUid, k)
+  if k notin {dkCode, dkForm, dkReport}: return
+  result = editorNewBlueprint(id, srcUid)
+  if result < 0: return
+  bpOpen(result, srcUid, editorText(id, srcUid), info.version)
+  bpRebuildDetails()
+
+proc onBpCode(srcUid: int) {.nimcall, gcsafe.} = bpSignal("code:" & $srcUid, srcUid)
+
+proc onBpGoto(srcUid, line: int) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    let id = bpEdId()
+    if int(id) > 0:
+      editorGoto(id, srcUid, line, 0)
+      editorFlush(id)
+    bpSignal("ligne:" & $srcUid & ":" & $(line + 1), srcUid)
+
+proc onBpStatus(msg: string) {.nimcall, gcsafe.} = bpSignal("statut:" & msg)
+
+proc onBpCommand(cmd: string) {.nimcall, gcsafe.} = bpSignal(cmd)
+
+proc onBpLocate(name: string): tuple[path: string, line: int] {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    withLock bpLock: result = bpDefs.getOrDefault(name.toUpperAscii)
+
+proc onBpOpenEntity(name: string) {.nimcall, gcsafe.} =
+  ## Icône fichier (double-clic) : ouvre le fichier de la procédure en vue blueprint.
+  {.cast(gcsafe).}:
+    let loc = onBpLocate(name)
+    let id = bpEdId()
+    if int(id) <= 0: return
+    if loc.path.len == 0 or not fileExists(loc.path):
+      bpSignal("statut:Définition de « " & name & " » introuvable dans le projet")
+      return
+    var uid = editorUidOf(id, loc.path)
+    if uid < 0:
+      try: uid = editorOpen(id, loc.path, readFile(loc.path))
+      except IOError, OSError: return
+      editorSetKind(id, uid, kindForPath(loc.path))
+    let bp = bpOpenView(uid)
+    if bp >= 0:
+      bpShowLine(bp, loc.line)
+      bpRebuildDetails()
+    bpSignal("entite:" & name & ":" & $uid, uid)
+
+proc bpNativeEvent(ev: var Event): bool =
+  ## Événements internes de la vue (canevas, palette, détails, barre d'outils) et
+  ## resynchronisation quand l'onglet d'une vue redevient actif. Vrai : traité.
+  if bpHost.isNil or ev.current != ev.id: return false
+  if ev.kind == evSelection and ev.id == bpEdId() and ev.text.startsWith("doc:"):
+    let id = bpEdId()
+    let uid = try: parseInt(ev.text[4 .. ^1]) except ValueError: -1
+    if uid >= 0 and editorKind(id, uid) == dkBlueprint:
+      let src = editorLinkUid(id, uid)
+      if src >= 0:
+        bpOpen(uid, src, editorText(id, src), editorInfo(id, src).version)
+        bpRebuildDetails()
+    return false                       # le programme reçoit aussi « doc: »
+  bpHandleEvent(ev)
 
 proc diagOf(L: Interp, t: LTable, lines: seq[string]): Diagnostic =
   let ln = max(1, optField(t, "ligne", 1)) - 1
@@ -1188,9 +1303,10 @@ proc defineMethods() =
     editorActivate(L.edOf(a, "activer"), int(L.checkInt(a, 2, "activer")))
   mfn "editeur", "documents", proc (L: Interp, a: seq[Value]): seq[Value] =
     let t = newLTable()
-    for d in editorDocs(L.edOf(a, "documents")):
+    let id = L.edOf(a, "documents")
+    for d in editorDocs(id, optBool(a, 2, false)):
       t.arr.add record({"uid": intV(d.uid), "chemin": strV(d.path), "titre": strV(d.title),
-                        "modifie": boolV(d.dirty)})
+                        "modifie": boolV(d.dirty), "nature": strV(natureNames[editorKind(id, d.uid)])})
     @[tableV(t)]
   mfn "editeur", "chemin", proc (L: Interp, a: seq[Value]): seq[Value] =
     let id = L.edOf(a, "chemin")
@@ -1297,6 +1413,31 @@ proc defineMethods() =
     let uid = if arg(a, 3).kind == vkNil: -1 else: int(L.checkInt(a, 3, "pastille"))
     let col = if arg(a, 4).kind == vkStr and a[3].s.len > 0: colorOf(a[3]) else: Color()
     editorSetBadge(id, uid, txt, col)
+  mfn "editeur", "nature", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:nature([uid]) : « code », « formulaire », « etat », « blueprint » ou « texte » ;
+    # ed:nature(genre, [uid]) : l'impose (couleur de la pastille de l'onglet).
+    let id = L.edOf(a, "nature")
+    let v = arg(a, 2)
+    if v.kind == vkStr:
+      let uid = if arg(a, 3).kind == vkNil: editorCodeUid(id) else: int(L.checkInt(a, 3, "nature"))
+      editorSetKind(id, uid, natureOf(v.s))
+      return @[]
+    let uid = if v.kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, 2, "nature"))
+    if uid < 0: return @[nilV]
+    @[strV(natureNames[editorKind(id, uid)])]
+  mfn "editeur", "pastilles", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:pastilles(vrai) : pastille de couleur par nature de document sur les onglets.
+    let id = L.edOf(a, "pastilles")
+    let on = optBool(a, 2, true)
+    withControl(id, CodeEditor, ed):
+      ed.kindDots = on
+      markDirty(ed)
+  mfn "editeur", "lien", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:lien(uid) : vue blueprint -> uid du code ; code -> uid de sa vue (nul : aucune).
+    let id = L.edOf(a, "lien")
+    let uid = L.uidArg(a, 2, id, "lien")
+    let r = if editorKind(id, uid) == dkBlueprint: editorLinkUid(id, uid) else: editorBlueprintFor(id, uid)
+    @[if r < 0: nilV else: intV(r)]
   mfn "editeur", "noms", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Noms proposés par la complétion (SQL : « table » et « table.colonne »).
     let id = L.edOf(a, "noms")
@@ -1305,6 +1446,67 @@ proc defineMethods() =
     if v.kind == vkTable:
       for i in 1 .. v.t.rawLen: names.add L.tostr(v.t.rawGet(intV(i)))
     editorSetProjectNames(id, names)
+
+  # vue blueprint (ui.blueprint)
+  proc hostOf(L: Interp, a: seq[Value], fname: string): ControlId =
+    let c = L.self(a, fname)
+    if c.ctl.isNil or not (c.ctl of DocHost): rtError("« " & fname & " » : vue blueprint attendue")
+    let id = bpEdId()
+    if int(id) <= 0: rtError("« " & fname & " » : ajoutez d'abord la vue blueprint à une fenêtre")
+    id
+  mfn "blueprint", "ouvrir", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:ouvrir([uid]) : ouvre (ou active) l'onglet blueprint du code uid (défaut : document actif).
+    let id = L.hostOf(a, "ouvrir")
+    let r = bpOpenView(L.uidArg(a, 2, id, "ouvrir"))
+    @[if r < 0: nilV else: intV(r)]
+  mfn "blueprint", "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:fermer([uid]) : ferme la vue blueprint uid, ou celle du code uid.
+    let id = L.hostOf(a, "fermer")
+    let uid = if arg(a, 2).kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, 2, "fermer"))
+    let bp = if editorKind(id, uid) == dkBlueprint: uid else: editorBlueprintFor(id, uid)
+    if bp >= 0:
+      editorClose(id, bp)
+      bpClose(bp)
+    @[boolV(bp >= 0)]
+  mfn "blueprint", "actif", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:actif() : vrai si l'onglet affiché est une vue blueprint.
+    let id = L.hostOf(a, "actif")
+    let uid = editorActiveUid(id)
+    @[boolV(uid >= 0 and editorKind(id, uid) == dkBlueprint)]
+  mfn "blueprint", "projet", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:projet(dossier) : procédures du projet (palette, liens d'appel vers d'autres fichiers).
+    discard L.hostOf(a, "projet")
+    let root = L.checkStr(a, 2, "projet")
+    let idx = indexProject(root)
+    var procs: seq[string]
+    var defs = initTable[string, tuple[path: string, line: int]]()
+    for k, locs in idx.defs:
+      procs.add k
+      if locs.len > 0: defs[k] = (locs[0].file, locs[0].line)
+    procs.sort()
+    withLock bpLock: bpDefs = defs
+    bpSetProjectProcs(procs)
+    @[intV(procs.len)]
+  mfn "blueprint", "inserer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:inserer(signature) : nœud pour une entrée de lexis.documentation() dans la vue affichée.
+    let id = L.hostOf(a, "inserer")
+    let sig = L.checkStr(a, 2, "inserer")
+    let uid = editorActiveUid(id)
+    if uid < 0 or editorKind(id, uid) != dkBlueprint: return @[boolV(false)]
+    for e in apiEntries():
+      if e.signature == sig:
+        bpInsertApi(e)
+        return @[boolV(true)]
+    @[boolV(false)]
+  mfn "blueprint", "afficherligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:afficherligne(ligne, [uid]) : centre la vue sur le nœud de la ligne (1 = première).
+    let id = L.hostOf(a, "afficherligne")
+    let line = int(L.checkInt(a, 2, "afficherligne")) - 1
+    var uid = if arg(a, 3).kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, 3, "afficherligne"))
+    if editorKind(id, uid) != dkBlueprint: uid = editorBlueprintFor(id, uid)
+    if uid >= 0:
+      bpShowLine(uid, line)
+      bpRebuildDetails()
 
   # visionneuse Markdown
   mfn "markdown", "charger", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1807,6 +2009,10 @@ proc openInterface(L: Interp): Value =
     let w = newWindow(title, optField(o, "largeur", 640), optField(o, "hauteur", 480), scriptHandler,
                       layout = layoutOf(optField(o, "disposition", "vertical")),
                       theme = themeOf(optField(o, "theme", "natif"), optField(o, "sombre", false)))
+    if field(o, "x").kind != vkNil or field(o, "y").kind != vkNil:
+      w.placed = true                  # position initiale à l'écran (sinon : centrée)
+      w.placeX = optField(o, "x", 0)
+      w.placeY = optField(o, "y", 0)
     @[L.register(UiCtl(rawId: w.id, win: w, family: "fenetre"))]
   ctor("etiquette", "etiquette"):
     newLabel(L.optStr(a, 1, "etiquette", ""), alignOf(L.optStr(a, 2, "etiquette", "gauche")))
@@ -1908,6 +2114,32 @@ proc openInterface(L: Interp): Value =
     ed.showMinimap = optField(o, "minicarte", true)
     ed.fontSize = optField(o, "taille", 14.0)
     @[L.newCtl(ed, "editeur")]
+  m.fn "blueprint", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ui.blueprint(ed, [{sombre=}]) : l'éditeur avec ses onglets à pastilles et la vue blueprint
+    # (palette, canevas, détails) qui le recouvre quand l'onglet actif est un blueprint.
+    # On ajoute la vue (et non l'éditeur) à son conteneur.
+    let c = ctlOf(arg(a, 1), "éditeur")
+    if c.ctl.isNil or not (c.ctl of CodeEditor): rtError("interface.blueprint : éditeur (ui.editeur) attendu")
+    if int(c.id) != 0: rtError("interface.blueprint : l'éditeur ne doit pas encore être ajouté à un conteneur")
+    var used = false
+    {.cast(gcsafe).}:
+      guarded: used = bpHostInUse()
+    if used: rtError("interface.blueprint : une seule vue blueprint par programme (déjà utilisée)")
+    let o = optsArg(a, 2)
+    initLangDocs()
+    var host: DocHost
+    {.cast(gcsafe).}:
+      guarded:
+        host = newDocHost(CodeEditor(c.ctl), themeOf("natif", optField(o, "sombre", true)))
+        bpHost = host
+        bpEd = c.ctl
+        bpCodeChanged = onBpCode
+        bpGotoLine = onBpGoto
+        bpStatus = onBpStatus
+        bpCommand = onBpCommand
+        bpLocate = onBpLocate
+        bpOpenEntity = onBpOpenEntity
+    @[L.newCtl(host, "blueprint")]
   m.fn "markdown", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = optsArg(a, 1)
     var txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
@@ -2072,7 +2304,7 @@ proc openInterface(L: Interp): Value =
   tableV(m)
 
 const uiDocs = [
-  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif.",
+  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée).",
   "interface.executer()", "Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime).",
   "interface.quitter()", "Ferme toutes les fenêtres du programme.",
   "interface.fenetres()", "Nombre de fenêtres ouvertes.",
@@ -2090,7 +2322,7 @@ const uiDocs = [
   "interface.grille{multi=, remplissage=\"programme|manuel|automatique\"}", "Grille de saisie.",
   "interface.jauge()", "Jauge.", "interface.curseur()", "Potentiomètre.", "interface.plage()", "Potentiomètre de plage.",
   "interface.ascenseur()", "Ascenseur.", "interface.compteur()", "Compteur à flèches.", "interface.notation()", "Notation.",
-  "interface.image(chemin)", "Image.", "interface.codebarre(texte)", "Code-barres.",
+  "interface.image(chemin)", "Image PNG, JPEG ou BMP (autres formats si wdgui est compilé avec -d:sdlimage) ; valeur : le chemin. Une image illisible est signalée sur la sortie d'erreur.", "interface.codebarre(texte)", "Code-barres.",
   "interface.graphe([genre], [titre])", "Graphe : colonnes, lignes, aires, secteurs.",
   "interface.calendrier([\"AAAAMMJJ\"])", "Calendrier.", "interface.kanban()", "Kanban.",
   "interface.mosaique()", "Mosaïque proportionnelle (treemap).", "interface.gantt()", "Gantt : g:ajoutertache(libelle, debut, duree, [avancement], [couleur], [detail]), g:fixeravancement(i, a), g:vider(), g:horaire([b]) (unités en heures, axe HH:MM), g:largeurlibelles(px) ; surselection : ev.index.",
@@ -2102,6 +2334,7 @@ const uiDocs = [
   "interface.panneau{disposition=, defilement=, colonnes=}", "Conteneur défilant (defilement : toujours, automatique, masque).",
   "interface.pdf()", "Visionneuse PDF (PDFium).",
   "interface.editeur([{minicarte=, taille=}])", "Éditeur de code Lexis+ à onglets (coloration, complétion, structure, minicarte, points d'arrêt). valeur : texte du document actif. surchangement : texte modifié ; surselection : signal dans ev.texte (\"pos:L:C\", \"doc:UID\", \"cmd:save\", \"cmd:run\"...).",
+  "interface.blueprint(editeur, [{sombre=}])", "Vue blueprint de l'éditeur (une par programme) : l'éditeur reçoit des pastilles de couleur par nature de document (rouge code, orange formulaire, jaune état, bleu blueprint) et la vue (palette, graphe éditable, détails) recouvre l'éditeur quand l'onglet actif est un blueprint ; chaque modification du graphe réécrit le code. On ajoute la vue, pas l'éditeur, au conteneur. surselection (ev.texte) : « code:UID » code réécrit, « ligne:UID:N », « statut:message », « entite:NOM:UID » procédure d'un autre fichier ouverte en blueprint, « cmd:... » raccourcis tapés dans la vue.",
   "interface.markdown(texte | {texte=, fichier=})", "Visionneuse Markdown en lecture seule (titres, listes, citations, code, gras, italique, liens), avec retour à la ligne automatique et ascenseur vertical. valeur : le texte Markdown ; surselection : URL du lien cliqué dans ev.texte ; fichier : relatif au dossier du programme.",
   "interface.alerte(message, [icone], [titre])", "Message (icone : information, question, attention, stop, aucune).",
   "interface.confirmer(message, [icone])", "OK / Annuler ; renvoie un logique.",
@@ -2144,11 +2377,20 @@ const uiDocs = [
   "panneau:defilera(x, y)", "Fait défiler.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre.",
   "editeur:ouvrir(chemin, [creer])", "Ouvre (ou active) un fichier dans un onglet ; renvoie l'uid du document. creer = vrai : fichier absent accepté.",
   "editeur:nouveau([titre])", "Nouveau document vide ; renvoie son uid.",
-  "editeur:texte([uid])", "Texte d'un document (actif par défaut).",
+  "editeur:texte([uid])", "Texte d'un document (par défaut : l'actif, ou le code représenté par la vue blueprint active, comme toutes les méthodes à uid facultatif).",
   "editeur:enregistrer([chemin], [uid])", "Écrit le document sur disque et le marque enregistré ; renvoie le chemin.",
   "editeur:fermer([uid])", "Ferme un document.", "editeur:actif()", "uid du document actif.",
   "editeur:activer(uid)", "Active un document.",
-  "editeur:documents()", "Documents ouverts : liste de {uid, chemin, titre, modifie}.",
+  "editeur:documents([avecblueprints])", "Documents ouverts : liste de {uid, chemin, titre, modifie, nature} (sans les vues blueprint, sauf avecblueprints = vrai).",
+  "editeur:nature([uid]) | editeur:nature(genre, [uid])", "Nature d'un document : code, formulaire, etat, blueprint ou texte ; avec genre, l'impose (couleur de la pastille de l'onglet).",
+  "editeur:pastilles([vrai])", "Affiche (ou masque) les pastilles de nature sur les onglets ; un clic sur une pastille envoie « cmd:dot:UID » (surselection).",
+  "editeur:lien([uid])", "Vue blueprint : uid du code représenté ; code : uid de sa vue blueprint (nul : aucune).",
+  "blueprint:ouvrir([uid])", "Ouvre (ou active) l'onglet blueprint du code uid (défaut : document actif) ; renvoie l'uid de la vue, nul si le document n'est pas du code Lexis+.",
+  "blueprint:fermer([uid])", "Ferme la vue blueprint uid, ou celle du code uid ; vrai si une vue a été fermée.",
+  "blueprint:actif()", "Vrai si l'onglet affiché est une vue blueprint.",
+  "blueprint:projet(dossier)", "Indexe les procédures et fonctions des .prg du dossier : palette, et icône fichier des appels vers un autre fichier (double-clic : l'ouvre en blueprint). Renvoie leur nombre.",
+  "blueprint:inserer(signature)", "Ajoute à la vue affichée un nœud pour une entrée de lexis.documentation() ; vrai si ajouté.",
+  "blueprint:afficherligne(ligne, [uid])", "Centre la vue blueprint sur le nœud de la ligne (1 = première) et le sélectionne.",
   "editeur:chemin([uid])", "Chemin d'un document.", "editeur:modifie([uid])", "Vrai si le document a des modifications non enregistrées.",
   "editeur:chercherdocument(chemin)", "uid du document ouvert sur ce chemin (ou ce titre) ; nul sinon.",
   "editeur:aller(ligne, [colonne], [uid])", "Place le curseur (lignes et colonnes à partir de 1).",

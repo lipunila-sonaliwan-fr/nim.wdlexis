@@ -15,9 +15,9 @@ retourner { ;
                 "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)", ;
                 "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts", ;
                 "Arguments et fichier principal…", "Générer l'application…"}}, ;
-  {"Conception", {"Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
+  {"Conception", {"Vue blueprint du fichier courant", "-", "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
                   "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"}}, ;
-  {"Affichage", {"Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)", ;
+  {"Affichage", {"Fenêtre Projet / Structure / Référence", "-", "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)", ;
                  "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)", ;
                  "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites", ;
                  "Signaler les procédures inconnues"}}, ;
@@ -116,6 +116,8 @@ procedure MENU(ev)
   cas choix = "Générer l'application…"
     GENERER_DIALOGUE()
   && Conception
+  cas choix = "Vue blueprint du fichier courant"
+    BLUEPRINT_BASCULER()
   cas choix = "Nouveau formulaire pour le fichier courant…"
     CONCEPTEUR_NOUVEAU()
   cas choix = "Ouvrir un formulaire…"
@@ -127,6 +129,8 @@ procedure MENU(ev)
   cas choix = "Ouvrir un état…"
     ETAT_CHOISIR()
   && Affichage
+  cas choix = "Fenêtre Projet / Structure / Référence"
+    AFFICHER_OUTILS(nul)
   cas choix = "Copier la console"
     COPIER_CONSOLE()
   cas choix = "Effacer la console"
@@ -149,7 +153,7 @@ procedure MENU(ev)
   cas choix = "Raccourcis clavier"
     ui.alerte(RACCOURCIS(), "information", "Raccourcis clavier")
   cas choix = "Référence des fonctions et paquets"
-    gauche.valeur = 3
+    AFFICHER_OUTILS(3)
   cas choix = "À propos"
     ui.alerte("wdlexis+ [S]tudio 1.7.3\nAtelier du langage Lexis+\n" +
               "Développez naturellement vos applications métier\n\n" +
@@ -173,5 +177,10 @@ fonction RACCOURCIS()
     "Ctrl+R exécuter (sans débogueur)         F5 déboguer / continuer", ;
     "F9 ou clic dans la marge : point d'arrêt F10 pas principal", ;
     "F11 pas à pas                            Maj+F11 sortir de la procédure", ;
-    "Maj+F5 arrêter"}
+    "Maj+F5 arrêter", ;
+    "", ;
+    "Vue blueprint (clic sur la pastille rouge d'un onglet)", ;
+    "Glisser depuis la palette, relier les broches   Suppr supprimer la sélection", ;
+    "Ctrl+Z/Y annuler, rétablir                      F ou Origine tout voir", ;
+    "Double-clic sur l'icône fichier d'un appel : la procédure s'ouvre en blueprint"}
 retourner joindre(l, car(10))

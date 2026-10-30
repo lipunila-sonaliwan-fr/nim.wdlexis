@@ -425,9 +425,24 @@ proc procRef*(L: Interp, name: string): Value =
 proc eval(L: Interp, fr: Frame, e: Expr): Value
 proc execBlock(L: Interp, fr: Frame, body: seq[Stmt]): ExecResult
 
+const lexisStackBudget {.intdefine.} = 1_200_000
+  ## Pile native qu'un fil d'exécution Lexis+ peut consommer (octets). Les fils de wdgui,
+  ## des tâches et de lexis.executer ont 2 Mo de pile : au-delà du budget, une erreur
+  ## Lexis+ (interceptable par essayer) remplace le débordement de pile qui tuerait le
+  ## processus (et l'atelier avec lui).
+
+proc checkDepth(L: Interp, c: Ctx) {.inline.} =
+  var probe: int
+  let here = cast[uint](addr probe)
+  if c.frames.len == 0: c.stackBase = here
+  elif c.frames.len >= L.maxDepth:
+    rtError("profondeur d'appel maximale atteinte (récursion infinie ?)")
+  elif c.stackBase > here and c.stackBase - here > uint(lexisStackBudget):
+    rtError("pile d'exécution épuisée : récursion trop profonde (" & $c.frames.len & " appels imbriqués)")
+
 proc callLexis(L: Interp, fn: LFunc, args: seq[Value]): seq[Value] =
   let c = ctx()
-  if c.frames.len >= L.maxDepth: rtError("profondeur d'appel maximale atteinte (récursion infinie ?)")
+  L.checkDepth(c)
   let p = fn.proto
   let fr = Frame(proto: p, fnName: fn.name, slots: newSeq[Cell](p.nslots), line: p.line)
   for i in 0 ..< p.nparams:
@@ -443,7 +458,7 @@ proc call*(L: Interp, f: Value, args: seq[Value]): seq[Value] =
   if f.kind == vkFunc:
     if f.f.native:
       let c = ctx()
-      if c.frames.len >= L.maxDepth: rtError("profondeur d'appel maximale atteinte")
+      L.checkDepth(c)
       c.frames.add Frame(fnName: f.f.name, line: 0)
       try:
         result = f.f.nfn(L, args)

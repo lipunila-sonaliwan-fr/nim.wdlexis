@@ -30,6 +30,12 @@ task raccourci, "Linux : ajoute wdlexis+ (avec son icône) au menu des applicati
 task test, "Tests du langage Lexis+ (sans interface graphique)":
   exec "nim c -r -d:release tests/t_langage.nim"
 
+task testblueprint, "Tests de la vue blueprint : aller-retour code -> graphe -> code sur les exemples":
+  exec "nim c -r -d:release tests/t_blueprint.nim"
+
+task testrecursion, "Récursion trop profonde : erreur Lexis+ interceptable, sans arrêt brutal du processus":
+  exec "nim c -r -d:release tests/t_recursion.nim"
+
 task testwebview, "Test du paquet webview (bibliothèque webview simulée, sans affichage)":
   exec "nim c -r -d:release tests/t_webview.nim"
 

@@ -19,7 +19,7 @@
 # Icons: iconStop, iconExclamation, iconQuestion, iconInformation, iconNone, or the id
 # returned by loadIcon(path) for a custom image.
 import std/[os, strutils, tables, times, algorithm, osproc, typedthreads, unicode, math]
-import ../sdl3, core, controls_basic, controls_lists, api
+import ../sdl3, core, controls_basic, controls_lists, api, imageload
 
 type
   IconId* = distinct int
@@ -47,7 +47,7 @@ var
   dialogStates: Table[int, DialogState]
 
 proc loadIcon*(path: string): IconId =
-  # Registers an image (BMP, or PNG/JPG with -d:sdlimage) usable as a dialog icon.
+  # Registers an image (PNG, JPEG, BMP ; other formats with -d:sdlimage) usable as a dialog icon.
   guarded:
     customIcons.add path
     result = IconId(100 + customIcons.high)
@@ -119,18 +119,10 @@ method draw*(c: IconView, d: Drawing, t: Theme) =
       {.cast(gcsafe).}:
         if i < customIcons.len: path = customIcons[i]
       if path.len > 0:
-        when defined(sdlimage):
-          let s = IMG_Load(path.cstring)
-        else:
-          let s = SDL_LoadBMP(path.cstring)
-        if s != nil:
-          c.tex = SDL_CreateTextureFromSurface(d.ren, s)
-          SDL_DestroySurface(s)
-          if c.tex != nil:
-            var w, h: cfloat
-            discard SDL_GetTextureSize(c.tex, addr w, addr h)
-            c.texW = float(w)
-            c.texH = float(h)
+        let r = loadTexture(d.ren, path)
+        c.tex = r.tex
+        c.texW = r.w
+        c.texH = r.h
     if c.tex != nil:
       let f = min(r.w / max(1.0, c.texW), r.h / max(1.0, c.texH))
       d.drawTexture(c.tex, rect(cx - c.texW * f / 2, cy - c.texH * f / 2, c.texW * f, c.texH * f))
@@ -449,7 +441,7 @@ proc accept(st: FileDialogState) =
                  "\" existe déjà.\nVoulez-vous le remplacer ?", st.win.title) != drOk:
         return
   elif not fileExists(path):
-    alert(iconExclamation, "\"" & typed & "\" introuvable.\nVérifiez le nom du fichier et réessayez..",
+    alert(iconExclamation, "\"" & typed & "\" introuvable.\nVérifiez le nom du fichier et réessayez.",
           st.win.title)
     return
   st.chosen = path
@@ -933,7 +925,7 @@ proc colorDialog*(color: var Color, title = "Couleurs"): DialogResult =
     for i in 0 .. 3:
       let row = right.addChild(newSupercontrol(lkHorizontal))
       let l = row.addChild(newLabel(names[i]))
-      l.fixedWidth = 80
+      l.fixedWidth = 50
       let sl = row.addChild(newSlider(float(channel(color, i)), 0, 255))
       sl.weight = 1
       let sp = row.addChild(newSpin(float(channel(color, i)), 0, 255))
@@ -942,7 +934,7 @@ proc colorDialog*(color: var Color, title = "Couleurs"): DialogResult =
       st.spins[i] = sp.id
     let hr = right.addChild(newSupercontrol(lkHorizontal))
     let hl = hr.addChild(newLabel("Hex"))
-    hl.fixedWidth = 80
+    hl.fixedWidth = 60
     let he = hr.addChild(newEdit(hexOf(color)))
     he.fixedWidth = 140
     st.hexEdit = he.id
@@ -1337,3 +1329,17 @@ proc findDialog*(request: var FindRequest, target = NoControl, replace = false, 
   result = runModal(st)
   if result == drOk: request = st.request
   else: result = drCancel
+
+
+method dispose*(c: IconView) =
+  if c.tex != nil: SDL_DestroyTexture(c.tex)
+  c.tex = nil
+  c.loaded = false
+
+method dispose*(c: FontPreview) =
+  when defined(sdlttf):
+    if c.tex != nil: SDL_DestroyTexture(c.tex)
+    c.tex = nil
+    if c.font != nil: TTF_CloseFont(c.font)
+    c.font = nil
+    c.key = ""

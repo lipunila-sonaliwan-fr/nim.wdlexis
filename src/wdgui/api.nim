@@ -155,6 +155,7 @@ proc deleteControl*(id: ControlId) =
         if c.win.focusedControl == c: c.win.focusedControl = nil
         if c.win.hoveredControl == c: c.win.hoveredControl = nil
         if c.win.capturedControl == c: c.win.capturedControl = nil
+        c.win.pendingDispose.add c       # polices, textures... libérées au prochain rendu.
       c.parent = nil
 
 proc theme*(winId: ControlId): Theme =

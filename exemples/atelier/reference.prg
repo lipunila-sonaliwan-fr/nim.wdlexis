@@ -3,19 +3,93 @@
 && Les fiches sont du Markdown affiché par ui.markdown.
 
 procedure CHARGER_REFERENCE
-  globale docs, docsparnom
+  && entrées lues une fois, triées par paquet puis par signature (sans tenir
+  && compte des accents ni de la casse), comme l'atelier natif
+  globale docs, docsparnom, refentrees
   docs = {}
   docsparnom = {}
-  aref:vider()
-  pour chaque d dans lexis.documentation()
-    aref:ajouter(d.paquet, d.signature)
+  locale toutes = lexis.documentation()
+  locale cles = {}
+  pour i = 1 a #toutes
+    locale d = toutes[i]
+    d.recherche = CLE_TRI(d.paquet + " " + d.nom + " " + d.signature + " " + d.description)
     docs[d.paquet + ui.sep + d.signature] = d
     si non d.methode
       docsparnom[majuscule(d.nom)] = d
       docsparnom[majuscule(decouper(d.signature, "(")[1])] = d
     finsi
+    inserer(cles, CLE_TRI(d.paquet) + car(1) + CLE_TRI(d.signature) + car(1) + i)
   suivant
+  trier(cles)                    && tri natif des clés, bien plus rapide qu'une comparaison en Lexis+
+  refentrees = {}
+  pour chaque c dans cles
+    locale morceaux = decouper(c, car(1))
+    inserer(refentrees, toutes[nombre(morceaux[#morceaux])])
+  suivant
+  ARBRE_REFERENCE()
 retourner
+
+fonction CLE_TRI(s)
+  && clé de tri et de recherche : minuscules, sans accents
+  locale r = minuscule(s)
+  pour chaque p dans {{"é", "e"}, {"è", "e"}, {"ê", "e"}, {"ë", "e"}, {"à", "a"}, {"â", "a"}, {"ä", "a"}, ;
+                      {"ù", "u"}, {"û", "u"}, {"ü", "u"}, {"ô", "o"}, {"ö", "o"}, {"î", "i"}, {"ï", "i"}, ;
+                      {"ç", "c"}, {"œ", "oe"}}
+    r = remplacertexte(r, p[1], p[2])
+  suivant
+retourner r
+
+procedure ARBRE_REFERENCE
+  && arbre filtré par la recherche : tous les mots, dans le paquet, le nom,
+  && la signature ou la description ; les paquets trouvés sont dépliés
+  si outils = nul
+    retourner
+  finsi
+  locale mots = {}
+  pour chaque m dans decouper(CLE_TRI(rechref.valeur), " ")
+    si m <> ""
+      inserer(mots, m)
+    finsi
+  suivant
+  aref:vider()
+  locale paquets = {}, n = 0
+  pour chaque d dans refentrees
+    locale garder = vrai
+    pour chaque m dans mots
+      si non (m $ d.recherche)
+        garder = faux
+        sortir
+      finsi
+    suivant
+    si garder
+      aref:ajouter(d.paquet, d.signature)
+      n += 1
+      si #paquets = 0 ou paquets[#paquets] <> d.paquet
+        inserer(paquets, d.paquet)
+      finsi
+    finsi
+  suivant
+  si #mots > 0
+    pour chaque p dans paquets
+      aref:deplier(p)
+    suivant
+    etat.libelle = "Référence : " + n + " résultat(s) dans " + #paquets + " paquet(s)"
+    si n = 0
+      fiche.valeur = "### Référence" + car(10) + car(10) + "Aucun résultat pour « " + rogner(rechref.valeur) + " »."
+    finsi
+  finsi
+retourner
+
+procedure FILTRER_REFERENCE(ev)
+  ARBRE_REFERENCE()
+retourner
+
+fonction BIENVENUE_REFERENCE()
+  locale md = {"### Référence", "", ;
+               "Sélectionnez un **paquet** ou une **fonction** dans l'arbre ci-dessus pour afficher sa fiche.", "", ;
+               "- Le champ de recherche filtre l'arbre (nom, paquet ou mots de la description).", ;
+               "- Double-clic sur une fonction : insérer l'appel dans l'éditeur, ou un nœud dans la vue blueprint."}
+retourner joindre(md, car(10))
 
 procedure REFERENCE(ev)
   && ev.chemin n'existe que pour les nœuds imbriqués : on découpe ev.texte
@@ -39,7 +113,12 @@ procedure INSERER_REFERENCE(ev)
     retourner
   finsi
   locale d = docs[parts[1] + ui.sep + parts[2]]
-  si d <> nul
+  si d = nul
+    retourner
+  finsi
+  si vb:actif()
+    vb:inserer(d.signature)         && vue blueprint : nouveau nœud au centre de la vue
+  sinon
     ed:inserer(MODELE_APPEL(d.signature))
     ed:focus()
   finsi
@@ -206,7 +285,7 @@ fonction FICHE(d)
   inserer(md, "---")
   inserer(md, "> **Disponibilité** : " + DISPONIBILITE(d.paquet))
   inserer(md, "")
-  inserer(md, "*Double-clic dans l'arbre : insérer l'appel.*")
+  inserer(md, "*Double-clic dans l'arbre : insérer l'appel (un nœud dans la vue blueprint).*")
 retourner joindre(md, car(10))
 
 fonction FICHE_PAQUET(nom)

@@ -17,7 +17,7 @@
 # inserted / deleted), evValidate (a modified row is left or Enter is pressed), and the
 # generic evClick / evDoubleClick / evRightClick... which also carry index and column.
 import std/[strutils, algorithm, sequtils, json, tables, math]
-import ../sdl3, core, controls_basic, controls_lists
+import ../sdl3, core, controls_basic, controls_lists, imageload
 
 type
   GridColumnKind* = enum
@@ -594,18 +594,8 @@ proc moveTo(g: Grid, r: int, extend = false) =
 # drawing.
 proc texture(g: Grid, d: Drawing, path: string): tuple[tex: SDL_Texture, w, h: float] =
   if path in g.textures: return g.textures[path]
-  when defined(sdlimage):
-    let s = IMG_Load(path.cstring)
-  else:
-    let s = SDL_LoadBMP(path.cstring)
-  if s != nil:
-    result.tex = SDL_CreateTextureFromSurface(d.ren, s)
-    SDL_DestroySurface(s)
-    if result.tex != nil:
-      var w, h: cfloat
-      discard SDL_GetTextureSize(result.tex, addr w, addr h)
-      result.w = float(w)
-      result.h = float(h)
+  let r = loadTexture(d.ren, path)
+  result = (r.tex, r.w, r.h)
   g.textures[path] = result
 
 proc drawCell(g: Grid, d: Drawing, t: Theme, col: GridColumn, cr: Rect, v: string, fg: Color) =
@@ -1440,3 +1430,8 @@ proc gridLoadJson*(id: ControlId, path: string, append = false): int =
   var s: string
   if not readText(path, s): return -1
   gridFromJson(id, s, append)
+
+
+method dispose*(g: Grid) =
+  for v in g.textures.values: SDL_DestroyTexture(v.tex)
+  g.textures.clear()

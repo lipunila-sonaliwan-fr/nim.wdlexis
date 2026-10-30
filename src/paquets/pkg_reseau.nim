@@ -478,12 +478,14 @@ proc runTool(L: Interp, s: SshSession, tool: string, args: seq[string], input = 
   var code = 0
   L.blocking:
     let p = startProcess(exe, args = fullArgs, env = env, options = {poStdErrToStdOut})
-    if input.len > 0:
-      p.inputStream.write(input)
-    p.inputStream.close()
-    output = p.outputStream.readAll()
-    code = p.waitForExit()
-    p.close()
+    try:
+      if input.len > 0:
+        p.inputStream.write(input)
+      p.inputStream.close()
+      output = p.outputStream.readAll()
+      code = p.waitForExit()
+    finally:
+      p.close()                          # tubes du processus fermés même en cas d'erreur.
   (output, code)
 
 proc checkSsh(L: Interp, a: seq[Value], fname: string): SshSession =

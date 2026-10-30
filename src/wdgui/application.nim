@@ -191,6 +191,8 @@ proc realize(f: Window) =
   discard SDL_SetRenderDrawBlendMode(f.sdlRen, SDL_BLENDMODE_BLEND)
   f.sdlId = SDL_GetWindowID(f.sdlWin)
   let owner = f.modalFor
+  if f.placed and owner == nil:
+    discard SDL_SetWindowPosition(f.sdlWin, f.placeX.cint, f.placeY.cint)
   if owner != nil and owner.sdlWin != nil:
     # child window of its owner, centered horizontally, in the upper third
     discard SDL_SetWindowParent(f.sdlWin, owner.sdlWin)
@@ -212,6 +214,10 @@ proc realize(f: Window) =
 
 proc destroyWindow(f: Window) =
   if f.sdlWin != nil:
+    # ressources des contrôles (polices, textures, documents) avant le moteur de rendu.
+    f.flushDisposals()
+    disposeTree(f.root)
+    if f.popup != nil: f.popup.dispose()
     if f.sdlTextInputActive: discard SDL_StopTextInput(f.sdlWin)
     if f.drawing != nil: f.drawing.dispose()
     SDL_DestroyRenderer(f.sdlRen)
@@ -237,6 +243,7 @@ proc drawTooltip(f: Window, d: Drawing, t: Theme) =
   d.textIn(r, c.tooltip, t.text, alCenter)
 
 proc drawWindow(f: Window) =
+  f.flushDisposals()
   f.animating = false
   let d = f.drawing
   let t = f.theme

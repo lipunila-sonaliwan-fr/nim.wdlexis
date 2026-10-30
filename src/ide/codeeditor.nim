@@ -30,6 +30,11 @@ type
     lines: seq[string]
     line, col: int
 
+  DocKind* = enum
+    # Nature d'un document (pastille de l'onglet quand kindDots est actif).
+    dkText = "texte", dkCode = "code Lexis+", dkForm = "formulaire", dkReport = "état",
+    dkBlueprint = "blueprint"
+
   CsdKind* = enum
     cbRoutine, cbIf, cbWhen, cbCase, cbLoop, cbTry, cbBlock, cbSection
 
@@ -65,6 +70,8 @@ type
     analyzed: bool
     diags*: seq[Diagnostic]      # diagnostics de lexislint (colonnes en octets).
     lang*: string                # "" : d'après l'extension ; "sql" ou "lexis" : imposé (ed:langage).
+    kind*: DocKind               # nature (pastille de couleur de l'onglet).
+    linkUid*: int                # vue blueprint : uid du document de code qu'elle représente.
 
   EditorColors = object
     bg, gutter, gutterText, gutterMajor, currentLine, selection, caret, tabBar, tabActive,
@@ -99,6 +106,8 @@ type
     suppressSpace: bool
     projectNames*: seq[string]   # symboles du projet pour la complétion.
     clipText: string             # texte à copier (commande "setClipboard").
+    kindDots*: bool              # pastille de couleur (nature du document) au début de chaque onglet.
+    hoverDot: int
 
 
 const ImageExts = [
@@ -110,6 +119,8 @@ const ImageExts = [
 
 const
   tabBarH = 34.0
+  EditorTabBarH* = tabBarH
+  dotSpace = 16.0
   levelW = 10.0
   minimapW = 118.0
 
@@ -175,10 +186,10 @@ proc firstWord(s: string, from0: int): string =
   s[from0 ..< i]
 
 proc computeCsd(lines: seq[string], toks: seq[seq[Token]], maxLevel: var int): seq[CsdBlock] =
-  ## Blocs Lexis+, d'après le premier mot de chaque instruction :
-  ## procedure / fonction, si / sinonsi / sinon / finsi, faire cas / cas / autrement / fincas,
-  ## pour / pour chaque ... suivant, tantque / faire tantque ... fintantque,
-  ## parcourir ... finparcourir, essayer / capturer / finessayer.
+  # Blocs Lexis+, d'après le premier mot de chaque instruction :
+  # procedure / fonction, si / sinonsi / sinon / finsi, faire cas / cas / autrement / fincas,
+  # pour / pour chaque ... suivant, tantque / faire tantque ... fintantque,
+  # parcourir ... finparcourir, essayer / capturer / finessayer.
   var stack: seq[int]
   maxLevel = 0
   template openBlk(k: CsdKind, i: int) =
@@ -222,7 +233,7 @@ proc computeCsd(lines: seq[string], toks: seq[seq[Token]], maxLevel: var int): s
     result[top].last = max(result[top].first, lines.high)
 
 proc isSql*(doc: Document): bool =
-  ## Document SQL : imposé par ed:langage("sql"), sinon d'après l'extension .sql.
+  # Document SQL : imposé par ed:langage("sql"), sinon d'après l'extension .sql.
   if doc.lang.len > 0: doc.lang == "sql" else: doc.path.toLowerAscii.endsWith(".sql")
 
 proc analyze(doc: Document) =
@@ -242,9 +253,24 @@ proc analyze(doc: Document) =
 
 var docUidCounter: int
 
+proc kindColor*(k: DocKind): Color =
+  # Couleur de la pastille : rouge = code Lexis+, orange = formulaire, jaune = état,
+  # bleu = vue blueprint, gris = autre texte.
+  case k
+  of dkCode: hex"#E5484D"
+  of dkForm: hex"#F59E0B"
+  of dkReport: hex"#EAD019"
+  of dkBlueprint: hex"#3B82F6"
+  of dkText: hex"#8C8F96"
+
+proc defaultKind(title, path: string): DocKind =
+  let n = (if path.len > 0: path else: title).toLowerAscii
+  if n.endsWith(".prg"): dkCode else: dkText
+
 proc newDocument*(title: string, text = "", path = ""): Document =
   inc docUidCounter
-  result = Document(title: title, path: path, uid: docUidCounter, execLine: -1, bps: initHashSet[int]())
+  result = Document(title: title, path: path, uid: docUidCounter, execLine: -1, bps: initHashSet[int](),
+                    kind: defaultKind(title, path))
   result.lines = text.replace("\r\n", "\n").replace("\t", "  ").split('\n')
   if result.lines.len == 0: result.lines = @[""]
   result.lastLen = result.lines.len
@@ -277,8 +303,8 @@ proc collapse(doc: Document) =
   doc.ancCol = doc.col
 
 proc shiftBreakpoints(doc: Document) =
-  ## Décale les points d'arrêt quand des lignes ont été insérées ou supprimées
-  ## (la modification a eu lieu autour de la ligne du curseur).
+  # Décale les points d'arrêt quand des lignes ont été insérées ou supprimées
+  # (la modification a eu lieu autour de la ligne du curseur).
   let delta = doc.lines.len - doc.lastLen
   doc.lastLen = doc.lines.len
   if delta == 0 or doc.bps.len == 0: return
@@ -575,7 +601,7 @@ proc replaceAll*(doc: Document, req: FindRequest): int =
 
 proc newCodeEditor*(): CodeEditor =
   result = CodeEditor(showMinimap: true, showCsd: true, fontSize: 14, charW: 9, lineH: 19,
-                      hoverTab: -1, hoverClose: -1, current: -1)
+                      hoverTab: -1, hoverClose: -1, current: -1, hoverDot: -1)
   initControl(result)
   result.focusable = true
 
@@ -643,11 +669,25 @@ proc notifyChange(ed: CodeEditor, trigger = "") =
   if trigger == "complete": ed.openCompletion()
   emit(ed, evChange, index = d.line + 1, column = runeCol(d.lines[d.line], d.col) + 1, text = "edit")
 
+proc linked(ed: CodeEditor, doc: Document): Document =
+  # Document de code d'une vue blueprint (nil sinon).
+  if doc.kind != dkBlueprint: return nil
+  for d in ed.docs:
+    if d.uid == doc.linkUid: return d
+
+proc tabTitle(ed: CodeEditor, doc: Document): string =
+  let src = ed.linked(doc)
+  if src != nil: src.title else: doc.title
+
+proc tabModified(ed: CodeEditor, doc: Document): bool =
+  let src = ed.linked(doc)
+  if src != nil: src.modified else: doc.modified
+
 proc tabRects(ed: CodeEditor, d: Drawing): seq[Rect] =
   var x = ed.rect.x + 6
   for doc in ed.docs:
     let bw = (if doc.badge.len > 0: d.textWidth(doc.badge) + 14 else: 0.0)
-    let w = min(240.0, d.textWidth(doc.title) + 52) + bw
+    let w = min(240.0, d.textWidth(ed.tabTitle(doc)) + 52) + bw + (if ed.kindDots: dotSpace else: 0.0)
     result.add rect(x, ed.rect.y + 5, w, tabBarH - 5)
     x += w + 2
 
@@ -877,9 +917,9 @@ method preferredSize*(ed: CodeEditor, d: Drawing, t: Theme): tuple[w, h: float] 
 
 method typeName*(ed: CodeEditor): string = "CodeEditor"
 
-method acceptsText*(ed: CodeEditor): bool = ed.doc != nil
+method acceptsText*(ed: CodeEditor): bool = ed.doc != nil and ed.doc.kind != dkBlueprint
 
-method acceptsTab*(ed: CodeEditor): bool = ed.doc != nil
+method acceptsTab*(ed: CodeEditor): bool = ed.doc != nil and ed.doc.kind != dkBlueprint
 
 method mouseCursor*(ed: CodeEditor, x, y: float): int =
   if ed.doc != nil and ed.codeRect.containsPoint(x, y): SDL_SYSTEM_CURSOR_TEXT
@@ -898,6 +938,7 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
   if not ed.hovered:
     ed.hoverTab = -1
     ed.hoverClose = -1
+    ed.hoverDot = -1
   let tabs = ed.tabRects(d)
   d.pushClip(rect(r.x, r.y, r.w, tabBarH))
   for i, tr in tabs:
@@ -915,13 +956,20 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
       let br = rect(tr.x + tr.w - 30 - bw + 4, tr.y + (tr.h - 16) / 2 + 1, bw - 6, 16)
       d.fillRoundRect(br, 8, bc)
       d.textIn(br, doc.badge, hex"#FFFFFF", alCenter)
-    d.textIn(rect(tr.x + 12, tr.y, tr.w - 36 - bw, tr.h), doc.title,
+    var tx = tr.x + 12
+    if ed.kindDots:
+      let dc = kindColor(doc.kind)
+      let dy = tr.y + tr.h / 2
+      if i == ed.hoverDot: d.fillCircle(tr.x + 14, dy, 8, dc.withAlpha(70))
+      d.fillCircle(tr.x + 14, dy, 5, dc)
+      tx += dotSpace
+    d.textIn(rect(tx, tr.y, tr.w - 36 - bw - (tx - tr.x - 12), tr.h), ed.tabTitle(doc),
              (if active: colors.tabTextActive else: colors.tabText))
     let cx = tr.x + tr.w - 16
     let cy = tr.y + tr.h / 2
     if i == ed.hoverClose:
       d.fillCircle(cx, cy, 8, colors.separator)
-    if doc.modified and i != ed.hoverTab and i != ed.hoverClose:
+    if ed.tabModified(doc) and i != ed.hoverTab and i != ed.hoverClose:
       d.fillCircle(cx, cy, 4, t.accent)
     elif active or i == ed.hoverTab:
       d.line(cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5, colors.tabText, 1.5)
@@ -930,6 +978,9 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
   let doc = ed.doc
   if doc == nil:
     ed.drawWelcome(d, t, colors)
+    return
+  if doc.kind == dkBlueprint:            # le corps est dessiné par la vue blueprint (dochost).
+    d.fillRect(ed.bodyRect, colors.bg)
     return
   doc.analyze()
   ed.clampScroll()
@@ -1140,19 +1191,34 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
   if e.y < r.y + tabBarH and not ed.dragging and not ed.draggingMini:
     ed.hoverTab = -1
     ed.hoverClose = -1
+    let oldDot = ed.hoverDot
+    ed.hoverDot = -1
     for i, tr in ed.tabRects(d):
       if tr.containsPoint(e.x, e.y):
         ed.hoverTab = i
         let onClose = abs(e.x - (tr.x + tr.w - 16)) <= 8
+        let onDot = ed.kindDots and abs(e.x - (tr.x + 14)) <= 9
         if onClose: ed.hoverClose = i
+        if onDot: ed.hoverDot = i
         if e.action == maPress and e.button == mbLeft:
           if onClose: ed.signal("cmd:close:" & $ed.docs[i].uid)
+          elif onDot: ed.signal("cmd:dot:" & $ed.docs[i].uid)
           else: ed.switchTo(i)
         elif e.action == maPress and e.button == mbMiddle:
           ed.signal("cmd:close:" & $ed.docs[i].uid)
+    if ed.hoverDot != oldDot:
+      ed.tooltip = if ed.hoverDot < 0: ""
+        else:
+          case ed.docs[ed.hoverDot].kind
+          of dkCode: "Code Lexis+ - cliquer la pastille : vue blueprint"
+          of dkBlueprint: "Vue blueprint - cliquer la pastille : revenir au code"
+          of dkForm: "Formulaire - cliquer la pastille : concepteur de formulaires"
+          of dkReport: "État - cliquer la pastille : éditeur d'états"
+          of dkText: "Texte"
     return
+  ed.tooltip = ""
   let doc = ed.doc
-  if doc == nil: return
+  if doc == nil or doc.kind == dkBlueprint: return
   let m = ed.minimapRect
   case e.action
   of maPress:
@@ -1234,7 +1300,7 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
 
 method onWheel*(ed: CodeEditor, dx, dy: float): bool =
   let doc = ed.doc
-  if doc == nil: return false
+  if doc == nil or doc.kind == dkBlueprint: return false
   var h = dx
   var v = dy
   if h == 0 and (SDL_GetModState() and KMOD_SHIFT) != 0:
@@ -1247,7 +1313,7 @@ method onWheel*(ed: CodeEditor, dx, dy: float): bool =
 
 method onText*(ed: CodeEditor, s: string) =
   let doc = ed.doc
-  if doc == nil or s.len == 0: return
+  if doc == nil or s.len == 0 or doc.kind == dkBlueprint: return
   if ed.suppressSpace and s == " ":          # Ctrl+Space already handled as "complete".
     ed.suppressSpace = false
     return
@@ -1271,6 +1337,12 @@ method onText*(ed: CodeEditor, s: string) =
 method onKey*(ed: CodeEditor, e: KeyEvent): bool =
   let doc = ed.doc
   if doc == nil: return false
+  if doc.kind == dkBlueprint:
+    # vue blueprint : seul Ctrl+Tab (document suivant) est traité ici.
+    if int(e.key) == KTab and (e.mods and (KMOD_CTRL or KMOD_CMD)) != 0 and ed.docs.len > 1:
+      ed.switchTo((ed.current + (if (e.mods and KMOD_SHIFT) != 0: ed.docs.len - 1 else: 1)) mod ed.docs.len)
+      return true
+    return false
   let shift = (e.mods and KMOD_SHIFT) != 0
   let cmd = (e.mods and KMOD_CMD) != 0
   let word = (e.mods and wordMod) != 0
@@ -1460,7 +1532,7 @@ method valueText*(ed: CodeEditor): string =
   if ed.doc != nil: ed.doc.text else: ""
 
 method setValueText*(ed: CodeEditor, v: string) =
-  ## Remplace le texte du document actif (en crée un s'il n'y en a pas) ; annulable.
+  # Remplace le texte du document actif (en crée un s'il n'y en a pas) ; annulable.
   if ed.doc == nil:
     ed.docs.add newDocument("sans titre", v)
     ed.current = ed.docs.high
@@ -1488,8 +1560,8 @@ proc identsOf(doc: Document): seq[string] =
           result.add w
 
 proc openCompletion(ed: CodeEditor) =
-  ## Complétion locale : mots-clés, bibliothèques et paquets enregistrés,
-  ## membres après « . », méthodes après « : », symboles du projet et du fichier.
+  # Complétion locale : mots-clés, bibliothèques et paquets enregistrés,
+  # membres après « . », méthodes après « : », symboles du projet et du fichier.
   let d = ed.doc
   if d == nil: return
   let line = d.lines[d.line]
@@ -1548,7 +1620,7 @@ proc samePath(a, b: string): bool =
   a.len > 0 and b.len > 0 and normalizedPath(absolutePath(a)) == normalizedPath(absolutePath(b))
 
 proc editorOpen*(id: ControlId, path, text: string): int =
-  ## Ouvre (ou active) un document ; renvoie son uid.
+  # Ouvre (ou active) un document ; renvoie son uid.
   let full = if path.len > 0: normalizedPath(absolutePath(path)) else: ""
   withControl(id, CodeEditor, ed):
     for i, d in ed.docs:
@@ -1584,9 +1656,63 @@ proc editorActiveUid*(id: ControlId): int =
 proc editorActivate*(id: ControlId, uid: int) =
   withControl(id, CodeEditor, ed): ed.switchTo(ed.docIndex(uid))
 
-proc editorDocs*(id: ControlId): seq[tuple[uid: int, path, title: string, dirty: bool]] =
+proc editorDocs*(id: ControlId, withBlueprints = false): seq[tuple[uid: int, path, title: string, dirty: bool]] =
+  # Documents ouverts (sans les vues blueprint, sauf withBlueprints).
   readControl(id, CodeEditor, ed):
-    for d in ed.docs: result.add (uid: d.uid, path: d.path, title: d.title, dirty: d.modified)
+    for d in ed.docs:
+      if d.kind != dkBlueprint or withBlueprints:
+        result.add (uid: d.uid, path: d.path, title: d.title, dirty: d.modified)
+
+proc editorSetKind*(id: ControlId, uid: int, kind: DocKind) =
+  withControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid and d.kind != dkBlueprint: d.kind = kind
+
+proc editorKind*(id: ControlId, uid: int): DocKind =
+  readControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid: return d.kind
+
+proc editorLinkUid*(id: ControlId, uid: int): int =
+  # Vue blueprint : uid du code représenté ; -1 sinon.
+  result = -1
+  readControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid and d.kind == dkBlueprint: return d.linkUid
+
+proc editorBlueprintFor*(id: ControlId, srcUid: int): int =
+  # Vue blueprint ouverte sur le document srcUid, -1 sinon.
+  result = -1
+  readControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.kind == dkBlueprint and d.linkUid == srcUid: return d.uid
+
+proc editorNewBlueprint*(id: ControlId, srcUid: int): int =
+  # Ouvre (ou active) l'onglet de la vue blueprint du document srcUid, juste après lui.
+  result = -1
+  withControl(id, CodeEditor, ed):
+    var at = -1
+    for i, d in ed.docs:
+      if d.kind == dkBlueprint and d.linkUid == srcUid:
+        ed.switchTo(i)
+        return d.uid
+      if d.uid == srcUid: at = i
+    if at < 0: return -1
+    let d = newDocument(ed.docs[at].title)
+    d.kind = dkBlueprint
+    d.linkUid = srcUid
+    ed.docs.insert(d, at + 1)
+    ed.current = at + 1
+    ed.signal("doc:" & $d.uid)
+    result = d.uid
+
+proc editorCodeUid*(id: ControlId): int =
+  # Document actif, ou code représenté par la vue blueprint active (-1 : aucun).
+  result = -1
+  readControl(id, CodeEditor, ed):
+    let d = ed.doc
+    if d != nil:
+      result = if d.kind == dkBlueprint: d.linkUid else: d.uid
 
 proc editorInfo*(id: ControlId, uid: int): tuple[path, title: string, dirty: bool, version: int] =
   readControl(id, CodeEditor, ed):
@@ -1601,8 +1727,8 @@ proc editorText*(id: ControlId, uid: int): string =
     if i >= 0: result = ed.docs[i].lines.join("\n")
 
 proc editorSetText*(id: ControlId, uid: int, text: string, modified = true): bool =
-  ## Remplace le texte d'un document ouvert (annulable) ; faux si le document n'existe pas.
-  ## modified = false : le document est marqué enregistré (fichier écrit à côté).
+  # Remplace le texte d'un document ouvert (annulable) ; faux si le document n'existe pas.
+  # modified = false : le document est marqué enregistré (fichier écrit à côté).
   withControl(id, CodeEditor, ed):
     let i = ed.docIndex(uid)
     if i < 0: return false
@@ -1656,7 +1782,7 @@ proc editorSetDiagnostics*(id: ControlId, uid, version: int, diags: seq[Diagnost
     if i >= 0 and ed.docs[i].version == version: ed.docs[i].diags = diags
 
 proc editorGoto*(id: ControlId, uid: int, line: int, col = 0) =
-  ## line et col à partir de 0 (col en caractères).
+  # line et col à partir de 0 (col en caractères).
   withControl(id, CodeEditor, ed):
     let i = ed.docIndex(uid)
     if i >= 0:
@@ -1686,8 +1812,8 @@ proc editorInsert*(id: ControlId, text: string) =
       ed.notifyCursor()
 
 proc editorCommand*(id: ControlId, cmd: string) =
-  ## undo, redo, cut, copy, paste, selectall, dup, comment, indent, outdent :
-  ## exécutées au prochain rendu, sur le thread UI (presse-papiers).
+  # undo, redo, cut, copy, paste, selectall, dup, comment, indent, outdent :
+  # exécutées au prochain rendu, sur le thread UI (presse-papiers).
   let c = case cmd
     of "selectall": "selectAll"
     of "dup": "duplicate"
@@ -1713,7 +1839,7 @@ proc editorSelection*(id: ControlId): string =
     if d != nil and d.hasSelection: result = d.selectedText
 
 proc editorCallContext*(id: ControlId): tuple[name: string, isMethod: bool, arg: int, firstArg: string] =
-  ## Fonction dont on écrit les arguments (aide à la signature).
+  # Fonction dont on écrit les arguments (aide à la signature).
   var lines: seq[string]
   var line, col: int
   readControl(id, CodeEditor, ed):
@@ -1784,11 +1910,11 @@ proc editorReplaceAll*(id: ControlId, req: FindRequest): int =
       ed.notifyCursor()
 
 proc editorSetOptions*(id: ControlId, minimap, dark: bool) =
-  ## Les couleurs suivent le thème de la fenêtre ; `dark` est ignoré ici.
+  # Les couleurs suivent le thème de la fenêtre ; `dark` est ignoré ici.
   withControl(id, CodeEditor, ed): ed.showMinimap = minimap
 
 proc editorSetFontSize*(id: ControlId, size: float) =
-  ## Taille de la police de l'éditeur (points) ; rechargée au prochain rendu (thread UI).
+  # Taille de la police de l'éditeur (points) ; rechargée au prochain rendu (thread UI).
   withControl(id, CodeEditor, ed):
     if size != ed.fontSize:
       ed.fontSize = size
@@ -1798,7 +1924,7 @@ proc editorSetProjectNames*(id: ControlId, names: seq[string]) =
   withControl(id, CodeEditor, ed): ed.projectNames = names
 
 proc editorSetLanguage*(id: ControlId, uid: int, lang: string) =
-  ## Langage d'un document : "sql", "lexis", ou "" (d'après l'extension).
+  # Langage d'un document : "sql", "lexis", ou "" (d'après l'extension).
   withControl(id, CodeEditor, ed):
     for d in ed.docs:
       if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
@@ -1807,7 +1933,7 @@ proc editorSetLanguage*(id: ControlId, uid: int, lang: string) =
         markDirty(ed)
 
 proc editorSetBadge*(id: ControlId, uid: int, badge: string, color = Color()) =
-  ## Pastille affichée après le titre de l'onglet d'un document ("" : aucune).
+  # Pastille affichée après le titre de l'onglet d'un document ("" : aucune).
   withControl(id, CodeEditor, ed):
     for d in ed.docs:
       if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
@@ -1822,7 +1948,7 @@ proc editorLanguage*(id: ControlId, uid: int): string =
         return (if d.isSql: "sql" else: "lexis")
 
 proc editorFlush*(id: ControlId) =
-  ## Compatibilité : les signaux sont émis directement.
+  # Compatibilité : les signaux sont émis directement.
   discard
 
 proc editorBreakpoints*(id: ControlId, uid: int): seq[int] =
@@ -1846,7 +1972,7 @@ proc editorClearBreakpoints*(id: ControlId) =
       ed.signal("bp:" & $d.uid)
 
 proc editorSetExecLine*(id: ControlId, uid, line: int) =
-  ## Ligne d'exécution (0-based) ; uid = -1 l'efface partout.
+  # Ligne d'exécution (0-based) ; uid = -1 l'efface partout.
   withControl(id, CodeEditor, ed):
     for d in ed.docs: d.execLine = (if d.uid == uid: line else: -1)
     let i = ed.docIndex(uid)
@@ -1861,7 +1987,7 @@ proc editorSetExecLine*(id: ControlId, uid, line: int) =
         d.scroll = max(0.0, float(d.line) - n / 3)
 
 proc editorUidOf*(id: ControlId, path: string): int =
-  ## uid du document ouvert sur `path` (ou dont le titre vaut `path`), -1 sinon.
+  # uid du document ouvert sur `path` (ou dont le titre vaut `path`), -1 sinon.
   result = -1
   readControl(id, CodeEditor, ed):
     for d in ed.docs:
@@ -1869,15 +1995,25 @@ proc editorUidOf*(id: ControlId, path: string): int =
         return d.uid
 
 proc editorSourceName*(id: ControlId, uid: int): string =
-  ## Nom de source pour l'interpréteur : chemin, ou titre si non enregistré.
+  # Nom de source pour l'interpréteur : chemin, ou titre si non enregistré.
   readControl(id, CodeEditor, ed):
     let i = ed.docIndex(uid)
     if i >= 0: result = (if ed.docs[i].path.len > 0: ed.docs[i].path else: ed.docs[i].title)
 
 
 proc editorCopyToClipboard*(id: ControlId, text: string) =
-  ## Copie `text` dans le presse-papiers. SDL exige le thread UI : la copie est
-  ## faite par l'éditeur à son prochain rendu.
+  # Copie `text` dans le presse-papiers. SDL exige le thread UI : la copie est
+  # faite par l'éditeur à son prochain rendu.
   withControl(id, CodeEditor, ed):
     ed.clipText = text
     ed.pending.add "setClipboard"
+
+
+method dispose*(ed: CodeEditor) =
+  # Police et textes rendus (rechargés au prochain affichage).
+  when defined(sdlttf):
+    for v in ed.cache.values: SDL_DestroyTexture(v.tex)
+    ed.cache.clear()
+    if ed.font != nil: TTF_CloseFont(ed.font)
+    ed.font = nil
+  ed.fontReady = false

@@ -2,7 +2,7 @@
 # Minimal FFI bindings for SDL3 (>= 3.2), loaded dynamically: no C headers required.
 # Compile-time options:
 #   -d:sdlttf    use SDL3_ttf for TrueType fonts (otherwise SDL3's built-in bitmap font)
-#   -d:sdlimage  use SDL3_image to load PNG/JPG... (otherwise BMP only)
+#   -d:sdlimage  use SDL3_image for formats other than PNG/JPEG/BMP (GIF, WEBP, TIFF...)
 import std/os
 
 proc sdlLibName(sfx: string): string =

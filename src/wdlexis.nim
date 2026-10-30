@@ -15,12 +15,24 @@
     pas à pas avec points d'arrêt, variables et pile d'appels), console avec
     saisie, référence des fonctions intégrées et des paquets.
 
+    Deux fenêtres :
+    * la fenêtre d'outils : Projet (fichiers), Structure (entités du fichier
+      édité), Référence (arbre des paquets / fiche Markdown, séparés par un
+      séparateur horizontal) ;
+    * la fenêtre principale : un onglet par document ouvert, avec une pastille
+      de couleur selon sa nature (rouge : code Lexis+, orange : formulaire,
+      jaune : état, bleu : vue blueprint). Cliquer la pastille rouge ouvre la
+      vue blueprint du code (graphe éditable, palette de toutes les fonctions) ;
+      la pastille orange ouvre le concepteur de formulaires, la jaune l'éditeur
+      d'états, la bleue ramène au code.
+
   Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
   SIRET 13033319800013 - metalab (at) sonaliwan.fr
 
 ]#
 
 import std/[os, strutils, sets, tables, atomics, locks, algorithm, deques]
+from std/unicode import nil
 import wdgui
 import ide/[compat, settings, lexislang, langdocs, lexislint, codeeditor, session]
 from ide/generer import generationDialog
@@ -28,6 +40,7 @@ import ide/designer
 from ide/formmodel import isFormFile
 import ide/reportdesigner
 import ide/appicon
+import ide/blueprint
 from ide/etats import isReportFile
 import lexis/api
 import paquets/tous
@@ -86,6 +99,7 @@ type
     rows: seq[ProblemRow]
     outline: seq[Symbol]
     outlineKey: string
+    outlinePaths: Table[string, int]
     findReq: FindRequest
     apiRows: seq[ApiDoc]
     pause: PauseInfo
@@ -96,7 +110,9 @@ var
   win: Window
   gWin: typeof(Event().window)
   haveWin: Atomic[bool]
-  mnu, edId, trProj, lstOutline, trApi, edApiDoc, tabLeft, tabBottom,
+  gTool: ControlId                # fenêtre d'outils (Projet, Structure, Référence)
+  toolOpen: Atomic[bool]
+  mnu, edId, trProj, trOutline, trApi, edApiDoc, edApiSearch, tabLeft, tabBottom,
     tblProb, edOut, edIn, btnSend, btnCopy, btnClear, tblVars, lstStack, lblStatus, lblPos,
     btnOpen, btnNew, btnSave, btnCheck, btnRun, btnDebug, btnStepIn, btnStepOver,
     btnStepOut, btnCont, btnPause, btnStop: ControlId
@@ -133,6 +149,30 @@ proc root(): string =
 proc opts(): Settings =
   withState: result = st.settings
 
+proc codeOf(uid: int): int =
+  ## Document de code d'un onglet (une vue blueprint renvoie le code qu'elle représente).
+  if uid >= 0 and editorKind(edId, uid) == dkBlueprint: editorLinkUid(edId, uid) else: uid
+
+proc activeUid(): int =
+  ## Document de code actif (celui de la vue blueprint active le cas échéant).
+  editorCodeUid(edId)
+
+proc docKindFor(path, title: string): DocKind =
+  let p = if path.len > 0: path else: title
+  if p.toLowerAscii.endsWith(".prg"):
+    if isFormFile(p): dkForm
+    elif isReportFile(p): dkReport
+    else: dkCode
+  else: dkText
+
+proc ensureKind(uid: int) =
+  if uid < 0: return
+  let k = editorKind(edId, uid)
+  if k == dkBlueprint: return
+  let info = editorInfo(edId, uid)
+  let want = docKindFor(info.path, info.title)
+  if want != k: editorSetKind(edId, uid, want)
+
 proc setOpts(s: Settings) =
   withState: st.settings = s
   saveSettings(s)
@@ -142,7 +182,7 @@ proc relPath(p: string): string =
   if r.len > 0 and p.startsWith(r): relativePath(p, r) else: p
 
 proc updateTitle() =
-  let uid = editorActiveUid(edId)
+  let uid = activeUid()
   var t = AppName & " - Lexis+"
   if uid >= 0:
     let info = editorInfo(edId, uid)
@@ -150,6 +190,7 @@ proc updateTitle() =
   let r = root()
   if r.len > 0: t.add "  [" & extractFilename(r) & "]"
   if running.load(): t.add "  (en cours)"
+  if editorKind(edId, editorActiveUid(edId)) == dkBlueprint: t.add "  - vue blueprint"
   if haveWin.load(): gWin.caption = t
 
 proc consoleAppend(s: string) =
@@ -205,6 +246,10 @@ proc reindex() =
   names.sort()
   withState: st.index = idx
   editorSetProjectNames(edId, names)
+  var procs: seq[string]
+  for k in idx.defs.keys: procs.add k
+  procs.sort()
+  bpSetProjectProcs(procs)
 
 proc fillProjectTree() =
   let r = root()
@@ -280,15 +325,52 @@ proc refreshOutline(syms: seq[Symbol], uid: int) =
       st.outline = syms
       changed = true
   if not changed: return
-  listDeleteAll(lstOutline)
+  # arbre : fichier > procédures / fonctions (avec leurs variables locales) > variables globales.
+  let title = if uid >= 0: editorInfo(edId, uid).title else: ""
+  var routines: seq[Symbol]
   for s in syms:
-    let icon = case s.kind
-      of symProc, symFunc: "ƒ "
-      of symGlobal: "● "
-      of symLocal: "· "
-    discard listAdd(lstOutline, icon & s.display & "    :" & $(s.line + 1))
+    if s.kind in {symProc, symFunc}: routines.add s
+  routines.sort(proc (a, b: Symbol): int = cmp(a.line, b.line))
+  var paths = initTable[string, int]()
+  var items: seq[tuple[path: string, expand: bool]]
+  let rootName = if title.len > 0: title else: "fichier"
+  proc label(s: Symbol): string = s.display & "   :" & $(s.line + 1)
+  for (group, kinds) in [("Procédures", {symProc}), ("Fonctions", {symFunc})]:
+    var any = false
+    for r in routines:
+      if r.kind notin kinds: continue
+      any = true
+      let rp = rootName & TreeSep & group & TreeSep & label(r)
+      paths[rp] = r.line
+      items.add (rp, false)
+      # variables locales comprises entre cette routine et la suivante.
+      let idx = routines.find(r)
+      let stop = if idx + 1 < routines.len: routines[idx + 1].line else: high(int)
+      for v in syms:
+        if v.kind == symLocal and v.line > r.line and v.line < stop:
+          let vp = rp & TreeSep & "· " & label(v)
+          paths[vp] = v.line
+          items.add (vp, false)
+    if any: items.add (rootName & TreeSep & group, true)
+  var globals = false
+  for v in syms:
+    if v.kind == symGlobal:
+      globals = true
+      let vp = rootName & TreeSep & "Variables globales" & TreeSep & "● " & label(v)
+      paths[vp] = v.line
+      items.add (vp, false)
+  if globals: items.add (rootName & TreeSep & "Variables globales", true)
+  withState: st.outlinePaths = paths
+  treeDeleteAll(trOutline)
+  for it in items:
+    if not it.expand: treeAdd(trOutline, it.path)
+  if items.len == 0: treeAdd(trOutline, rootName & TreeSep & "(aucune entité)")
+  treeExpand(trOutline, rootName)
+  for it in items:
+    if it.expand: treeExpand(trOutline, it.path)
 
-proc lintDoc(uid: int) =
+proc lintDoc(uid0: int) =
+  let uid = codeOf(uid0)
   if uid < 0: return
   let snap = editorSnapshot(edId, uid)
   let info = editorInfo(edId, uid)
@@ -306,14 +388,14 @@ proc lintDoc(uid: int) =
   editorSetDiagnostics(edId, uid, snap.version, diags)
   withState:
     st.diagByUid[uid] = (title: info.title, path: info.path, diags: diags)
-  if uid == editorActiveUid(edId): refreshOutline(syms, uid)
+  if uid == activeUid(): refreshOutline(syms, uid)
   refreshProblems()
 
 proc scheduleLint() =
   let g = lintGen.fetchAdd(1) + 1
   sleep(350)
   if lintGen.load() == g:
-    lintDoc(editorActiveUid(edId))
+    lintDoc(activeUid())
     updateTitle()
 
 proc lintAllOpen() =
@@ -323,9 +405,10 @@ proc lintAllOpen() =
 # Fichiers
 #
 
-proc saveAs(uid: int): bool
+proc saveAs(uid0: int): bool
 
-proc save(uid: int): bool =
+proc save(uid0: int): bool =
+  let uid = codeOf(uid0)
   if uid < 0: return false
   let info = editorInfo(edId, uid)
   if info.path.len == 0: return saveAs(uid)
@@ -340,7 +423,8 @@ proc save(uid: int): bool =
   except IOError, OSError:
     alert(iconStop, "Écriture impossible :\n" & info.path)
 
-proc saveAs(uid: int): bool =
+proc saveAs(uid0: int): bool =
+  let uid = codeOf(uid0)
   if uid < 0: return false
   let info = editorInfo(edId, uid)
   var target = saveFileDialog(defaultName = info.title, filter = "Programmes Lexis+|*.prg\nTous les fichiers|*")
@@ -363,15 +447,24 @@ proc saveAll(): bool =
     if d.dirty and d.path.len > 0 and not save(d.uid): result = false
 
 proc closeDoc(uid: int) =
+  if editorKind(edId, uid) == dkBlueprint:       # vue blueprint : le code reste ouvert.
+    editorClose(edId, uid)
+    bpClose(uid)
+    updateTitle()
+    return
   let info = editorInfo(edId, uid)
   if info.dirty:
     if confirm(iconQuestion, "« " & info.title & " » a été modifié.\n" &
                "OK : enregistrer puis fermer.  Annuler : continuer l'édition.") != drOk: return
     if not save(uid): return
+  let bp = editorBlueprintFor(edId, uid)
+  if bp >= 0:
+    editorClose(edId, bp)
+    bpClose(bp)
   editorClose(edId, uid)
   withState: st.diagByUid.del(uid)
   refreshProblems()
-  lintDoc(editorActiveUid(edId))
+  lintDoc(activeUid())
   updateTitle()
 
 proc newFileInProject() =
@@ -438,7 +531,7 @@ proc gotoDefinition(word0: string) =
   let word = upper(word0.strip(chars = {'@'}))
   var locs: seq[Location]
   withState: locs = st.index.defs.getOrDefault(word)
-  let uid = editorActiveUid(edId)
+  let uid = activeUid()
   if uid >= 0:
     let snap = editorSnapshot(edId, uid)
     let (toks, _) = lexAll(snap.lines)
@@ -495,7 +588,7 @@ proc findAgain(backwards: bool) =
   editorFlush(edId)
 
 proc gotoLine() =
-  let uid = editorActiveUid(edId)
+  let uid = activeUid()
   if uid < 0: return
   let cur = editorCursor(edId)
   let s = prompt(iconQuestion, "Aller à la ligne :", $(cur.line + 1))
@@ -591,7 +684,7 @@ proc runProgramFrom(debug, stepFirst: bool) =
   if o.mainFile.len > 0 and r.len > 0 and fileExists(r / o.mainFile): path = r / o.mainFile
   elif r.len > 0 and fileExists(r / MainName): path = r / MainName
   else:
-    let uid = editorActiveUid(edId)
+    let uid = activeUid()
     if uid < 0:
       running.store(false)
       status("Aucun programme à exécuter.")
@@ -703,11 +796,42 @@ proc programArguments() =
 # Panneau API
 #
 
+proc sortKey(s: string): string =
+  ## Clé de tri et de recherche : minuscules, sans accents.
+  result = unicode.toLower(s)
+  for (a, b) in [("é", "e"), ("è", "e"), ("ê", "e"), ("ë", "e"), ("à", "a"), ("â", "a"), ("ä", "a"),
+                 ("ù", "u"), ("û", "u"), ("ü", "u"), ("ô", "o"), ("ö", "o"), ("î", "i"), ("ï", "i"),
+                 ("ç", "c"), ("œ", "oe")]:
+    result = result.replace(a, b)
+
 proc fillApiTree() =
-  let rows = apiEntries()
+  ## Arbre de la Référence : paquets et contenu par ordre alphabétique, filtrés par la
+  ## recherche (tous les mots, dans le nom, la signature, le paquet ou la description).
+  var rows = apiEntries()
+  rows.sort(proc (a, b: ApiDoc): int =
+    result = cmp(sortKey(a.section), sortKey(b.section))
+    if result == 0: result = cmp(sortKey(a.signature), sortKey(b.signature)))
   withState: st.apiRows = rows
+  let words = sortKey(edApiSearch.value).splitWhitespace()
   treeDeleteAll(trApi)
-  for e in rows: treeAdd(trApi, e.section & TreeSep & e.signature)
+  var shown: seq[string]
+  var count = 0
+  for e in rows:
+    if words.len > 0:
+      let hay = sortKey(e.section & " " & e.name & " " & e.signature & " " & e.doc)
+      var ok = true
+      for w in words:
+        if w notin hay: ok = false
+      if not ok: continue
+    treeAdd(trApi, e.section & TreeSep & e.signature)
+    inc count
+    if e.section notin shown: shown.add e.section
+  if words.len > 0:
+    for sec in shown: treeExpand(trApi, sec)    # résultats dépliés
+    edApiSearch.tooltip = $count & " résultat(s) dans " & $shown.len & " paquet(s)"
+    if count == 0: edApiDoc.value = "### Référence\n\nAucun résultat pour « " & edApiSearch.value.strip & " »."
+  else:
+    edApiSearch.tooltip = "Rechercher une fonction : nom, paquet ou mots de sa description"
 
 #
 # Fiches Markdown du panneau Référence
@@ -1050,6 +1174,7 @@ proc applyView() =
   editorSetOptions(edId, o.minimap, o.dark)
   editorSetFontSize(edId, EditorBaseFont + float(o.fontDelta))
   if haveWin.load(): gWin.theme = themeFor(o.dark, o.fontDelta)
+  if toolOpen.load(): gTool.theme = themeFor(o.dark, o.fontDelta)
 
 proc changeFont(delta: int, reset = false) =
   var o = opts()
@@ -1073,7 +1198,7 @@ proc designerCodeFile(): string =
   # Code qui recevra les procédures : le .prg actif s'il est dans le projet (et
   # n'est pas un formulaire), sinon le fichier principal.
   let r = root()
-  let uid = editorActiveUid(edId)
+  let uid = activeUid()
   if uid >= 0:
     let p = editorInfo(edId, uid).path
     if p.len > 0 and p.toLowerAscii.endsWith(".prg") and not isFormFile(p) and
@@ -1108,7 +1233,7 @@ proc openFormDesigner(formFile: string) =
 
 proc designerButton() =
   # Formulaire actif dans l'éditeur : le rouvrir ; sinon nouveau formulaire pour le fichier courant.
-  let uid = editorActiveUid(edId)
+  let uid = activeUid()
   let p = if uid >= 0: editorInfo(edId, uid).path else: ""
   if p.len > 0 and isFormFile(p): openFormDesigner(p) else: openFormDesigner("")
 
@@ -1126,6 +1251,84 @@ proc openReport(reportFile: string) =
   let msg = openReportDesigner(r, reportFile, edId, theme(gWin))
   if msg.len > 0: alert(iconInformation, msg, title = "Éditeur d'états")
   else: status("Éditeur d'états : " & (if reportFile.len > 0: extractFilename(reportFile) else: "nouvel état"))
+
+#
+# Vues blueprint et pastilles des onglets
+#
+
+proc openBlueprint(uid0: int) =
+  ## Ouvre (ou active) la vue blueprint du document de code uid0.
+  let uid = codeOf(uid0)
+  if uid < 0:
+    status("Ouvrez d'abord un fichier .prg.")
+    return
+  let kind = editorKind(edId, uid)
+  if kind notin {dkCode, dkForm, dkReport}:
+    status("La vue blueprint s'applique au code Lexis+ (.prg).")
+    return
+  let bp = editorNewBlueprint(edId, uid)
+  if bp < 0: return
+  bpOpen(bp, uid, editorText(edId, uid), editorInfo(edId, uid).version)
+  bpRebuildDetails()
+  status("Vue blueprint de " & editorInfo(edId, uid).title &
+         " - glisser depuis la palette, relier les broches ; le code est réécrit à chaque modification")
+  updateTitle()
+
+proc onDot(uid: int) =
+  ## Clic sur la pastille d'un onglet.
+  let info = editorInfo(edId, uid)
+  case editorKind(edId, uid)
+  of dkCode: openBlueprint(uid)
+  of dkBlueprint:
+    let src = editorLinkUid(edId, uid)
+    if src >= 0: editorActivate(edId, src)
+  of dkForm:
+    if info.path.len > 0: openFormDesigner(info.path)
+  of dkReport:
+    if info.path.len > 0: openReport(info.path)
+  of dkText: status("Document texte : pas de vue associée.")
+
+proc handler(ev: var Event) {.nimcall, gcsafe.}
+
+proc buildToolWindow() =
+  ## Fenêtre d'outils : Projet, Structure, Référence.
+  let o = opts()
+  let tw = newWindow("Projet - " & AppName, 380, 860, handler, layout = lkBorder, theme = themeFor(o.dark, o.fontDelta))
+  tw.placed = true
+  tw.placeX = 16
+  tw.placeY = 48
+  gTool = tw.id
+  let left = tw.addChild(newTab())
+  left.dock = dkCenter
+  tabLeft = left.id
+  let pgProj = left.addPage("Projet", lkVertical)
+  let tp = pgProj.addChild(newTreeView())
+  tp.weight = 1
+  trProj = tp.id
+  let pgOut = left.addPage("Structure", lkVertical)
+  let lo = pgOut.addChild(newTreeView())
+  lo.weight = 1
+  trOutline = lo.id
+  let pgApi = left.addPage("Référence", lkBorder)
+  let search = pgApi.addChild(newEdit(placeholder = "Rechercher (nom, paquet, description…)"))
+  search.dock = dkTop
+  edApiSearch = search.id
+  # arbre des paquets et fiche Markdown, séparés par un séparateur horizontal déplaçable.
+  let sp = pgApi.addChild(newSplitter(vertical = false, position = 0.5))
+  sp.dock = dkCenter
+  let ta = sp.addChild(newTreeView())
+  trApi = ta.id
+  let ad = sp.addChild(newMarkdownView(ApiDocWelcome))
+  edApiDoc = ad.id
+  toolOpen.store(true)
+
+proc showToolWindow() =
+  if toolOpen.load(): return
+  buildToolWindow()
+  fillProjectTree()
+  fillApiTree()
+  withState: st.outlineKey = ""
+  lintDoc(activeUid())
 
 proc onMenu(path: string) =
   let item = path.split(TreeSep)[^1]
@@ -1148,6 +1351,8 @@ proc onMenu(path: string) =
   of "Fermer l'onglet":
     let uid = editorActiveUid(edId)
     if uid >= 0: closeDoc(uid)
+  of "Vue blueprint du fichier courant": openBlueprint(activeUid())
+  of "Fenêtre Projet / Structure / Référence": showToolWindow()
   of "Quitter":
     var dirty = false
     for d in editorDocs(edId):
@@ -1242,7 +1447,9 @@ proc onMenu(path: string) =
     setOpts(o)
     lintAllOpen()
   of "Raccourcis clavier": alert(iconInformation, Shortcuts, title = "Raccourcis")
-  of "Référence des fonctions et paquets": tabLeft.value = "3"
+  of "Référence des fonctions et paquets":
+    showToolWindow()
+    tabLeft.value = "3"
   of "Copier la console": consoleCopy()
   of "Effacer la console": consoleClear()
   of "À propos":
@@ -1272,9 +1479,11 @@ proc buildMenu(m: ControlId) =
                    "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)",
                    "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts",
                    "Arguments et fichier principal…", "Générer l'application…"]),
-    ("Conception", @["Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…",
+    ("Conception", @["Vue blueprint du fichier courant", "-",
+                     "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…",
                      "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"]),
-    ("Affichage", @["Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
+    ("Affichage", @["Fenêtre Projet / Structure / Référence", "-",
+                    "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
                     "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)",
                     "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",
                     "Signaler les procédures inconnues"]),
@@ -1292,7 +1501,15 @@ proc onEditorSignal(text: string) =
     if p.len >= 3: lblPos.caption = "Ln " & p[1] & ", Col " & p[2]
     showSignature()
   elif text.startsWith("doc:"):
-    lintDoc(editorActiveUid(edId))
+    let uid = try: parseInt(text[4 .. ^1]) except ValueError: -1
+    ensureKind(uid)
+    if uid >= 0 and editorKind(edId, uid) == dkBlueprint:
+      # vue blueprint activée : reprise du code s'il a changé depuis.
+      let src = editorLinkUid(edId, uid)
+      if src >= 0:
+        bpOpen(uid, src, editorText(edId, src), editorInfo(edId, src).version)
+        bpRebuildDetails()
+    lintDoc(activeUid())
     updateTitle()
   elif text.startsWith("bp:"):
     try: syncBreakpoints(parseInt(text[3 .. ^1])) except ValueError: discard
@@ -1320,8 +1537,51 @@ proc onEditorSignal(text: string) =
     of "open": onMenu("Fichier" & TreeSep & "Ouvrir un fichier…")
     of "close":
       try: closeDoc(parseInt(arg)) except ValueError: discard
+    of "dot":
+      try: onDot(parseInt(arg)) except ValueError: discard
     of "definition": gotoDefinition(arg)
     else: discard
+
+proc onBlueprintCode(srcUid: int) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    lintDoc(srcUid)
+    updateTitle()
+
+proc onBlueprintGoto(srcUid, line: int) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    editorGoto(edId, srcUid, line, 0)
+    editorFlush(edId)
+
+proc onBlueprintStatus(msg: string) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}: status(msg)
+
+proc onBlueprintCommand(cmd: string) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}: onEditorSignal(cmd)
+
+proc onBlueprintLocate(name: string): tuple[path: string, line: int] {.nimcall, gcsafe.} =
+  ## Définition d'une procédure dans les fichiers du projet (index de l'atelier).
+  {.cast(gcsafe).}:
+    var locs: seq[Location]
+    withState: locs = st.index.defs.getOrDefault(upper(name))
+    if locs.len > 0: result = (locs[0].file, locs[0].line)
+
+proc onBlueprintOpenEntity(name: string) {.nimcall, gcsafe.} =
+  ## Icône fichier (double-clic) : ouvre le fichier de la procédure et l'affiche en blueprint.
+  {.cast(gcsafe).}:
+    let loc = onBlueprintLocate(name)
+    if loc.path.len == 0 or not fileExists(loc.path):
+      status("Définition de « " & name & " » introuvable dans le projet")
+      return
+    var uid = editorUidOf(edId, loc.path)
+    if uid < 0: uid = openFile(loc.path)
+    if uid < 0: return
+    ensureKind(uid)
+    openBlueprint(uid)
+    let bp = editorBlueprintFor(edId, uid)
+    if bp >= 0:
+      bpShowLine(bp, loc.line)
+      bpRebuildDetails()
+    status(name & " : " & relPath(loc.path) & " ligne " & $(loc.line + 1) & " (vue blueprint)")
 
 #
 # Gestionnaire
@@ -1329,14 +1589,13 @@ proc onEditorSignal(text: string) =
 
 proc handleEvent(ev: var Event) =
   block:
-    if not haveWin.load():
-      {.cast(gcsafe).}: gWin = ev.window
-      haveWin.store(true)
     if ev.current != ev.id: return
+    if bpHandleEvent(ev): return
     case ev.kind
     of evWindowOpen:
+      if ev.id == gTool: return
       applyView()
-      let uid = editorActiveUid(edId)
+      let uid = activeUid()
       if uid >= 0: lintDoc(uid)
       updateTitle()
     of evSelection:
@@ -1349,18 +1608,17 @@ proc handleEvent(ev: var Event) =
           let p = r / parts[1 .. ^1].join($DirSep)
           if fileExists(p):
             discard openFile(p)
-            lintDoc(editorActiveUid(edId))
+            lintDoc(activeUid())
             updateTitle()
-      elif ev.id == lstOutline:
-        var s: Symbol
-        var ok = false
-        withState:
-          if ev.index >= 1 and ev.index <= st.outline.len:
-            s = st.outline[ev.index - 1]
-            ok = true
-        if ok:
-          editorGoto(edId, editorActiveUid(edId), s.line, 0)
-          editorFlush(edId)
+      elif ev.id == trOutline:
+        var line = -1
+        withState: line = st.outlinePaths.getOrDefault(ev.text, -1)
+        if line >= 0:
+          let cur = editorActiveUid(edId)
+          if editorKind(edId, cur) == dkBlueprint: bpShowLine(cur, line)
+          else:
+            editorGoto(edId, activeUid(), line, 0)
+            editorFlush(edId)
       elif ev.id == lstStack:
         var info: PauseInfo
         withState: info = st.pause
@@ -1398,9 +1656,15 @@ proc handleEvent(ev: var Event) =
       elif ev.id == trApi:
         let (ok, e) = apiEntryForPath(trApi.value)
         if ok:
-          editorInsert(edId, callTemplate(e))
-          editorFlush(edId)
+          if editorKind(edId, editorActiveUid(edId)) == dkBlueprint:
+            bpInsertApi(e)                       # vue blueprint : nouveau nœud.
+          else:
+            editorInsert(edId, callTemplate(e))
+            editorFlush(edId)
     of evChange:
+      if ev.id == edApiSearch:
+        fillApiTree()
+        return
       if ev.id == edId:
         updateTitle()
         scheduleLint()
@@ -1409,7 +1673,7 @@ proc handleEvent(ev: var Event) =
     of evClick:
       if ev.id == btnOpen: onMenu("Fichier" & TreeSep & "Ouvrir un projet…")
       elif ev.id == btnNew: newFileInProject()
-      elif ev.id == btnSave: discard save(editorActiveUid(edId))
+      elif ev.id == btnSave: discard save(activeUid())
       elif ev.id == btnCheck: onMenu("Exécuter" & TreeSep & "Vérifier les fichiers ouverts")
       elif ev.id == btnRun: runProgramFrom(false, false)
       elif ev.id == btnDebug: runProgramFrom(true, false)
@@ -1423,10 +1687,14 @@ proc handleEvent(ev: var Event) =
       elif ev.id == btnCopy: consoleCopy()
       elif ev.id == btnClear: consoleClear()
     of evWindowClose:
+      if ev.id == gTool:
+        toolOpen.store(false)          # rouverte par Affichage > Fenêtre Projet / Structure / Référence.
+        return
       doStop()
       closeDesigner()
       closeReportDesigner()
       saveSettings(opts())
+      quitApplication()
     else: discard
 
 proc handler(ev: var Event) {.nimcall, gcsafe.} =
@@ -1462,7 +1730,12 @@ proc buildUi() =
   elif s.lastProject.len > 0 and dirExists(s.lastProject):
     startDir = s.lastProject
 
-  win = newWindow(AppName & " - Lexis+", 1320, 860, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
+  win = newWindow(AppName & " - Lexis+", 1240, 860, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
+  win.placed = true
+  win.placeX = 408
+  win.placeY = 48
+  {.cast(gcsafe).}: gWin = win.id
+  haveWin.store(true)
 
   let top = win.addChild(newSupercontrol(lkVertical))
   top.dock = dkTop
@@ -1493,31 +1766,12 @@ proc buildUi() =
   lp.fixedWidth = 140
   lblPos = lp.id
 
-  let split = win.addChild(newSplitter(vertical = true, position = 0.22))
-  split.dock = dkCenter
-
-  let left = split.addChild(newTab())
-  tabLeft = left.id
-  let pgProj = left.addPage("Projet", lkVertical)
-  let tp = pgProj.addChild(newTreeView())
-  tp.weight = 1
-  trProj = tp.id
-  let pgOut = left.addPage("Structure", lkVertical)
-  let lo = pgOut.addChild(newListBox())
-  lo.weight = 1
-  lstOutline = lo.id
-  let pgApi = left.addPage("Référence", lkVertical)
-  let ta = pgApi.addChild(newTreeView())
-  ta.weight = 1
-  trApi = ta.id
-  # fiche de l'élément sélectionné : Markdown mis en forme, ascenseur si nécessaire
-  let ad = pgApi.addChild(newMarkdownView(ApiDocWelcome))
-  ad.weight = 1
-  edApiDoc = ad.id
-
-  let right = split.addChild(newSplitter(vertical = false, position = 0.70))
-  let ed = right.addChild(newLexisEditor())
-  ed.weight = 1
+  # documents (une page par document, pastille de couleur) au-dessus des panneaux d'exécution.
+  let right = win.addChild(newSplitter(vertical = false, position = 0.72))
+  right.dock = dkCenter
+  let ed = newLexisEditor()
+  let host = right.addChild(newDocHost(ed, themeFor(s.dark, s.fontDelta)))
+  host.weight = 1
   edId = ed.id
 
   let bottom = right.addChild(newTab())
@@ -1568,6 +1822,13 @@ proc buildUi() =
   designerFileCreated = onDesignerFile
   designerCodeChanged = onDesignerCode
   reportFileCreated = onDesignerFile
+  bpCodeChanged = onBlueprintCode
+  bpGotoLine = onBlueprintGoto
+  bpStatus = onBlueprintStatus
+  bpCommand = onBlueprintCommand
+  bpLocate = onBlueprintLocate
+  bpOpenEntity = onBlueprintOpenEntity
+  buildToolWindow()
   editorSetOptions(edId, s.minimap, s.dark)
   editorSetFontSize(edId, EditorBaseFont + float(s.fontDelta))
   fillApiTree()
@@ -1576,6 +1837,7 @@ proc buildUi() =
   if startFile.len > 0:
     try: discard editorOpen(edId, startFile, readFile(startFile))
     except IOError, OSError: discard
+  for d in editorDocs(edId): ensureKind(d.uid)
 
 when isMainModule:
   useLexisIcon()

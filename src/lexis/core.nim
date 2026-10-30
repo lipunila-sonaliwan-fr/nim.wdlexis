@@ -180,6 +180,7 @@ type
 
   Ctx* = ref object             # pile d'appels d'un fil (programme, tâche, événement).
     frames*: seq[Frame]
+    stackBase*: uint            # adresse de la pile native au premier appel Lexis du fil.
     co*: Coroutine
 
   Sem* = ref object             # sémaphore (non lié à un thread : utilisable en passage de relais).

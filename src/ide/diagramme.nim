@@ -708,3 +708,13 @@ proc placeNew*(c: DiagramCanvas) =
       n.x = if any: maxX + 60 else: 0.0
       n.y = y
       y += n.h + 24
+
+
+method dispose*(c: DiagramCanvas) =
+  ## Polices (une par taille) et textes rendus.
+  when defined(sdlttf):
+    for f in c.fonts.values:
+      if f != nil: TTF_CloseFont(f)
+  c.fonts.clear()
+  for e in c.texts.values: SDL_DestroyTexture(e.tex)
+  c.texts.clear()

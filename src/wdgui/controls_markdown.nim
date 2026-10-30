@@ -282,6 +282,22 @@ proc parseInline(s: string): seq[Span] =
 # Polices et texte
 #
 
+when defined(sdlttf):
+  # Polices partagées par toutes les vues Markdown (ouvertes une fois, jamais fermées) :
+  # une vue supprimée ne garde plus de fichiers ouverts, et créer des vues en nombre
+  # n'épuise plus les descripteurs de fichiers (256 par défaut sous macOS).
+  var mdFontCache: Table[string, TTF_Font]
+
+  proc sharedFont(path: string, size: float, style: uint32): TTF_Font =
+    let key = path & "|" & $size & "|" & $style
+    {.cast(gcsafe).}:
+      result = mdFontCache.getOrDefault(key)
+      if result == nil:
+        result = TTF_OpenFont(path.cstring, cfloat(size))
+        if result != nil:
+          if style != 0: TTF_SetFontStyle(result, style)
+          mdFontCache[key] = result
+
 proc ensureFonts(v: MarkdownView, d: Drawing, t: Theme) =
   let key = t.name & "|" & $t.fontSize & "|" & $t.textScale & "|" & t.fonts.join(";")
   if key == v.fontKey: return
@@ -292,9 +308,7 @@ proc ensureFonts(v: MarkdownView, d: Drawing, t: Theme) =
     for f in MdFont:
       for e in v.caches[f].values: SDL_DestroyTexture(e.tex)
       v.caches[f].clear()
-      if v.fonts[f] != nil:
-        TTF_CloseFont(v.fonts[f])
-        v.fonts[f] = nil
+      v.fonts[f] = nil                   # police partagée : non fermée.
     var body, mono = ""
     for p in t.fonts:
       if fileExists(p):
@@ -316,9 +330,8 @@ proc ensureFonts(v: MarkdownView, d: Drawing, t: Theme) =
           of mfH1: (body, 1.42, 1'u32)
           of mfH2: (body, 1.2, 1'u32)
           of mfH3: (body, 1.06, 1'u32)
-        let fo = TTF_OpenFont(path.cstring, cfloat(t.fontSize * k))
+        let fo = sharedFont(path, t.fontSize * k, style)
         if fo != nil:
-          if style != 0: TTF_SetFontStyle(fo, style)
           v.fonts[f] = fo
           v.heights[f] = float(TTF_GetFontHeight(fo))
   for f in MdFont:
@@ -755,3 +768,14 @@ method onKey*(v: MarkdownView, e: KeyEvent): bool =
     if v.source.len > 0: discard SDL_SetClipboardText(v.source.cstring)
   else: return false
   true
+
+
+method dispose*(v: MarkdownView) =
+  ## Textures du texte ; les polices sont partagées entre les vues (non fermées).
+  when defined(sdlttf):
+    for f in MdFont:
+      for e in v.caches[f].values: SDL_DestroyTexture(e.tex)
+      v.caches[f].clear()
+      v.fonts[f] = nil
+  v.fontKey = ""
+  v.layoutKey = ""

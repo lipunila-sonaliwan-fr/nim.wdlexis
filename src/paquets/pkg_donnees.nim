@@ -23,8 +23,8 @@ proc writeText(path, data: string, append: bool): seq[Value] =
     if append:
       var f: File
       if not open(f, path, fmAppend): return fail(path & " : écriture impossible")
-      f.write(data)
-      f.close()
+      try: f.write(data)
+      finally: f.close()
     else:
       writeFile(path, data)
     @[boolV(true)]

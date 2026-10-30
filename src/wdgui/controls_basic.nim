@@ -3,7 +3,7 @@
 # Slider, Range Slider, Scrollbar, Rating, Shape, Image, Bar Code,
 # and containers: Cell, Tab, Splitter, Toolbar.
 import std/[math, strutils, unicode]
-import ../sdl3, core
+import ../sdl3, core, imageload
 
 # shared drawing helpers
 
@@ -676,7 +676,7 @@ proc arrowArea(c: Spin): Rect = rect(c.rect.x + c.rect.w - 23, c.rect.y + 2, 21,
 
 method typeName*(c: Spin): string = "Spin"
 
-method preferredSize*(c: Spin, d: Drawing, t: Theme): tuple[w, h: float] = (120.0, t.controlHeight)
+method preferredSize*(c: Spin, d: Drawing, t: Theme): tuple[w, h: float] = (100.0, t.controlHeight)
 
 method valueNum*(c: Spin): float = c.readValue
 
@@ -1128,18 +1128,10 @@ method draw*(c: Image, d: Drawing, t: Theme) =
     c.tex = nil
     c.texPath = c.path
     if c.path.len > 0:
-      when defined(sdlimage):
-        let s = IMG_Load(c.path.cstring)
-      else:
-        let s = SDL_LoadBMP(c.path.cstring)
-      if s != nil:
-        c.tex = SDL_CreateTextureFromSurface(d.ren, s)
-        SDL_DestroySurface(s)
-        if c.tex != nil:
-          var w, h: cfloat
-          discard SDL_GetTextureSize(c.tex, addr w, addr h)
-          c.texW = float(w)
-          c.texH = float(h)
+      let r = loadTexture(d.ren, c.path)    # PNG, JPEG, BMP ; autres formats avec -d:sdlimage
+      c.tex = r.tex
+      c.texW = r.w
+      c.texH = r.h
   let r = c.rect
   if c.style.background.isSome: d.fillRect(r, c.style.background.get)
   if c.tex == nil:
@@ -1458,3 +1450,10 @@ method typeName*(b: Toolbar): string = "Toolbar"
 method draw*(b: Toolbar, d: Drawing, t: Theme) =
   d.fillRect(b.rect, b.style.background.get(t.header))
   d.fillRect(rect(b.rect.x, b.rect.y + b.rect.h - 1, b.rect.w, 1), t.border)
+
+
+method dispose*(c: Image) =
+  ## Texture de l'image (rechargée si l'image est de nouveau affichée).
+  if c.tex != nil: SDL_DestroyTexture(c.tex)
+  c.tex = nil
+  c.texPath = ""

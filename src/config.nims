@@ -10,6 +10,12 @@ switch("define", "useMalloc")
 switch("define", "sdlttf")
 switch("define", "ssl")          # HTTPS et TLS (OpenSSL chargé à l'exécution).
 switch("stackTrace", "on")
+# Avec stackTrace, Nim arrête brutalement le processus (quit) au-delà de 2000 appels
+# imbriqués : une récursion Lexis+ d'environ 200 niveaux (une dizaine d'appels Nim par
+# niveau) aurait tué l'atelier. Lexis+ a ses propres gardes (200 niveaux, budget de
+# pile : lexis/interp.nim) qui lèvent une erreur Lexis+ interceptable ; la garde de
+# Nim est repoussée au maximum (int16).
+switch("define", "nimCallDepthLimit=32000")
 
 # Icône et informations de version des exécutables Windows (wdlexis+, wdlexisrt,
 # wdlexisgen) : ressources précompilées au format objet COFF, produites par

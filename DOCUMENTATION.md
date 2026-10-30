@@ -57,6 +57,10 @@ Bonjour Ada
    montre `i` et `nom`, *F11* avance d'une instruction (en entrant dans `CARRE`),
    *F10* passe par-dessus les appels, *Maj+F11* termine la procédure en cours,
    *F5* continue.
+6. Cliquez la **pastille rouge** de l'onglet `principal.prg` : un onglet à
+   pastille bleue montre le programme en **blueprint** (chapitre 8.6). Glissez
+   *Afficher ?* depuis la palette, reliez-le, saisissez sa valeur : la ligne
+   correspondante apparaît dans le code.
 
 Le même programme s'exécute sans l'atelier : `./wdlexisrt projet_lexis/principal.prg`.
 
@@ -270,7 +274,20 @@ retourner a > b
 
 - Un appel avec une seule table d'options peut s'écrire sans parenthèses :
   `ui.fenetre{titre = "x"}` équivaut à `ui.fenetre({titre = "x"})`.
-- La récursion est limitée à 200 niveaux.
+- La récursion est limitée à 200 niveaux (et à la pile disponible) : au-delà,
+  l'erreur « profondeur d'appel maximale atteinte (récursion infinie ?) » arrête
+  le programme proprement (dans l'atelier : message, ligne fautive, pile
+  d'appels) ; elle s'intercepte comme toute erreur :
+
+```lexis
+essayer
+  ? FACT(100000)
+capturer e
+  ? "trop profond :", e
+finessayer
+```
+
+  Pour de grandes valeurs, préférez une boucle à la récursion.
 
 ### 3.8 Tables
 
@@ -776,6 +793,34 @@ retourner vrai                             && faux interrompt la réponse
 
 ## 8. L'atelier
 
+L'atelier ouvre **deux fenêtres** :
+
+- la **fenêtre d'outils**, à gauche, avec trois pages :
+  - **Projet** : les fichiers du dossier du projet (clic : ouvrir ;
+    double-clic sur un `form_*.prg` ou un `etat_*.prg` : son concepteur) ;
+  - **Structure** : les entités du fichier édité, en arbre — procédures et
+    fonctions (avec leurs variables locales), variables globales ; clic : aller
+    à la ligne (ou au nœud dans une vue blueprint) ;
+  - **Référence** : un champ de **recherche** (tous les mots saisis, dans le nom,
+    le paquet ou la description, sans tenir compte des accents ; résultats
+    dépliés), l'arbre des paquets et de leurs fonctions **par ordre alphabétique**
+    en haut, la fiche Markdown de l'élément sélectionné en bas, séparés par un
+    **séparateur horizontal** que l'on fait glisser ;
+
+  fermée, elle se rouvre par *Affichage > Fenêtre Projet / Structure / Référence* ;
+- la **fenêtre principale** : menus, barre d'outils, **un onglet par document
+  ouvert**, puis les panneaux Problèmes, Console, Variables et Pile d'appels.
+  L'onglet indique le nom du document et, par une **pastille de couleur**, sa
+  nature :
+
+  | Pastille | Document | Clic sur la pastille |
+  | --- | --- | --- |
+  | rouge | code Lexis+ (`.prg`) | ouvre la **vue blueprint** du code (chapitre 8.6) |
+  | orange | formulaire (`form_*.prg`) | ouvre le concepteur de formulaires |
+  | jaune | état (`etat_*.prg`) | ouvre l'éditeur d'états |
+  | bleue | vue blueprint d'un fichier | revient à l'onglet du code |
+  | grise | autre texte (`.md`, `.json`, `.sql`...) | — |
+
 | Touche | Action |
 | --- | --- |
 | Ctrl+R | exécuter (sans débogueur, plus rapide) |
@@ -795,9 +840,9 @@ retourner vrai                             && faux interrompt la réponse
 - **Analyse en continu** : erreurs de syntaxe (le vrai analyseur de
   l'interpréteur), appels de procédures inconnues, variables non déclarées dans
   les procédures. Onglet **Problèmes** ; double-clic pour aller à la ligne.
-- **Structure** : les procédures et les variables globales du fichier.
+- **Structure** : les procédures, fonctions et variables du fichier.
 - **Référence** : toutes les fonctions intégrées et les paquets ; double-clic pour
-  insérer l'appel.
+  insérer l'appel (dans une vue blueprint : ajouter le nœud correspondant).
 - **Diagramme de structure** dans la marge : procédures, `si`, boucles,
   `faire cas`, `essayer`.
 - **Console** : sortie du programme ; la ligne de saisie répond à `saisir()` et
@@ -906,12 +951,15 @@ reprend les paramètres enregistrés par [Sauver].
 
 ### 8.2 L'atelier écrit en Lexis+
 
-`exemples/atelier` est l'atelier wdlexis+ réécrit en Lexis+ : mêmes menus,
-même barre d'outils, onglets **Projet**, **Structure** et **Référence** à
-gauche, **Problèmes**, **Console**, **Variables** et **Pile d'appels** en bas ;
-débogueur (points d'arrêt, pas à pas, pas principal, sortie de procédure,
-pause), recherche et remplacement, aller à la ligne et à la définition,
-réglages et session conservés, boîte « Générer l'application ».
+`exemples/atelier` est l'atelier wdlexis+ réécrit en Lexis+, avec la même
+disposition en deux fenêtres : à gauche la fenêtre d'outils (**Projet**,
+**Structure** en arbre, **Référence** avec recherche, arbre des paquets par ordre
+alphabétique et fiche sous un séparateur horizontal), à droite la fenêtre des
+documents (onglets à pastille de couleur, vue blueprint) avec **Problèmes**,
+**Console**, **Variables** et **Pile d'appels** en bas. Mêmes menus et barre
+d'outils ; débogueur (points d'arrêt, pas à pas, pas principal, sortie de
+procédure, pause), recherche et remplacement, aller à la ligne et à la
+définition, réglages et session conservés, boîte « Générer l'application ».
 
 ```
 wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
@@ -919,18 +967,45 @@ wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
 
 | Fichier | Rôle |
 | --- | --- |
-| `principal.prg` | interface, réglages, démarrage |
+| `principal.prg` | les deux fenêtres (outils, documents), réglages, démarrage |
 | `projet.prg` | projet, fichiers, session (`.wdlexis/atelier.json` du projet) |
-| `edition.prg` | analyse pendant la frappe, problèmes, structure, recherche, définition |
+| `edition.prg` | analyse pendant la frappe, problèmes, structure (arbre), pastilles et vue blueprint, recherche, définition |
 | `execution.prg` | exécution, débogage, console, variables, pile d'appels |
-| `reference.prg` | référence des fonctions et paquets (fiches Markdown) |
+| `reference.prg` | référence des fonctions et paquets : recherche, tri alphabétique, fiches Markdown |
 | `generation.prg` | boîte « Générer l'application » (outil `wdlexisgen`) |
 | `concepteur.prg` | concepteur de formulaires (menu *Conception*, chapitre 8.3) |
 | `etats.prg` | éditeur d'états PDF (menu *Conception*, chapitre 8.4) |
 | `menus.prg` | menus, raccourcis, à propos |
 
-Il s'appuie sur deux briques natives : le contrôle `ui.editeur` (chapitre 5) et
-le paquet `lexis`, qui met le langage à la portée des programmes :
+Il s'appuie sur des briques natives : le contrôle `ui.editeur` (chapitre 5), sa
+vue blueprint `ui.blueprint` et le paquet `lexis`, qui met le langage à la portée
+des programmes.
+
+La vue blueprint (chapitre 8.6) enveloppe l'éditeur : on ajoute la vue, et non
+l'éditeur, à son conteneur. Elle donne aux onglets leur pastille de couleur ; le
+programme décide de la nature de chaque document et de ce que fait un clic sur sa
+pastille (signal `cmd:dot:UID` de l'éditeur) :
+
+```lexis
+ed = ui.editeur{minicarte = vrai}
+ed.surselection = @SIGNAL                   && « doc:UID », « cmd:dot:UID »...
+vb = cote:ajouter(ui.blueprint(ed))         && éditeur + vue blueprint
+vb.surselection = @SIGNAL_BLUEPRINT         && « code:UID », « statut:... », « entite:NOM:UID »
+vb:projet(dossier)                          && procédures du projet : palette, liens entre fichiers
+
+ed:nature("formulaire", uid)                && pastille orange (code, formulaire, etat, texte)
+bp = vb:ouvrir(uid)                         && onglet bleu : le code uid en graphe
+ed:lien(bp)                                 && -> uid du code représenté
+vb:inserer("fichier.lire(chemin)")          && nœud pour une entrée de lexis.documentation()
+vb:afficherligne(32)                        && centre la vue sur le nœud de la ligne 32
+```
+
+Sans uid, `ed:texte()`, `ed:chemin()`, `ed:enregistrer()`… s'appliquent au
+document actif ou, quand c'est une vue blueprint, au code qu'elle représente. Une
+seule vue blueprint par programme (elle est réservée à l'atelier natif dans les
+programmes qu'il exécute).
+
+Le paquet `lexis` met le langage lui-même à la portée des programmes :
 
 ```lexis
 pbs = lexis.verifier(ed:texte(), {nom = "principal.prg", projet = dossier})
@@ -1269,6 +1344,82 @@ Les mots de passe ne sont jamais écrits dans le projet. Sur demande (case
 `~/.duckdbstudio/secrets.json` (droits 0600, clé locale aléatoire) ; sinon ils
 sont redemandés à la connexion suivante. Voir `LISEZMOI.md` dans le dossier de
 l'exemple.
+
+### 8.6 Vue blueprint
+
+Un clic sur la **pastille rouge** d'un onglet de code (ou *Conception > Vue
+blueprint du fichier courant*) ouvre, juste à côté, un onglet à **pastille
+bleue** : le même code présenté en graphe, à la manière des blueprints
+d'Unreal, et modifiable.
+
+La vue se compose d'une **palette** (à gauche), du **graphe** et du panneau des **détails** (à droite) :
+
+- **Entrées** (rouge) : le *Programme principal* et un nœud par `procedure` ou
+  `fonction`, ses paramètres en sorties de données.
+- **Instructions** reliées par des liens d'**exécution** (blancs) dans l'ordre
+  du code : *Afficher* (`?`, `??`), *Affecter* (`=`, `+=`, `-=`), *Locale*,
+  *Globale*, appels de procédures et de méthodes, *Retourner*, *Sortir*,
+  *Boucler*, *Commentaire*. Les blocs ont une sortie par corps et une sortie
+  **suite** : *Si* (alors, sinon — `sinonsi` est conservé), *Faire cas* (cas 1,
+  cas 2..., autrement), *Tant que*, *Pour* (sa variable en sortie),
+  *Pour chaque*, *Parcourir*, *Essayer* (essayer, capturer).
+- **Expressions** reliées par des liens de **données** (en couleur) : appels de
+  fonctions (vert), opérateurs, variables, membres `objet.nom`, index
+  `objet[clé]`. Une valeur littérale (`12`, `"texte"`, `vrai`, `{...}`,
+  `@PROCEDURE`) se saisit directement dans la **case** de l'entrée.
+- Une instruction que la vue ne décompose pas (`sql`, `utiliser`, `stocker`,
+  `inserer`...) devient un nœud **Code Lexis+** dont on modifie le texte.
+
+Édition :
+
+| Geste | Effet |
+| --- | --- |
+| glisser un élément de la **palette** sur le graphe | crée le nœud à cet endroit |
+| clic sur un élément de la palette | l'ajoute après l'instruction sélectionnée (ou sur la première entrée libre du nœud sélectionné pour une expression) |
+| glisser d'une broche à une autre | relie (un lien existant se reprend en glissant depuis son entrée) |
+| Alt+clic sur une broche | rompt ses liens |
+| clic, Maj+clic, cadre de sélection | sélectionne ; glisser déplace les nœuds |
+| double-clic sur un nœud | va à sa ligne dans le code ; sur une case : l'édite dans les détails |
+| clic droit | menu (ajouter, dupliquer, supprimer, instruction / expression...) |
+| clic droit ou milieu glissé, molette | déplace la vue ; Ctrl+molette : zoom |
+| Suppr, Ctrl+D, Ctrl+Z / Ctrl+Y, Ctrl+A | supprimer, dupliquer, annuler / rétablir, tout sélectionner |
+| F ou Origine | tout voir (ou centrer le nœud sélectionné) |
+
+**Plier / déplier.** Chaque entrée (procédure, fonction, programme principal)
+porte une icône à deux états : **−** (dépliée, contenu affiché) ou **+**
+(pliée : seul le nœud d'entrée reste, avec le nombre de nœuds masqués ; les
+procédures situées dessous remontent). *Tout plier* / *Tout déplier* dans la
+barre d'outils, *Plier* / *Déplier* au clic droit ; déplacer une procédure
+pliée emporte son contenu.
+
+**Liens d'appel.** Un appel (`NOM(...)`) ou une référence (`@NOM`) à une
+procédure du même fichier est relié, en pointillés violets, à l'entrée de cette
+procédure : le lien part de l'instruction qui appelle si la procédure appelante
+est dépliée, de son entrée si elle est pliée (bouton *Appels* : afficher ou
+masquer ces liens). Quand la procédure appelée est définie dans **un autre
+fichier** du projet, une **icône fichier** apparaît sur l'instruction (ou sur
+l'entrée pliée) ; l'infobulle donne le fichier, et un **double-clic** sur l'icône
+ouvre ce fichier et l'affiche en blueprint, la procédure sélectionnée (plusieurs
+procédures externes : un menu permet de choisir).
+
+La **palette** propose, par catégorie et avec une recherche : les procédures
+du projet, les instructions, les blocs de contrôle, les valeurs et opérateurs,
+puis **toutes les fonctions** intégrées, des paquets et des objets (méthodes).
+Le panneau **Détails** modifie le nœud sélectionné : nom et paramètres d'une
+procédure, cible d'une affectation, variable d'une boucle, valeurs des entrées,
+appel utilisé comme *instruction* ou comme *expression*, entrées
+supplémentaires (*+ entrée*)...
+
+**Le code reste la référence.** Chaque modification du graphe réécrit le code
+de l'onglet rouge (annulable dans le graphe par Ctrl+Z, ou dans l'éditeur) ; seule
+l'instruction touchée est régénérée : les autres lignes, les commentaires, les
+lignes vides et l'indentation sont conservés à l'identique. Une instruction qui
+n'est reliée à aucune entrée est signalée en bas du graphe et ignorée dans le
+code. Inversement, le code modifié dans son onglet est relu quand on revient à
+la vue blueprint (positions des nœuds conservées quand la structure n'a pas
+changé ; *Réorganiser* refait la mise en page). Un fichier dont la structure
+des blocs est incorrecte (`finsi` manquant...) s'affiche avec le message
+d'erreur : on le corrige dans l'onglet du code.
 
 ## 9. Le runtime
 
@@ -1912,7 +2063,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.ascenseur()` | Ascenseur. |
 | `interface.compteur()` | Compteur à flèches. |
 | `interface.notation()` | Notation. |
-| `interface.image(chemin)` | Image. |
+| `interface.image(chemin)` | Image PNG, JPEG ou BMP (autres formats si wdgui est compilé avec `-d:sdlimage`) ; valeur : le chemin. Une image illisible est signalée sur la sortie d'erreur. |
 | `interface.codebarre(texte)` | Code-barres. |
 | `interface.graphe([genre], [titre])` | Graphe : colonnes, lignes, aires, secteurs. |
 | `interface.calendrier(["AAAAMMJJ"])` | Calendrier. |

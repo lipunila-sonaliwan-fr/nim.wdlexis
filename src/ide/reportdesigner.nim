@@ -1461,3 +1461,13 @@ proc closeReportDesigner*() =
     open = rOpen
     w = rWin
   if open: closeWindow(w)
+
+
+method dispose*(c: ReportCanvas) =
+  for f in c.fonts.values:
+    if f != nil: TTF_CloseFont(f)
+  c.fonts.clear()
+  for e in c.texts.values: SDL_DestroyTexture(e.tex)
+  c.texts.clear()
+  for e in c.images.values: SDL_DestroyTexture(e.tex)
+  c.images.clear()

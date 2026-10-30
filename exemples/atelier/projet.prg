@@ -9,6 +9,7 @@ procedure CHARGER_PROJET(d)
   dossier = d
   fen.titre = "wdlexis+ [S]tudio 1.7.3 - " + fichier.nom(dossier)
   ARBRE_PROJET()
+  vb:projet(dossier)        && procédures du projet : palette et liens d'appel entre fichiers
   locale s = LIRE_SESSION()
   locale ouverts = 0
   pour chaque p dans s.fichiers
@@ -29,6 +30,10 @@ procedure CHARGER_PROJET(d)
 retourner
 
 procedure ARBRE_PROJET
+  si outils = nul
+    retourner
+  finsi
+  outils.titre = "Projet - " + fichier.nom(dossier)
   arbre:vider()
   pour chaque nom dans fichier.liste(dossier, vrai)
     si finitpar(nom, "/") ou commencepar(nom, ".") ou ("/." $ nom) ou commencepar(nom, "distribution/")
@@ -176,6 +181,7 @@ procedure NOUVEAU_FICHIER
   fichier.ecrire(p, "&& " + fichier.nom(p) + car(10))
   ARBRE_PROJET()
   ed:ouvrir(p)
+  vb:projet(dossier)
 retourner
 
 procedure ENREGISTRER
@@ -189,6 +195,7 @@ procedure ENREGISTRER
   essayer
     locale p = ed:enregistrer()
     etat.libelle = "Enregistré : " + fichier.nom(p)
+    vb:projet(dossier)      && les procédures ont pu changer
   capturer e
     ui.alerte("Enregistrement impossible : " + e, "stop")
   finessayer
@@ -216,6 +223,14 @@ procedure TOUT_ENREGISTRER
 retourner
 
 procedure FERMER_DOCUMENT(uid)
+  si uid = nul ou uid < 0
+    retourner
+  finsi
+  && vue blueprint : seul son onglet se ferme, le code reste ouvert
+  si ed:nature(uid) = "blueprint"
+    vb:fermer(uid)
+    retourner
+  finsi
   locale d = nul
   pour chaque x dans ed:documents()
     si x.uid = uid
@@ -230,6 +245,7 @@ procedure FERMER_DOCUMENT(uid)
       retourner
     finsi
   finsi
+  vb:fermer(uid)            && sa vue blueprint éventuelle
   ed:fermer(uid)
 retourner
 
