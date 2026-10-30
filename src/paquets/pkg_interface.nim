@@ -35,7 +35,7 @@ import ../wdgui
 import ../lexis/api
 import ../ide/compat
 import ../ide/[codeeditor, langdocs]
-from ../ide/designer import FormCanvas, PaletteView, newFormCanvas, newPaletteView, nodeByUid, pathOfNode,
+from ../ide/designer import designImageBase, FormCanvas, PaletteView, newFormCanvas, newPaletteView, nodeByUid, pathOfNode,
   visibleProps, canvasSetProp, select, deleteSelected, moveSelected, moveOut, showNode
 from ../ide/reportdesigner import ReportCanvas, ReportPalette, SelKind, newReportCanvas, newReportPalette,
   findNode, selectedUid, selectUid, selectionTitle, inspectorRows, selectionHelp, setSelectionValue, renameNode,
@@ -312,11 +312,18 @@ proc ctlOf(v: Value, what = "contrôle"): UiCtl =
 
 const captionFamilies = ["etiquette", "bouton", "fenetre", "page", "cadre"]
 
+proc programPath(L: Interp, path: string): string =
+  # Chemin relatif au dossier du programme (comme webview).
+  if path.isAbsolute: path
+  else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
+
 proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
   let id = c.id
   case key
-  of "valeur", "texte":
-    let txt = L.tostr(v)
+  of "valeur", "texte", "chemin":
+    var txt = L.tostr(v)
+    if c.family == "image" and txt.len > 0: txt = L.programPath(txt)   # relatif au programme
+    elif key == "chemin": unsupported(key)
     if c.family in captionFamilies and key == "texte":
       setVia(c, id.caption, caption, txt, key)
     elif int(id) == 0 and not c.ctl.isNil:
@@ -409,7 +416,8 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
 proc getProp(L: Interp, c: UiCtl, key: string): Value =
   let id = c.id
   case key
-  of "valeur", "texte":
+  of "valeur", "texte", "chemin":
+    if key == "chemin" and c.family != "image": unsupported(key)
     if key == "texte" and c.family in captionFamilies: gCaption(id)
     else: gValue(id)
   of "num": gNum(id)
@@ -638,10 +646,10 @@ proc addChildTo(L: Interp, parent: UiCtl, child: UiCtl) =
   else:
     rtError("« " & parent.family & " » n'est pas un conteneur")
 
-proc programPath(L: Interp, path: string): string =
-  ## Chemin relatif au dossier du programme (comme webview).
-  if path.isAbsolute: path
-  else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
+#proc programPath(L: Interp, path: string): string =
+#  ## Chemin relatif au dossier du programme (comme webview).
+#  if path.isAbsolute: path
+#  else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
 
 proc readMarkdown(L: Interp, path, fname: string): string =
   let p = L.programPath(path)
@@ -2059,8 +2067,10 @@ proc openInterface(L: Interp): Value =
     newControlCompat("spin")
   ctor("notation", "notation"):
     newControlCompat("rating")
-  ctor("image", "image"):
-    newImageCompat(L.optStr(a, 1, "image", ""))
+  m.fn "image", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # chemin relatif : au dossier du programme principal (comme interface.markdown{fichier=}).
+    let p = L.optStr(a, 1, "image", "")
+    @[L.newCtl(newImageCompat(if p.len > 0: L.programPath(p) else: ""), "image")]
   ctor("codebarre", "codebarre"):
     newBarCodeCompat(L.optStr(a, 1, "codebarre", ""))
   ctor("graphe", "graphe"):
@@ -2155,7 +2165,9 @@ proc openInterface(L: Interp): Value =
     var model: FormModel
     {.cast(gcsafe).}:
       guarded:
-        if root.len > 0: loadCustomPalette(root)
+        if root.len > 0:
+          loadCustomPalette(root)
+          designImageBase = root          # chemins d'images relatifs au projet
       if path.len > 0:
         var txt = ""
         try: txt = readFile(L.programPath(path))
@@ -2322,7 +2334,7 @@ const uiDocs = [
   "interface.grille{multi=, remplissage=\"programme|manuel|automatique\"}", "Grille de saisie.",
   "interface.jauge()", "Jauge.", "interface.curseur()", "Potentiomètre.", "interface.plage()", "Potentiomètre de plage.",
   "interface.ascenseur()", "Ascenseur.", "interface.compteur()", "Compteur à flèches.", "interface.notation()", "Notation.",
-  "interface.image(chemin)", "Image PNG, JPEG ou BMP (autres formats si wdgui est compilé avec -d:sdlimage) ; valeur : le chemin. Une image illisible est signalée sur la sortie d'erreur.", "interface.codebarre(texte)", "Code-barres.",
+  "interface.image(chemin)", "Image PNG, JPEG ou BMP (autres formats avec -d:sdlimage). Chemin relatif : au dossier du programme principal. img.valeur = \"ressources/autre.png\" (ou img.chemin) change l'image en cours d'exécution.", "interface.codebarre(texte)", "Code-barres.",
   "interface.graphe([genre], [titre])", "Graphe : colonnes, lignes, aires, secteurs.",
   "interface.calendrier([\"AAAAMMJJ\"])", "Calendrier.", "interface.kanban()", "Kanban.",
   "interface.mosaique()", "Mosaïque proportionnelle (treemap).", "interface.gantt()", "Gantt : g:ajoutertache(libelle, debut, duree, [avancement], [couleur], [detail]), g:fixeravancement(i, a), g:vider(), g:horaire([b]) (unités en heures, axe HH:MM), g:largeurlibelles(px) ; surselection : ev.index.",

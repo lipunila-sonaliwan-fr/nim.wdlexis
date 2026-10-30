@@ -125,6 +125,14 @@ proc nodeLayout(n: DNode): string =
 
 # construction de l'aperçu (mêmes constructeurs que le paquet interface)
 
+var designImageBase*: string
+  # Dossier du projet : un chemin d'image relatif s'y rapporte (comme à l'exécution,
+  # où il se rapporte au dossier du programme principal).
+
+proc imagePath*(path: string): string =
+  if path.len == 0 or path.isAbsolute or designImageBase.len == 0: path
+  else: designImageBase / path
+
 proc makeControl(n: DNode): Control =
   case baseOf(n.kind)
   of "conteneur": result = newContainer(layoutOf(n.getProp("disposition")), columns = max(1, n.pi("colonnes")))
@@ -151,7 +159,7 @@ proc makeControl(n: DNode): Control =
   of "jauge": result = newProgressBar(n.pf("valeur"), n.pf("min"), n.pf("max"))
   of "notation": result = newRating(n.pf("valeur"))
   of "ascenseur": result = newScrollbar(true, n.pf("min"), n.pf("max"))
-  of "image": result = newImage(n.getProp("chemin"))
+  of "image": result = newImage(imagePath(n.getProp("chemin")))
   of "codebarre": result = newBarCode(n.getProp("texte"))
   of "calendrier": result = newCalendar(n.getProp("date"))
   of "graphe": result = newChart(chartOf(n.getProp("genre")), n.getProp("titre"))
@@ -1472,6 +1480,7 @@ proc openDesigner*(root, codePath, formFile: string, editorId: ControlId, theme:
   guarded:
     dOpen = true
     dRoot = root
+    designImageBase = root
     dCodePath = normalizedPath(absolutePath(code))
     dEditor = editorId
     dTools.setLen(0)
