@@ -45,7 +45,7 @@ etctl = {}              && ses autres contrôles
 outils = nul            && fenêtre Projet / Structure / Référence (nul : fermée)
 
 && Deux fenêtres, comme l'atelier natif : les outils à gauche, les documents à droite.
-fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.7.3", largeur = 1320, hauteur = 860, disposition = "bordure", ;
+fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.8.2", largeur = 1320, hauteur = 860, disposition = "bordure", ;
                  sombre = reglages.sombre, x = 408, y = 48}
 fen.surfermeture = @FERMETURE
 fen.surtouchebas = @TOUCHE_FENETRE      && F5, F9, F10, F11 depuis n'importe quel contrôle

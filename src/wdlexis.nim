@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.7.3,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.8.2,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -1456,7 +1456,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.7.3\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.8.2\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" &
