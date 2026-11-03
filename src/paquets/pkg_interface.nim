@@ -107,7 +107,7 @@ proc idText(cid: ControlId): string =
   else: result = "?"
 
 proc openWindows*(L: Interp): int =
-  ## Nombre de fenêtres du programme encore ouvertes.
+  # Nombre de fenêtres du programme encore ouvertes.
   let r = L.ext.getOrDefault("ui")
   if r.isNil: return 0
   for w in UiState(r).windows:
@@ -122,7 +122,7 @@ proc closeAllWindows*(L: Interp) =
       closeWindow(w.id)
 
 proc loopNeeded*(L: Interp): bool =
-  ## Runtime autonome : faut-il lancer la boucle wdgui après le programme ?
+  # Runtime autonome : faut-il lancer la boucle wdgui après le programme ?
   let r = L.ext.getOrDefault("ui")
   not r.isNil and not UiState(r).loopRunning and L.openWindows() > 0
 
@@ -313,7 +313,7 @@ proc ctlOf(v: Value, what = "contrôle"): UiCtl =
 const captionFamilies = ["etiquette", "bouton", "fenetre", "page", "cadre"]
 
 proc programPath(L: Interp, path: string): string =
-  ## Chemin relatif au dossier du programme (comme webview).
+  # Chemin relatif au dossier du programme (comme webview).
   if path.isAbsolute: path
   else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
 
@@ -467,7 +467,7 @@ template evInt(t: LTable, ev: Event, field: untyped, key: string) =
   when compiles(int(ev.field)): t.set key, intV(int(ev.field))
 
 proc frenchEvent(k: string): string =
-  ## Nom français d'un événement wdgui (« click » -> « clic »).
+  # Nom français d'un événement wdgui (« click » -> « clic »).
   case k
   of "click": "clic"
   of "doubleclick": "doubleclic"
@@ -719,12 +719,12 @@ proc bpEdId(): ControlId =
   if bpEd.isNil: NoControl else: bpEd.id
 
 proc bpSignal(text: string, index = 0) =
-  ## Événement « surselection » de la vue (ev.texte) livré au programme.
+  # Événement « surselection » de la vue (ev.texte) livré au programme.
   {.cast(gcsafe).}:
     if not bpHost.isNil: bpHost.emit(evSelection, index = index, text = text)
 
 proc bpOpenView(srcUid: int): int =
-  ## Ouvre (ou active) la vue blueprint du document de code srcUid ; -1 si impossible.
+  # Ouvre (ou active) la vue blueprint du document de code srcUid ; -1 si impossible.
   result = -1
   let id = bpEdId()
   if int(id) <= 0 or srcUid < 0: return
@@ -759,7 +759,7 @@ proc onBpLocate(name: string): tuple[path: string, line: int] {.nimcall, gcsafe.
     withLock bpLock: result = bpDefs.getOrDefault(name.toUpperAscii)
 
 proc onBpOpenEntity(name: string) {.nimcall, gcsafe.} =
-  ## Icône fichier (double-clic) : ouvre le fichier de la procédure en vue blueprint.
+  # Icône fichier (double-clic) : ouvre le fichier de la procédure en vue blueprint.
   {.cast(gcsafe).}:
     let loc = onBpLocate(name)
     let id = bpEdId()
@@ -779,8 +779,8 @@ proc onBpOpenEntity(name: string) {.nimcall, gcsafe.} =
     bpSignal("entite:" & name & ":" & $uid, uid)
 
 proc bpNativeEvent(ev: var Event): bool =
-  ## Événements internes de la vue (canevas, palette, détails, barre d'outils) et
-  ## resynchronisation quand l'onglet d'une vue redevient actif. Vrai : traité.
+  # Événements internes de la vue (canevas, palette, détails, barre d'outils) et
+  # resynchronisation quand l'onglet d'une vue redevient actif. Vrai : traité.
   if bpHost.isNil or ev.current != ev.id: return false
   if ev.kind == evSelection and ev.id == bpEdId() and ev.text.startsWith("doc:"):
     let id = bpEdId()
@@ -913,12 +913,16 @@ proc defineMethods() =
       w.closed = true
       closeWindow(w.id)
   # agrandir (maximiser), réduire (minimiser : Dock / barre des tâches), restaurer, plein écran
-  for (nm, st) in [("agrandir", wsMaximized), ("maximiser", wsMaximized), ("reduire", wsMinimized),
-                   ("minimiser", wsMinimized), ("restaurer", wsNormal)]:
-    let s0 = st
-    let n0 = nm
-    mfn "fenetre", n0, proc (L: Interp, a: seq[Value]): seq[Value] =
-      setWindowState(L.self(a, n0).id, s0)
+  # (une fabrique par méthode : dans une boucle, les fermetures de Nim partageraient
+  # les variables de la dernière itération et toutes feraient « restaurer »)
+  proc stateMethod(name: string, st: WindowState): NativeProc =
+    result = proc (L: Interp, a: seq[Value]): seq[Value] =
+      setWindowState(L.self(a, name).id, st)
+  mfn "fenetre", "agrandir", stateMethod("agrandir", wsMaximized)
+  mfn "fenetre", "maximiser", stateMethod("maximiser", wsMaximized)
+  mfn "fenetre", "reduire", stateMethod("reduire", wsMinimized)
+  mfn "fenetre", "minimiser", stateMethod("minimiser", wsMinimized)
+  mfn "fenetre", "restaurer", stateMethod("restaurer", wsNormal)
   mfn "fenetre", "pleinecran", proc (L: Interp, a: seq[Value]): seq[Value] =
     # fen:pleinecran() ou fen:pleinecran(vrai) : plein écran ; fen:pleinecran(faux) : fenêtre normale.
     setWindowState(L.self(a, "pleinecran").id, if optBool(a, 2, true): wsFullscreen else: wsNormal)

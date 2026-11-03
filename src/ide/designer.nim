@@ -833,7 +833,7 @@ proc pathOfNode*(n: DNode): string =
   parts.join($TreeSep)
 
 proc showNode*(c: FormCanvas, n: DNode) =
-  ## Affiche dans l'aperçu les pages d'onglets qui contiennent `n`.
+  # Affiche dans l'aperçu les pages d'onglets qui contiennent `n`.
   var p = n
   while p != nil and p.parent != nil:
     if baseOf(p.kind) == "page":
@@ -845,7 +845,7 @@ proc parentLayoutOf*(n: DNode): string =
   if n != nil and n.parent != nil: nodeLayout(n.parent) else: ""
 
 proc visibleProps*(n: DNode): seq[PropDef] =
-  ## Propriétés montrées par l'inspecteur : x / y en disposition absolue, ancrage en bordure.
+  # Propriétés montrées par l'inspecteur : x / y en disposition absolue, ancrage en bordure.
   let pl = parentLayoutOf(n)
   for d in allProps(n.kind):
     if d.name in ["x", "y"] and pl != "absolue": continue
@@ -853,8 +853,8 @@ proc visibleProps*(n: DNode): seq[PropDef] =
     result.add d
 
 proc canvasRename*(c: FormCanvas, n: DNode, newName: string): string =
-  ## Renomme un nœud (ou le formulaire) ; "" si c'est fait, sinon le message d'erreur.
-  ## Les fichiers (form_<nom>.prg) et le code sont l'affaire de l'appelant.
+  # Renomme un nœud (ou le formulaire) ; "" si c'est fait, sinon le message d'erreur.
+  # Les fichiers (form_<nom>.prg) et le code sont l'affaire de l'appelant.
   let v = newName.strip
   if n == c.model.root:
     if not isFormName(v): return "Nom du formulaire : lettres, chiffres et _ seulement"
@@ -867,7 +867,7 @@ proc canvasRename*(c: FormCanvas, n: DNode, newName: string): string =
   ""
 
 proc canvasSetProp*(c: FormCanvas, n: DNode, key, value: string): string =
-  ## Modifie une propriété et reconstruit l'aperçu ; "" si c'est fait, sinon le message.
+  # Modifie une propriété et reconstruit l'aperçu ; "" si c'est fait, sinon le message.
   if key == "name": return canvasRename(c, n, value)
   var kind = pkString
   for d in allProps(n.kind):
@@ -1195,7 +1195,7 @@ proc rebuildInspector() =
     guarded: dEventRows.add((cb.id, ev, choices))
 
 proc applyProp(prop: string, kind: PropKind, value: string, uid = -1) =
-  ## uid >= 0 : nœud visé (sinon le nœud sélectionné).
+  # uid >= 0 : nœud visé (sinon le nœud sélectionné).
   var oldForm, newForm: string
   var ok = true
   var msg = ""
@@ -1462,9 +1462,9 @@ proc designerHandler(ev: var Event) {.nimcall, gcsafe.} =
     withLock dOpLock: designerEvent(ev)
 
 proc openDesigner*(root, codePath, formFile: string, editorId: ControlId, theme: Theme): bool =
-  ## Ouvre le concepteur pour `codePath` (le code qui reçoit les procédures).
-  ## `formFile` : un form_<nom>.prg existant à rouvrir, ou "" pour un nouveau
-  ## formulaire nommé d'après le premier numéro libre.
+  # Ouvre le concepteur pour `codePath` (le code qui reçoit les procédures).
+  # `formFile` : un form_<nom>.prg existant à rouvrir, ou "" pour un nouveau
+  # formulaire nommé d'après le premier numéro libre.
   var already = false
   guarded: already = dOpen
   if already: return false

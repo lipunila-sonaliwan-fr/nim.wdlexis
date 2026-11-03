@@ -316,9 +316,9 @@ method onWheel*(c: Control, dx, dy: float): bool {.base.} = false  # true = cons
 method onFocus*(c: Control, gained: bool) {.base.} = discard
 
 method dispose*(c: Control) {.base.} = discard
-  ## Releases native resources (fonts, textures, documents). Called on the UI thread when
-  ## the control leaves its window for good (window destroyed, or deleteControl). The
-  ## control must stay usable: resources are reloaded lazily if it is shown again.
+  # Releases native resources (fonts, textures, documents). Called on the UI thread when
+  # the control leaves its window for good (window destroyed, or deleteControl). The
+  # control must stay usable: resources are reloaded lazily if it is shown again.
 
 proc disposeTree*(c: Control) =
   if c == nil: return
@@ -327,7 +327,7 @@ proc disposeTree*(c: Control) =
   c.dispose()
 
 proc flushDisposals*(f: Window) =
-  ## Disposes controls removed since the last frame (unless they were attached again).
+  # Disposes controls removed since the last frame (unless they were attached again).
   if f.pendingDispose.len == 0: return
   let pending = f.pendingDispose
   f.pendingDispose.setLen(0)
