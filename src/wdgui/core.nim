@@ -103,6 +103,9 @@ type
     activePage*: int      # stack layout / tabs (0-based).
     framed*: bool
 
+  WindowState* = enum
+    wsNormal = "normale", wsMaximized = "agrandie", wsMinimized = "reduite", wsFullscreen = "pleinecran"
+
   Window* = ref object of Control
     title*: string
     appliedTitle*: string
@@ -134,6 +137,9 @@ type
     placed*: bool             # initial position requested (placeX, placeY: screen coordinates)
     pendingDispose*: seq[Control]   # controls removed by deleteControl (disposed on the UI thread)
     placeX*, placeY*: int
+    stateRequest*: WindowState      # demandé par setWindowState (appliqué par la boucle UI)
+    stateRequested*: bool
+    winState*: WindowState          # état courant (suivi des événements SDL)
 
 var
   guiLock*: Lock
@@ -165,6 +171,15 @@ proc stopPropagation*(ev: var Event) = ev.stopped = true
   # Stops propagation to the parents.
 
 proc propagationStopped*(ev: Event): bool = ev.stopped
+
+proc currentWindowState*(f: Window): WindowState =
+  # État réel de la fenêtre d'après SDL (normale si elle n'est pas encore ouverte).
+  if f.sdlWin == nil: return f.winState
+  let fl = SDL_GetWindowFlags(f.sdlWin)
+  if (fl and SDL_WINDOW_FULLSCREEN) != 0: wsFullscreen
+  elif (fl and SDL_WINDOW_MINIMIZED) != 0: wsMinimized
+  elif (fl and SDL_WINDOW_MAXIMIZED) != 0: wsMaximized
+  else: wsNormal
 
 proc wakeUI*() =
   # Wakes the UI loop (thread-safe) so that it redraws.

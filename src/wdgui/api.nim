@@ -164,6 +164,17 @@ proc `theme=`*(winId: ControlId, t: Theme) =
   # Changes a window's look & feel on the fly.
   withControl(winId, Window, f): f.theme = t
 
+proc setWindowState*(winId: ControlId, s: WindowState) =
+  # Agrandit, réduit (dans le Dock / la barre des tâches), restaure ou passe en plein
+  # écran (thread-safe ; appliqué par la boucle de l'interface, même avant l'ouverture).
+  withControl(winId, Window, f):
+    f.stateRequest = s
+    f.stateRequested = true
+  wakeUI()
+
+proc windowState*(winId: ControlId): WindowState =
+  readControl(winId, Window, f): result = currentWindowState(f)
+
 proc closeWindow*(winId: ControlId) =
   # Closes (Close) a window.
   withControl(winId, Window, f): f.closeRequested = true

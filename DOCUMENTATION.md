@@ -2039,7 +2039,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 
 | Appel | Rôle |
 | --- | --- |
-| `interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=}` | Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif. |
+| `interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=, etat=}` | Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée) ; etat : `normale`, `agrandie`, `reduite` ou `pleinecran` à l'ouverture. |
 | `interface.executer()` | Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime). |
 | `interface.quitter()` | Ferme toutes les fenêtres du programme. |
 | `interface.fenetres()` | Nombre de fenêtres ouvertes. |
@@ -2063,7 +2063,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.ascenseur()` | Ascenseur. |
 | `interface.compteur()` | Compteur à flèches. |
 | `interface.notation()` | Notation. |
-| `interface.image(chemin)` | Image PNG, JPEG ou BMP (autres formats si wdgui est compilé avec `-d:sdlimage`) ; valeur : le chemin. Une image illisible est signalée sur la sortie d'erreur. |
+| `interface.image(chemin)` | Image PNG, JPEG ou BMP (autres formats si wdgui est compilé avec `-d:sdlimage`). Un chemin relatif se rapporte au dossier du programme principal (le dossier du projet), aussi dans le concepteur. `img.valeur = "ressources/autre.png"` (ou `img.chemin`) change l'image en cours d'exécution ; la lecture rend le chemin complet. Une image illisible est signalée sur la sortie d'erreur. |
 | `interface.codebarre(texte)` | Code-barres. |
 | `interface.graphe([genre], [titre])` | Graphe : colonnes, lignes, aires, secteurs. |
 | `interface.calendrier(["AAAAMMJJ"])` | Calendrier. |
@@ -2096,6 +2096,11 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `c:menucontextuel(element, ...)` | Menu contextuel ; le choix arrive dans surselection. |
 | `c:redessiner()` | Redessine le contrôle. |
 | `fen:fermer()` | Ferme la fenêtre. |
+| `fen:agrandir()` | Agrandit (maximise) la fenêtre ; aussi `fen:maximiser()`. |
+| `fen:reduire()` | Réduit (minimise) la fenêtre dans le Dock ou la barre des tâches ; aussi `fen:minimiser()`. |
+| `fen:restaurer()` | Rend à la fenêtre sa taille normale (après agrandir, réduire ou plein écran). |
+| `fen:pleinecran([actif])` | Plein écran ; `fen:pleinecran(faux)` : retour à la fenêtre normale. |
+| `fen.etatfenetre` | État de la fenêtre : `normale`, `agrandie`, `reduite` ou `pleinecran` (lecture et écriture). Un changement d'état déclenche `surredimension` (`ev.texte` : le nouvel état). |
 | `fen:fixertheme(nom, [sombre])` | Change le thème. |
 | `onglets:ajouterpage(titre, [disposition])` | Ajoute une page ; renvoie son conteneur. |
 | `liste:ajouter(element, ...)` | Ajoute (listes et combos). |

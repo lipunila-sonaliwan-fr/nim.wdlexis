@@ -212,6 +212,23 @@ proc realize(f: Window) =
   f.dirty = true
   emit(f, evWindowOpen)
 
+proc applyStateRequest(f: Window) =
+  ## Agrandir, réduire, restaurer, plein écran (sur le fil de l'interface).
+  f.stateRequested = false
+  let w = f.sdlWin
+  if w == nil: return
+  let full = (SDL_GetWindowFlags(w) and SDL_WINDOW_FULLSCREEN) != 0
+  if f.stateRequest != wsFullscreen and full: discard SDL_SetWindowFullscreen(w, false)
+  case f.stateRequest
+  of wsNormal: discard SDL_RestoreWindow(w)
+  of wsMaximized: discard SDL_MaximizeWindow(w)
+  of wsMinimized: discard SDL_MinimizeWindow(w)
+  of wsFullscreen: discard SDL_SetWindowFullscreen(w, true)
+  f.dirty = true
+
+proc readState(f: Window) =
+  if f.sdlWin != nil: f.winState = currentWindowState(f)
+
 proc destroyWindow(f: Window) =
   if f.sdlWin != nil:
     # ressources des contrôles (polices, textures, documents) avant le moteur de rendu.
@@ -285,7 +302,13 @@ proc handleEvent(e: var SDL_Event) =
       emit(f, evWindowClose)
       if not f.manualClose: f.closeRequested = true
     of SDL_EVENT_WINDOW_RESIZED:
+      readState(f)
       emit(f, evWindowResize, x = float(we.data1), y = float(we.data2))
+    of SDL_EVENT_WINDOW_MINIMIZED, SDL_EVENT_WINDOW_MAXIMIZED, SDL_EVENT_WINDOW_RESTORED,
+       SDL_EVENT_WINDOW_SHOWN:
+      let before = f.winState
+      readState(f)
+      if f.winState != before: emit(f, evWindowResize, x = float(f.width), y = float(f.height), text = $f.winState)
     of SDL_EVENT_WINDOW_FOCUS_GAINED:
       if blocked(f, true): return
       activeWindow = f
@@ -477,6 +500,7 @@ proc uiLoop() {.thread.} =
         for f in allWindows:
           if f.closeRequested and not f.closed: destroyWindow(f)
           elif not f.closed and f.sdlWin == nil: realize(f)
+          if f.opened and f.stateRequested: applyStateRequest(f)
           if f.opened: inc openCount
         if openCount > 0: hadWindow = true
         elif hadWindow: finished = true

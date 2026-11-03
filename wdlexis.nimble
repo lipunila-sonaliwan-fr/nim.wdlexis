@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-version       = "1.8.2"
+version       = "1.8.3"
 author        = "Jean-Marc QUÉRÉ, sonaliwan.fr"
 description   = "wdlexis+ : atelier et runtime du langage Lexis+"
 license       = "Propriétaire - tous droits réservés"
@@ -18,8 +18,8 @@ task atelier, "Compile l'atelier (exécutable wdlexis+)":
   iconeFinder("wdlexis+")
 
 task runtime, "Compile le runtime autonome (wdlexisrt)":
-  exec "nim c -d:release -d:sdlttf src/wdlexisrt.nim"
-  iconeFinder("src/wdlexisrt")
+  exec "nim c -d:release -d:sdlttf -o:wdlexisrt src/wdlexisrt.nim"
+  iconeFinder("wdlexisrt")
 
 task icones, "Régénère les icônes et ressources Windows depuis src/ressources/wdlexis.png":
   exec "nim r --hints:off outils/icones.nim"

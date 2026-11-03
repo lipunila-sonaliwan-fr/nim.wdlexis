@@ -91,6 +91,9 @@ type
 const
   SDL_INIT_VIDEO* = 0x20'u32
   SDL_WINDOW_RESIZABLE* = 0x20'u64
+  SDL_WINDOW_FULLSCREEN* = 0x1'u64
+  SDL_WINDOW_MINIMIZED* = 0x40'u64
+  SDL_WINDOW_MAXIMIZED* = 0x80'u64
   SDL_BLENDMODE_BLEND* = 0x1'u32
   SDL_PIXELFORMAT_ARGB8888* = 0x16362004'u32                      # B,G,R,A bytes in memory (little-endian)
   SDL_TEXTUREACCESS_STATIC* = 0.cint
@@ -173,6 +176,11 @@ proc SDL_SetWindowModal*(w: SDL_Window, modal: bool): bool
 proc SDL_GetWindowPosition*(w: SDL_Window, px, py: ptr cint): bool
 proc SDL_SetWindowPosition*(w: SDL_Window, x, y: cint): bool
 proc SDL_RaiseWindow*(w: SDL_Window): bool
+proc SDL_MaximizeWindow*(w: SDL_Window): bool
+proc SDL_MinimizeWindow*(w: SDL_Window): bool
+proc SDL_RestoreWindow*(w: SDL_Window): bool
+proc SDL_SetWindowFullscreen*(w: SDL_Window, fullscreen: bool): bool
+proc SDL_GetWindowFlags*(w: SDL_Window): uint64
 proc SDL_CreateRenderer*(w: SDL_Window, name: cstring): SDL_Renderer
 proc SDL_DestroyRenderer*(r: SDL_Renderer)
 proc SDL_SetRenderVSync*(r: SDL_Renderer, vsync: cint): bool

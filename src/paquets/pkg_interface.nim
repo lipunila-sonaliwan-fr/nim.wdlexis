@@ -313,9 +313,17 @@ proc ctlOf(v: Value, what = "contrôle"): UiCtl =
 const captionFamilies = ["etiquette", "bouton", "fenetre", "page", "cadre"]
 
 proc programPath(L: Interp, path: string): string =
-  # Chemin relatif au dossier du programme (comme webview).
+  ## Chemin relatif au dossier du programme (comme webview).
   if path.isAbsolute: path
   else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
+
+proc windowStateOf(s: string): WindowState =
+  case s.toLowerAscii
+  of "normale", "normal", "restauree", "restaurée": wsNormal
+  of "agrandie", "maximisee", "maximisée", "maximized": wsMaximized
+  of "reduite", "réduite", "minimisee", "minimisée", "minimized": wsMinimized
+  of "pleinecran", "plein écran", "fullscreen": wsFullscreen
+  else: rtError("état de fenêtre attendu : normale, agrandie, reduite ou pleinecran")
 
 proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
   let id = c.id
@@ -335,6 +343,9 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
         if c.ctl.isNil: unsupported(key)
         withControl(c.id, Control, obj): obj.setValueText(txt)
         requestRedraw(c.id)
+  of "etatfenetre":
+    if c.family != "fenetre": unsupported(key)
+    setWindowState(c.id, windowStateOf(L.tostr(v)))
   of "num": setNum(id.valueNum, numOf(v, "num"), key)
   of "libelle", "titre":
     let txt = L.tostr(v)
@@ -420,6 +431,9 @@ proc getProp(L: Interp, c: UiCtl, key: string): Value =
     if key == "chemin" and c.family != "image": unsupported(key)
     if key == "texte" and c.family in captionFamilies: gCaption(id)
     else: gValue(id)
+  of "etatfenetre":
+    if c.family != "fenetre": unsupported(key)
+    strV($windowState(id))
   of "num": gNum(id)
   of "libelle", "titre": gCaption(id)
   of "visible": gVisible(id)
@@ -645,11 +659,6 @@ proc addChildTo(L: Interp, parent: UiCtl, child: UiCtl) =
     discard Container(parent.ctl).addChild(child.ctl)
   else:
     rtError("« " & parent.family & " » n'est pas un conteneur")
-
-#proc programPath(L: Interp, path: string): string =
-#  ## Chemin relatif au dossier du programme (comme webview).
-#  if path.isAbsolute: path
-#  else: (if L.scriptPath.len > 0: L.scriptPath.parentDir else: getCurrentDir()) / path
 
 proc readMarkdown(L: Interp, path, fname: string): string =
   let p = L.programPath(path)
@@ -903,6 +912,16 @@ proc defineMethods() =
     if not w.closed:
       w.closed = true
       closeWindow(w.id)
+  # agrandir (maximiser), réduire (minimiser : Dock / barre des tâches), restaurer, plein écran
+  for (nm, st) in [("agrandir", wsMaximized), ("maximiser", wsMaximized), ("reduire", wsMinimized),
+                   ("minimiser", wsMinimized), ("restaurer", wsNormal)]:
+    let s0 = st
+    let n0 = nm
+    mfn "fenetre", n0, proc (L: Interp, a: seq[Value]): seq[Value] =
+      setWindowState(L.self(a, n0).id, s0)
+  mfn "fenetre", "pleinecran", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # fen:pleinecran() ou fen:pleinecran(vrai) : plein écran ; fen:pleinecran(faux) : fenêtre normale.
+    setWindowState(L.self(a, "pleinecran").id, if optBool(a, 2, true): wsFullscreen else: wsNormal)
   mfn "fenetre", "fixertheme", proc (L: Interp, a: seq[Value]): seq[Value] =
     let w = L.self(a, "fixertheme")
     let th = themeOf(L.optStr(a, 2, "fixertheme", "natif"), optBool(a, 3, false))
@@ -2021,6 +2040,10 @@ proc openInterface(L: Interp): Value =
       w.placed = true                  # position initiale à l'écran (sinon : centrée)
       w.placeX = optField(o, "x", 0)
       w.placeY = optField(o, "y", 0)
+    let etat0 = optField(o, "etat", "")
+    if etat0.len > 0:
+      w.stateRequest = windowStateOf(etat0)    # appliqué à l'ouverture
+      w.stateRequested = true
     @[L.register(UiCtl(rawId: w.id, win: w, family: "fenetre"))]
   ctor("etiquette", "etiquette"):
     newLabel(L.optStr(a, 1, "etiquette", ""), alignOf(L.optStr(a, 2, "etiquette", "gauche")))
@@ -2316,7 +2339,11 @@ proc openInterface(L: Interp): Value =
   tableV(m)
 
 const uiDocs = [
-  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée).",
+  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=, etat=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée) ; etat : normale, agrandie, reduite ou pleinecran à l'ouverture.",
+  "fenetre:agrandir()", "Agrandit (maximise) la fenêtre ; aussi fen:maximiser(). fen.etatfenetre vaut alors « agrandie ».",
+  "fenetre:reduire()", "Réduit (minimise) la fenêtre dans le Dock ou la barre des tâches ; aussi fen:minimiser().",
+  "fenetre:restaurer()", "Rend à la fenêtre sa taille normale (après agrandir, réduire ou plein écran).",
+  "fenetre:pleinecran([actif])", "Plein écran (faux : retour à la fenêtre normale).",
   "interface.executer()", "Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime).",
   "interface.quitter()", "Ferme toutes les fenêtres du programme.",
   "interface.fenetres()", "Nombre de fenêtres ouvertes.",
