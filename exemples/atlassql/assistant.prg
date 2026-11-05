@@ -282,8 +282,12 @@ fonction IA_REGLES(question)
       inserer(md6, "- **" + r.code + "** : " + r.colonnes + sisinon("," $ r.variantes, " — *types incohérents : " + r.variantes + "*", ""))
     suivant
     retourner joindre(md6, car(10))
+  cas o = nul et CONTIENT_UN(q, {"combien", "nombre de"}) et IA_GENRE(q) <> nul
+    retourner IA_COMBIEN(IA_GENRE(q))
   cas o = nul et CONTIENT_UN(q, {"combien", "inventaire", "volumétrie", "synthèse", "bilan"})
     retourner SYNTHESE()
+  cas o = nul et CONTIENT_UN(q, {"impact"}) et IA_COLONNE(question) <> nul
+    retourner IA_IMPACT_COLONNE(IA_COLONNE(question))
   fincas
   && actions sur un objet
   si o = nul
@@ -317,6 +321,72 @@ fonction IA_REGLES(question)
     retourner IA_EXPLIQUER(o)
   fincas
 retourner IA_RESUMER(o)
+
+fonction IA_GENRE(q)
+  && genre d'objet cité dans une question « combien de … »
+  pour chaque g dans {{"procédure", "PROCEDURE"}, {"procedure", "PROCEDURE"}, {"table", "TABLE"}, {"vue", "VUE"}, ;
+                      {"fonction", "FONCTION"}, {"déclencheur", "DECLENCHEUR"}, {"trigger", "DECLENCHEUR"}, {"job", "JOB"}, ;
+                      {"synonyme", "SYNONYME"}, {"index", "INDEX"}, {"colonne", "COLONNE"}, {"serveur", "SERVEUR"}, {"base", "BASE"}}
+    si g[1] $ q
+      retourner g[2]
+    finsi
+  suivant
+retourner nul
+
+fonction IA_COMBIEN(g)
+  locale md = {}
+  faire cas
+  cas g = "COLONNE"
+    inserer(md, "**" + NB(RV(nul, "select count(*) from colonnes", nul)) + "** colonnes inventoriées :")
+    inserer(md, "")
+    pour chaque r dans RQ(nul, "select serveur, count(*) as n, count(distinct objet_id) as t from colonnes group by 1 order by 1", nul)
+      inserer(md, "- 🖥 **" + r.serveur + "** : " + NB(r.n) + " colonnes dans " + r.t + " tables et vues")
+    suivant
+  cas g = "SERVEUR" ou g = "BASE"
+    inserer(md, "**" + RV(nul, "select count(distinct serveur) from objets", nul) + "** serveur(s), **" + ;
+                RV(nul, "select count(distinct serveur || '.' || base) from objets where base <> ''", nul) + "** base(s) :")
+    inserer(md, "")
+    pour chaque r dans RQ(nul, "select serveur, string_agg(distinct base, ', ' order by base) as b from objets where base <> '' group by 1 order by 1", nul)
+      inserer(md, "- 🖥 **" + r.serveur + "** : " + r.b)
+    suivant
+  autrement
+    inserer(md, "**" + NB(RV(nul, "select count(*) from objets where genre = ?", {g})) + "** " + minuscule(LIBELLE_GENRE(g)) + "(s) :")
+    inserer(md, "")
+    pour chaque r dans RQ(nul, "select serveur, base, count(*) as n from objets where genre = ? group by all order by 1, 2", {g})
+      inserer(md, "- 🖥 " + r.serveur + " › " + r.base + " : **" + r.n + "**")
+    suivant
+  fincas
+retourner joindre(md, car(10))
+
+fonction IA_COLONNE(question)
+  && nom de colonne cité dans la question (le plus long reconnu)
+  locale mots = {}
+  pour chaque m dans decouper(remplacertexte(remplacertexte(question, "?", " "), ",", " "), " ")
+    si #rogner(m) >= 3
+      inserer(mots, minuscule(rogner(m)))
+    finsi
+  suivant
+  si #mots = 0
+    retourner nul
+  finsi
+retourner RV(nul, "select nom from colonnes where list_contains(string_split(?, '|'), lower(nom)) order by length(nom) desc limit 1", {joindre(mots, "|")})
+
+fonction IA_IMPACT_COLONNE(c)
+  locale md = {"**Impact d'une modification de la colonne " + c + "**", ""}
+  locale tabs = RQ(nul, "select distinct serveur || ' › ' || base || '.' || sch || '.' || table_nom as t, type_sql from colonnes where lower(nom) = lower(?) order by 1", {c})
+  inserer(md, "Présente dans **" + #tabs + "** table(s) ou vue(s) :")
+  pour chaque r dans tabs
+    inserer(md, "- " + r.t + " — " + MDCODE(r.type_sql))
+  suivant
+  locale cod = IMPACT_COLONNE(c, nul)
+  inserer(md, "")
+  inserer(md, "Citée dans le code de **" + #cod + "** objet(s) :")
+  pour chaque r dans cod
+    inserer(md, "- " + ICONE_GENRE(r.genre) + " " + r.sch + "." + r.nom + " (" + r.occurrences + " occurrence(s))")
+  suivant
+  inserer(md, "")
+  inserer(md, "Aperçu ligne par ligne et script de renommage : onglet *Refacto*, opération « Renommer ».")
+retourner joindre(md, car(10))
 
 fonction IA_RESUMER(o)
   locale md = {"**" + o.sch + "." + o.nom + "** — " + LIBELLE_GENRE(o.genre) + " de " + o.serveur + " › " + o.base + "."}
@@ -355,10 +425,15 @@ fonction IA_RESUMER(o)
   locale ent = RELATIONS(o.id, "entrant", "")
   si #ent > 0
     locale l = {}
+    locale vus = {}
     pour chaque r dans ent
-      inserer(l, DERNIER(r.nom))
+      locale nm = DERNIER(r.nom)
+      si vus[nm] = nul
+        vus[nm] = vrai
+        inserer(l, nm)
+      finsi
     suivant
-    inserer(md, "Utilisé par " + #ent + " objet(s) : " + COURT(joindre(l, ", "), 300) + ".")
+    inserer(md, "Utilisé par " + #l + " objet(s) : " + COURT(joindre(l, ", "), 300) + ".")
   finsi
   si #m > 0 et m[1].classe <> nul et m[1].classe <> ""
     inserer(md, "Classement : **" + m[1].classe + "**.")
@@ -452,6 +527,16 @@ fonction IA_REFACTORISER(o)
   locale m = RQ(nul, "select * from metriques where objet_id = ?", {o.id})
   si #m > 0 et m[1].complexite <> nul et m[1].complexite > 8
     inserer(md, "- Complexité " + m[1].complexite + " : découper par phases (onglet Refactoring › *Découper par phases*).")
+  finsi
+  si #m > 0 et m[1].maintenabilite <> nul et m[1].maintenabilite < 45
+    inserer(md, "- Maintenabilité " + arrondi(m[1].maintenabilite) + "/100 : code long et dense ; extraire les blocs réutilisables (onglet Refacto › *Extraire la sélection*).")
+  finsi
+  si #m > 0 et m[1].dette_min <> nul et m[1].dette_min >= 120
+    inserer(md, "- Dette estimée " + arrondi(m[1].dette_min) + " min, due surtout à :")
+    pour chaque r dans RQ(nul, "select regle, niveau, count(*) as n, any_value(suggestion) as suggestion from diagnostics where objet_id = ? " + ;
+                               "group by regle, niveau order by case niveau when 'critique' then 1 when 'important' then 2 else 3 end, n desc limit 5", {o.id})
+      inserer(md, "    - " + PASTILLE_NIVEAU(r.niveau) + " " + r.regle + sisinon(r.n > 1, " (×" + r.n + ")", "") + " → " + r.suggestion)
+    suivant
   finsi
   pour chaque r dans RQ(nul, "select distinct u.groupe, u.genre, u.proposition, (select string_agg(distinct o2.nom, ', ') from duplications u2 " + ;
                              "join objets o2 on o2.id = u2.objet_id where u2.groupe = u.groupe and u2.objet_id <> u.objet_id) as autres " + ;

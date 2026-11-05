@@ -227,7 +227,7 @@ retourner liste
 
 fonction nil_instr()
 retourner {toks = {}, kw = "", l1 = 0, l2 = 0, entete = faux, vue = faux, aselect = faux, aset = faux, ;
-           principal = faux, n = 0}
+           principal = faux, principal_kw = "", wins_sel = faux, n = 0}
 
 procedure MARQUER_INSTR(cur, u, dp)
   si dp = 0
@@ -237,8 +237,12 @@ procedure MARQUER_INSTR(cur, u, dp)
     si u = "SET"
       cur.aset = vrai
     finsi
-    si cur.kw = "WITH" et (u = "SELECT" ou u = "INSERT" ou u = "UPDATE" ou u = "DELETE" ou u = "MERGE")
+    si cur.kw = "WITH" et cur.principal et cur.principal_kw = "INSERT" et (u = "SELECT" ou u = "VALUES" ou u = "EXEC")
+      cur.wins_sel = vrai                            && WITH … INSERT INTO t SELECT : la source de l'INSERT
+    finsi
+    si cur.kw = "WITH" et non cur.principal et (u = "SELECT" ou u = "INSERT" ou u = "UPDATE" ou u = "DELETE" ou u = "MERGE")
       cur.principal = vrai
+      cur.principal_kw = u
     finsi
   finsi
 retourner
@@ -273,6 +277,9 @@ fonction CONTINUE_INSTR(cur, u, prec, toks, i)
     finsi
     si kw = "WITH" et non cur.principal
       retourner vrai
+    finsi
+    si kw = "WITH" et cur.principal_kw = "INSERT" et cur.wins_sel <> vrai
+      retourner vrai                                 && WITH cte AS (…) INSERT INTO t SELECT …
     finsi
     si kw = "DECLARE" et prec = "FOR"
       retourner vrai                                 && DECLARE c CURSOR FOR SELECT
@@ -886,7 +893,7 @@ fonction EXPRESSION_DYN(etat, toks, debut, fin)
       inserer(p, "{" + j.o + "}")
     autrement
       && fonction, CAST(…), QUOTENAME(…) : regroupés jusqu'au « + » de niveau 0
-      locale q = {}
+      locale k0 = k
       tantque k <= fin
         locale x = toks[k]
         si x.o = "("
@@ -897,11 +904,10 @@ fonction EXPRESSION_DYN(etat, toks, debut, fin)
         si dp = 0 et x.o = "+"
           sortir
         finsi
-        inserer(q, x.o)
         k += 1
       fintantque
       dp = 0
-      inserer(p, "{" + COURT(joindre(q, ""), 60) + "}")
+      inserer(p, "{" + COURT(TEXTE_COMPACT(toks, k0, k - 1), 60) + "}")
       boucler
     fincas
     k += 1
@@ -916,11 +922,30 @@ procedure AFFECTATIONS(R, etat, ins)
   locale toks = ins.toks
   locale n = #toks
   pour i = 1 a n - 2
-    si toks[i].k = "V" et (toks[i + 1].o = "=" ou toks[i + 1].o = "+=")
+    && DECLARE @v TYPE(…) = valeur : on saute le type jusqu'au « = »
+    locale eg = i + 1
+    si ins.kw = "DECLARE" et toks[i].k = "V" et toks[i + 1].o <> "="
+      locale dq = 0
+      locale m = i + 1
+      tantque m <= n
+        si toks[m].o = "("
+          dq += 1
+        sinonsi toks[m].o = ")"
+          dq -= 1
+        sinonsi dq = 0 et (toks[m].o = "=" ou toks[m].o = ",")
+          sortir
+        finsi
+        m += 1
+      fintantque
+      si m <= n - 1 et toks[m].o = "="
+        eg = m
+      finsi
+    finsi
+    si toks[i].k = "V" et (toks[eg].o = "=" ou toks[eg].o = "+=") et eg + 1 <= n
       && fin de l'expression : virgule de niveau 0 ou FROM ou fin
       locale fin = n
       locale dp = 0
-      pour k = i + 2 a n
+      pour k = eg + 1 a n
         si toks[k].o = "("
           dp += 1
         sinonsi toks[k].o = ")"
@@ -930,10 +955,10 @@ procedure AFFECTATIONS(R, etat, ins)
           sortir
         finsi
       suivant
-      locale e = EXPRESSION_DYN(etat, toks, i + 2, fin)
+      locale e = EXPRESSION_DYN(etat, toks, eg + 1, fin)
       si e <> nul
         locale v = toks[i].u
-        si toks[i + 1].o = "+=" et etat.dyn[v] <> nul
+        si toks[eg].o = "+=" et etat.dyn[v] <> nul
           e = etat.dyn[v] + e
         finsi
         && SQL plausible : un mot SQL dans le texte
@@ -982,6 +1007,52 @@ procedure DYNAMIQUE_EXEC(R, etat, ins, k)
     sqlr = "{" + COURT(TEXTE_TOKS(toks, d, f), 80) + "}"
   finsi
   inserer(R.dyn, {ligne = toks[k].l, mode = "EXEC", variable = var_, sql = sqlr, params = "", types = ""})
+  REFS_DYNAMIQUES(R, sqlr, toks[k].l)
+retourner
+
+procedure REFS_DYNAMIQUES(R, sqlr, ligne)
+  && tables citées dans le SQL dynamique reconstitué (FROM, JOIN, INTO, UPDATE, MERGE, DELETE FROM)
+  si sqlr = nul
+    retourner
+  finsi
+  locale t = sqlr
+  pour chaque c dans {"(", ")", ",", ";", car(10), car(13), car(9)}
+    t = remplacertexte(t, c, " ")
+  suivant
+  locale mots = {}
+  pour chaque m dans decouper(t, " ")
+    si m <> ""
+      inserer(mots, m)
+    finsi
+  suivant
+  locale nature = "SELECT"
+  pour i = 1 a #mots - 1
+    locale u = majuscule(mots[i])
+    faire cas
+    cas u = "SELECT"
+      nature = "SELECT"
+    cas u = "INSERT"
+      nature = "INSERT"
+    cas u = "UPDATE"
+      nature = "UPDATE"
+    cas u = "DELETE"
+      nature = "DELETE"
+    cas u = "MERGE"
+      nature = "MERGE"
+    fincas
+    si u = "FROM" ou u = "JOIN" ou u = "INTO" ou (u = "UPDATE" et majuscule(mots[i + 1]) <> "SET") ou (u = "MERGE" et majuscule(mots[i + 1]) <> "INTO")
+      locale nom = mots[i + 1]
+      locale nu = majuscule(nom)
+      si non ("{" $ nom) et non commencepar(nom, "@") et non commencepar(nom, "#") et non commencepar(nom, "'") ;
+         et nu <> "SELECT" et nu <> "INTO" et nu <> "OPENQUERY"
+        locale parties = decouper(remplacertexte(remplacertexte(nom, "[", ""), "]", ""), ".")
+        locale pr = PARTIES_REF(parties)
+        inserer(R.refs, {ref = nom, p1 = pr.p1, p2 = pr.p2, p3 = pr.p3, p4 = pr.p4, ;
+                         nature = sisinon(u = "FROM" ou u = "JOIN", sisinon(nature = "DELETE", "DELETE", "SELECT"), nature), ;
+                         ligne = ligne, distant = pr.p4, dynamique = vrai})
+      finsi
+    finsi
+  suivant
 retourner
 
 procedure DYNAMIQUE_SPEXEC(R, etat, ins, k)
@@ -1051,6 +1122,7 @@ procedure DYNAMIQUE_SPEXEC(R, etat, ins, k)
     types = joindre(typs, " ; ")
   finsi
   inserer(R.dyn, {ligne = toks[k].l, mode = "sp_executesql", variable = var_, sql = sqlr, params = params, types = types})
+  REFS_DYNAMIQUES(R, sqlr, toks[k].l)
 retourner
 
 fonction ARGUMENTS(toks, d, n)
@@ -1075,6 +1147,21 @@ fonction ARGUMENTS(toks, d, n)
     inserer(args, {d = debut, f = n})
   finsi
 retourner args
+
+fonction TEXTE_COMPACT(toks, d, f)
+  && texte lisible : QUOTENAME(@Tri), CAST(@Annee AS VARCHAR(4)), dbo.T
+  locale r = ""
+  locale prec = ""
+  pour k = d a min(f, #toks)
+    locale o = toks[k].o
+    si r = "" ou o = ")" ou o = "," ou o = "." ou prec = "(" ou prec = "." ou (o = "(" et toks[k - 1].k = "W")
+      r = r + o
+    sinon
+      r = r + " " + o
+    finsi
+    prec = o
+  suivant
+retourner r
 
 fonction TEXTE_TOKS(toks, d, f)
   locale p = {}
@@ -1199,6 +1286,10 @@ fonction PHASE_INSTR(etat, ins, info)
     retourner "Déclarations"
   cas kw = "SET" et #toks >= 2 et toks[2].k = "W"
     retourner "Initialisation"                     && SET NOCOUNT, XACT_ABORT…
+  cas kw = "SET" et #toks >= 2 et toks[2].k = "V" et etat.dyn[toks[2].u] <> nul
+    retourner "SQL dynamique"                      && construction d'une requête dynamique
+  cas kw = "SET" et non info.dynamique et #info.lit = 0 et EXPRESSION_CALCULEE(toks)
+    retourner "Calcul"
   cas kw = "SET" et non info.dynamique et #info.lit = 0
     retourner "Initialisation"
   cas kw = "SET"
@@ -1211,12 +1302,18 @@ fonction PHASE_INSTR(etat, ins, info)
     retourner "Traces"
   cas kw = "CREATE" et #toks >= 3 et toks[2].u = "TABLE" et commencepar(toks[3].o, "#")
     retourner "Chargement"
-  cas kw = "OPEN" ou kw = "FETCH" ou kw = "CLOSE" ou kw = "DEALLOCATE"
+  cas kw = "OPEN" ou kw = "FETCH"
     retourner "Calcul"
+  cas kw = "CLOSE" ou kw = "DEALLOCATE"
+    retourner "Nettoyage"
+  cas kw = "DROP" et #toks >= 3 et (commencepar(toks[3].o, "#") ou (toks[3].u = "IF" et #toks >= 5 et commencepar(toks[#toks].o, "#")))
+    retourner "Nettoyage"
+  cas kw = "WITH" et CONTIENT_ECRITURE(toks)
+    retourner sisinon(#info.ecrit > 0, "Écriture", "Calcul")
   cas kw = "IF" ou kw = "WHILE" ou kw = "ELSE"
     retourner ""                                   && déterminé par le corps
   cas info.dynamique
-    retourner "Écriture"
+    retourner "SQL dynamique"
   cas info.appel et #info.ecrit = 0 et #info.lit = 0
     retourner "Traitements"
   cas info.assigne
@@ -1224,7 +1321,10 @@ fonction PHASE_INSTR(etat, ins, info)
   fincas
   locale cible = majuscule(info.cible)
   si #info.ecrit > 0 ou (info.cible <> "" et non info.temp)
-    si "HIST" $ cible ou "ARCH" $ cible ou "LOG" $ cible ou "AUDIT" $ cible
+    si "LOG" $ cible ou "AUDIT" $ cible ou "TRACE" $ cible ou "JOURNAL" $ cible
+      retourner "Traces"
+    finsi
+    si "HIST" $ cible ou "ARCH" $ cible
       retourner "Archivage"
     finsi
     si kw = "DELETE" ou kw = "TRUNCATE"
@@ -1245,6 +1345,26 @@ fonction PHASE_INSTR(etat, ins, info)
     retourner "Traitements"
   finsi
 retourner "Traitements"
+
+fonction EXPRESSION_CALCULEE(toks)
+  && SET @v = expression qui lit d'autres variables ou des fonctions (et pas une simple constante)
+  si #toks >= 3 et (toks[3].o = "+=" ou toks[3].o = "-=" ou toks[3].o = "*=" ou toks[3].o = "/=")
+    retourner vrai
+  finsi
+  pour k = 3 a #toks
+    si toks[k].k = "V" ou commencepar(toks[k].o, "@@") ou (k < #toks et toks[k].k = "W" et toks[k + 1].o = "(")
+      retourner vrai
+    finsi
+  suivant
+retourner faux
+
+fonction CONTIENT_ECRITURE(toks)
+  pour chaque j dans toks
+    si j.u = "INSERT" ou j.u = "UPDATE" ou j.u = "DELETE" ou j.u = "MERGE"
+      retourner vrai
+    finsi
+  suivant
+retourner faux
 
 procedure PHASES_CONTROLES(R)
   && IF dont le corps lève une erreur ou sort : Contrôles ; sinon, phase dominante du corps

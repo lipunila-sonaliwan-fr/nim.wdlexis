@@ -157,6 +157,10 @@ fonction LIBELLE_MOTS(mots)
               SK = "clé technique (substitution)", COURANT = "Version courante", SEGMENT = "Segment", NIVEAU = "Niveau", ;
               MESSAGE = "Message", RAISON = "Raison", SOCIALE = "sociale", CATEGORIE = "Catégorie", REMISE = "Remise"}
   locale g = GLOSSAIRE()
+  && FACTURE_ID -> « Identifiant de la facture » : le rôle passe devant le nom métier
+  si #mots = 2 et l[mots[2]] <> nul et g.mots[mots[1]] <> nul et l[mots[1]] = nul
+    mots = {mots[2], mots[1]}
+  finsi
   locale p = {}
   locale i = 0
   pour chaque m dans mots
@@ -164,12 +168,24 @@ fonction LIBELLE_MOTS(mots)
     si l[m] <> nul
       inserer(p, sisinon(i = 1, l[m], minuscule(gauche(l[m], 1)) + souschaine(l[m], 2)))
     sinonsi g.mots[m] <> nul
-      inserer(p, sisinon(i = 1, g.mots[m][1], "du " + minuscule(g.mots[m][1])))
+      inserer(p, sisinon(i = 1, g.mots[m][1], ARTICLE_DE(g.mots[m][1]) + minuscule(g.mots[m][1])))
     sinon
       inserer(p, sisinon(i = 1, gauche(m, 1) + minuscule(souschaine(m, 2)), minuscule(m)))
     finsi
   suivant
 retourner joindre(p, " ")
+
+fonction ARTICLE_DE(nom)
+  && « du », « de la » ou « de l' » devant un nom métier (Numéro de la facture, Code du client, Date de l'écriture)
+  locale p = minuscule(gauche(nom, 1))
+  si p $ "aeiouyéèêàâîôûh"
+    retourner "de l'"
+  finsi
+  locale premier = minuscule(decouper(nom, " ")[1])
+  si ("," + premier + ",") $ ",commande,facture,ligne,remise,devise,tva,paie,balance,dimension,vente,taxe,catégorie,société,personne,ville,région,zone,livraison,réservation,relance,"
+    retourner "de la "
+  finsi
+retourner "du "
 
 procedure CONSTRUIRE_DICTIONNAIRE(s, t)
   locale g = GLOSSAIRE()

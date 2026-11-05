@@ -42,6 +42,11 @@ dossier = fichier.absolu(depart)
 OUVRIR_ENTREPOT(dossier)
 INIT_FILE()
 
+&& icône de l'application (barre de titre, barre des tâches, Dock)
+essayer
+  ui.icone(fichier.joindre(systeme.dossierprogramme(), "atlassql.png"))
+capturer e
+finessayer
 fen = ui.fenetre{titre = "Atlas SQL — " + fichier.nom(dossier), largeur = 1600, hauteur = 960, disposition = "bordure", ;
                  sombre = reglages.sombre, etat = "agrandie", densite = "compacte"}
 && pas de marge autour de la fenêtre : chaque zone gère son propre espacement
