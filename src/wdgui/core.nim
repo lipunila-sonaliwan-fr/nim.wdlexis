@@ -674,13 +674,30 @@ proc newWindow*(title: string, width = 800, height = 600,
 proc addChild*[T: Control](parent: Container, c: T): T =
   # Adds a control (or container) to a container; returns the control (its id: `.id`).
   guarded:
+    let oldWin = c.win
     if c.parent != nil:
       let cc: Control = c
       let i = c.parent.children.find(cc)
       if i >= 0: c.parent.children.delete(i)
+      markDirty(c.parent)
     c.parent = parent
     parent.children.add c
     attach(c, parent.win)
+    if oldWin != nil and parent.win != nil and oldWin != parent.win:
+      # Déplacé d'une fenêtre à une autre : les textures en cache appartiennent au
+      # moteur de rendu de l'ancienne fenêtre ; elles sont libérées (puis recréées)
+      # avant le prochain rendu de la nouvelle.
+      parent.win.pendingDispose.add c
+      oldWin.dirty = true
+      proc within(x: Control): bool =
+        var p = x
+        while p != nil:
+          if p == c: return true
+          p = p.parent
+        false
+      if within(oldWin.focusedControl): oldWin.focusedControl = nil
+      if within(oldWin.hoveredControl): oldWin.hoveredControl = nil
+      if within(oldWin.capturedControl): oldWin.capturedControl = nil
     markDirty(parent)
   wakeUI()
   c

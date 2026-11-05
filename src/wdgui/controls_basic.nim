@@ -676,7 +676,7 @@ proc arrowArea(c: Spin): Rect = rect(c.rect.x + c.rect.w - 23, c.rect.y + 2, 21,
 
 method typeName*(c: Spin): string = "Spin"
 
-method preferredSize*(c: Spin, d: Drawing, t: Theme): tuple[w, h: float] = (100.0, t.controlHeight)
+method preferredSize*(c: Spin, d: Drawing, t: Theme): tuple[w, h: float] = (120.0, t.controlHeight)
 
 method valueNum*(c: Spin): float = c.readValue
 
@@ -1264,12 +1264,39 @@ proc tabHeaderHeight(t: Theme): float = t.controlHeight + 8
 
 proc tabRects*(o: Tab, d: Drawing, t: Theme): seq[Rect] =
   # Rectangles des en-têtes (aussi utilisé par le concepteur de formulaires de wdlexis+).
+  # Débordement : quand les en-têtes ne tiennent pas, on réduit d'abord la marge interne,
+  # puis on plafonne la largeur des onglets les plus longs (libellés abrégés par « … »).
+  var tws: seq[float]
+  var textTotal = 0.0
+  for e in o.children:
+    let tw = d.textWidth(e.caption)
+    tws.add tw
+    textTotal += tw
+  let n = o.children.len
+  let gap = if t.look == lfMacOS: 0.0 else: 2.0
+  let avail = o.rect.w - 8 - gap * float(max(0, n - 1))
+  var pad = 28.0
+  if n > 0 and textTotal + pad * float(n) > avail:
+    pad = max(12.0, (avail - textTotal) / float(n))
   var ws: seq[float]
   var total = 0.0
-  for e in o.children:
-    let w = d.textWidth(e.caption) + 28
-    ws.add w
-    total += w
+  for tw in tws:
+    ws.add tw + pad
+    total += tw + pad
+  if n > 0 and total > avail and avail > 0:
+    # plafond c tel que somme(min(w, c)) = avail
+    var lo = 0.0
+    var hi = 0.0
+    for w in ws: hi = max(hi, w)
+    for _ in 0 .. 30:
+      let c = (lo + hi) / 2
+      var s = 0.0
+      for w in ws: s += min(w, c)
+      if s > avail: hi = c else: lo = c
+    total = 0.0
+    for i in 0 ..< ws.len:
+      ws[i] = max(24.0, min(ws[i], lo))
+      total += ws[i]
   let h = t.controlHeight
   var x = if t.look == lfMacOS: o.rect.x + max(0.0, (o.rect.w - total) / 2) else: o.rect.x + 4
   let y = o.rect.y + 4
@@ -1334,7 +1361,7 @@ method draw*(o: Tab, d: Drawing, t: Theme) =
           d.fillRect(rect(rr.x + 6, rr.y + rr.h - 3, rr.w - 12, 3), acc)
       elif i == o.hoverIndex and o.children[i].state != csGrayed:
         d.fillRoundRect(rr.shrink(2), t.radius, t.surfaceHover)
-    d.textIn(rr, o.children[i].caption, col, alCenter)
+    d.textIn(rr, o.children[i].caption, col, alCenter, 4)
     if o.focus and isActiveTab: d.drawFocus(t, rr.shrink(2), t.radius)
 
 method onMouse*(o: Tab, e: MouseEvent) =
@@ -1397,18 +1424,29 @@ method layoutChildren*(s: Splitter, d: Drawing, t: Theme) =
   var vis: seq[Control]
   for e in s.children:
     if e.visible: vis.add e
-  if vis.len >= 1:
+  if vis.len == 1:
+    # un seul volet visible : il prend toute la place (la position est conservée
+    # pour le jour où l'autre volet réapparaît)
+    layoutControl(vis[0], r, d, t)
+  elif vis.len >= 2:
     layoutControl(vis[0], (if s.vertical: rect(r.x, r.y, b.x - r.x, r.h) else: rect(r.x, r.y, r.w, b.y - r.y)), d, t)
   if vis.len >= 2:
     layoutControl(vis[1], (if s.vertical: rect(b.x + b.w, r.y, r.x + r.w - b.x - b.w, r.h)
                       else: rect(r.x, b.y + b.h, r.w, r.y + r.h - b.y - b.h)), d, t)
 
 method mouseCursor*(s: Splitter, x, y: float): int =
-  if s.bar.containsPoint(x, y) or s.dragging:
+  if s.dragging or (s.bar.containsPoint(x, y) and s.children.len >= 2 and s.children[0].visible and s.children[1].visible):
     (if s.vertical: SDL_SYSTEM_CURSOR_EW_RESIZE else: SDL_SYSTEM_CURSOR_NS_RESIZE)
   else: SDL_SYSTEM_CURSOR_DEFAULT
 
+proc twoPanes(s: Splitter): bool =
+  var n = 0
+  for e in s.children:
+    if e.visible: inc n
+  n >= 2
+
 method draw*(s: Splitter, d: Drawing, t: Theme) =
+  if not s.twoPanes: return
   let b = s.bar
   d.fillRect(b, if s.dragging or s.hovered: t.surfacePressed else: t.windowBg)
   let col = t.textSecondary
@@ -1417,6 +1455,9 @@ method draw*(s: Splitter, d: Drawing, t: Theme) =
     else: d.fillCircle(b.x + b.w / 2 + float(i) * 6, b.y + b.h / 2, 1.5, col)
 
 method onMouse*(s: Splitter, e: MouseEvent) =
+  if not s.twoPanes:
+    s.dragging = false
+    return
   case e.action
   of maPress: s.dragging = s.bar.containsPoint(e.x, e.y)
   of maMove:

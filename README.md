@@ -1,13 +1,3 @@
-Lexis+ &
-wdlexis+ - l'atelier du langage Lexis+<br/>
-© 2026 Jean‑Marc "jihem"Quéré, sonaliwan.fr<br/>
-SIRET 13033319800013<br/>
-Distribué sous licence CC BY‑NC‑SA 4.0.<br/>
-
-Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
-Pour obtenir une autorisation d'utilisation commerciale,<br/>
-contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
-
 [![](wdlexis.png)]()
 
 # wdlexis+ - l'atelier du langage Lexis+
@@ -44,6 +34,10 @@ par enregistrement à la manière de dBase. On y trouve :
 Les programmes du serveur wdGestion V s'exécutent tels quels (sauf les
 instructions propres aux pages web : `envoyer`, `rediriger`, `statut`, `entete`,
 `deconnecter`). La documentation complète est dans `DOCUMENTATION.md`.
+
+**IMPORTANT**\
+Pour pouvoir exécuter les applications :
+Décompressez au préalable les archives 7-Zip nommées **linOS.7z** (→ crée un dossier `linOS`), **macOS.7z** (→ crée un dossier `macOS`), **winOS.7z** (→ crée un dossier `winOS`).
 
 ## Un premier programme
 

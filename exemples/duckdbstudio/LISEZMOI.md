@@ -1,3 +1,15 @@
+DuckDB \[S\]tudio, Lexis+ &
+wdlexis+ - l'atelier du langage Lexis+<br/>
+© 2026 Jean‑Marc "jihem"Quéré, sonaliwan.fr<br/>
+SIRET 13033319800013<br/>
+Distribué sous licence CC BY‑NC‑SA 4.0.<br/>
+
+Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
+Pour obtenir une autorisation d'utilisation commerciale,<br/>
+contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
+
+[![](duckdbstudio.png)]()
+
 # DuckDB Studio
 
 Atelier de conception, d'administration, d'analyse et d'optimisation autour de
@@ -99,3 +111,8 @@ nécessaire).
 - **lot 4** : si vous avez des idées...
 
 Les éléments *Orchestration* de la palette annoncent ces évolutions.
+
+### Encore une chose !
+Un p'tit geste qui peut - grandement - nous aider... \[La caféïne c'est important pour une équipe de neuro-atypiques : TSA, TDAH, TAG, HPI et/ou THPI (membres de **mensa.fr** et de **triplenine.org**).\]
+
+[![Buy Me a Coffee](buymeacoffe-fre.png)](https://buymeacoffee.com/sonaliwan.fr)

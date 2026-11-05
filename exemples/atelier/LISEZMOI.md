@@ -1,3 +1,15 @@
+Lexis+ &
+wdlexis+ - l'atelier du langage Lexis+<br/>
+© 2026 Jean‑Marc "jihem"Quéré, sonaliwan.fr<br/>
+SIRET 13033319800013<br/>
+Distribué sous licence CC BY‑NC‑SA 4.0.<br/>
+
+Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
+Pour obtenir une autorisation d'utilisation commerciale,<br/>
+contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
+
+[![](wdlexis+.png)]()
+
 # wdlexis+ écrit en Lexis+
 
 L'atelier wdlexis+ réécrit dans son propre langage.
@@ -69,3 +81,8 @@ frappes, l'atelier n'analyse pas deux fois le même texte.
 - Les gestionnaires d'événements s'exécutent chacun sur leur fil, dans un ordre
   non garanti : l'atelier relit l'état réel (`ed:curseur()`) au lieu de se fier
   à l'ordre d'arrivée.
+
+### Encore une chose !
+Un p'tit geste qui peut - grandement - nous aider... \[La caféïne c'est important pour une équipe de neuro-atypiques : TSA, TDAH, TAG, HPI et/ou THPI (membres de **mensa.fr** et de **triplenine.org**).\]
+
+[![Buy Me a Coffee](buymeacoffe-fre.png)](https://buymeacoffee.com/sonaliwan.fr)

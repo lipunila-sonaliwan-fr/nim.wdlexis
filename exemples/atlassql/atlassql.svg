@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="cadre" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F4F7FC"/>
+      <stop offset="0.35" stop-color="#9AA9C2"/>
+      <stop offset="0.6" stop-color="#E9EEF6"/>
+      <stop offset="1" stop-color="#7D8BA3"/>
+    </linearGradient>
+    <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0B2A6B"/>
+      <stop offset="0.55" stop-color="#071A47"/>
+      <stop offset="1" stop-color="#040F2E"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.66" cy="0.3" r="0.45">
+      <stop offset="0" stop-color="#2F7BFF" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#2F7BFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="reflet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E4FD8"/>
+      <stop offset="0.5" stop-color="#2E8BFF"/>
+      <stop offset="1" stop-color="#8FD0FF"/>
+    </linearGradient>
+    <radialGradient id="globe" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#7FC4FF"/>
+      <stop offset="0.45" stop-color="#2A7BF0"/>
+      <stop offset="1" stop-color="#0B3A9E"/>
+    </radialGradient>
+    <linearGradient id="texte" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.55" stop-color="#E6ECF5"/>
+      <stop offset="1" stop-color="#AFC0D8"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD24A"/>
+      <stop offset="0.55" stop-color="#FFA21A"/>
+      <stop offset="1" stop-color="#E06A00"/>
+    </linearGradient>
+    <linearGradient id="sol" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3D8BFF" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#3D8BFF" stop-opacity="0.35"/>
+    </linearGradient>
+    <filter id="lueur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="ombre" x="-10%" y="-10%" width="130%" height="140%">
+      <feDropShadow dx="10" dy="12" stdDeviation="6" flood-color="#000814" flood-opacity="0.85"/>
+    </filter>
+    <clipPath id="interieur"><rect x="52" y="52" width="920" height="920" rx="120"/></clipPath>
+  </defs>
+
+  <!-- cadre métallique -->
+  <rect x="14" y="14" width="996" height="996" rx="150" fill="url(#cadre)"/>
+  <rect x="40" y="40" width="944" height="944" rx="130" fill="#1B2F63"/>
+
+  <g clip-path="url(#interieur)">
+    <rect x="52" y="52" width="920" height="920" fill="url(#fond)"/>
+    <rect x="52" y="52" width="920" height="920" fill="url(#halo)"/>
+    <!-- reflet vitré -->
+    <path d="M52 52 H972 V260 Q512 330 52 230 Z" fill="url(#reflet)"/>
+
+    <!-- grille en perspective -->
+    <g stroke="#3D8BFF" stroke-opacity="0.75" stroke-width="3" fill="none">
+      <line x1="52" y1="752" x2="972" y2="752"/>
+      <line x1="52" y1="780" x2="972" y2="780"/>
+      <line x1="52" y1="818" x2="972" y2="818"/>
+      <line x1="52" y1="868" x2="972" y2="868"/>
+      <line x1="52" y1="935" x2="972" y2="935"/>
+      <line x1="512" y1="752" x2="512" y2="972"/>
+      <line x1="440" y1="752" x2="330" y2="972"/>
+      <line x1="584" y1="752" x2="694" y2="972"/>
+      <line x1="368" y1="752" x2="140" y2="972"/>
+      <line x1="656" y1="752" x2="884" y2="972"/>
+      <line x1="296" y1="752" x2="-60" y2="972"/>
+      <line x1="728" y1="752" x2="1084" y2="972"/>
+      <line x1="224" y1="752" x2="-260" y2="972"/>
+      <line x1="800" y1="752" x2="1284" y2="972"/>
+      <line x1="152" y1="752" x2="-460" y2="972"/>
+      <line x1="872" y1="752" x2="1484" y2="972"/>
+    </g>
+    <rect x="52" y="742" width="920" height="16" fill="#5AA8FF" opacity="0.25" filter="url(#lueur)"/>
+  </g>
+
+  <!-- globe (atlas) -->
+  <g filter="url(#lueur)">
+    <circle cx="650" cy="285" r="165" fill="url(#globe)"/>
+  </g>
+  <g fill="none" stroke="#CFE8FF" stroke-opacity="0.75" stroke-width="5">
+    <circle cx="650" cy="285" r="165"/>
+    <ellipse cx="650" cy="285" rx="70" ry="165"/>
+    <ellipse cx="650" cy="285" rx="130" ry="165"/>
+    <line x1="650" y1="120" x2="650" y2="450"/>
+    <ellipse cx="650" cy="285" rx="165" ry="52"/>
+    <path d="M512 195 Q650 160 788 195"/>
+    <path d="M512 375 Q650 410 788 375"/>
+  </g>
+  <!-- disques de base de données sur le globe -->
+  <g transform="translate(650 300)">
+    <path d="M-62 -38 v74 a62 20 0 0 0 124 0 v-74" fill="#0A2C7A" stroke="#E8F3FF" stroke-width="6"/>
+    <path d="M-62 -2 a62 20 0 0 0 124 0" fill="none" stroke="#E8F3FF" stroke-width="6"/>
+    <ellipse cx="0" cy="-38" rx="62" ry="20" fill="#3D93FF" stroke="#E8F3FF" stroke-width="6"/>
+  </g>
+  <!-- étincelle -->
+  <circle cx="575" cy="200" r="10" fill="#FFFFFF" opacity="0.9"/>
+
+  <!-- orbite / arc lumineux -->
+  <g filter="url(#lueur)">
+    <path d="M150 640 C120 470 300 300 520 250 C650 220 790 230 880 280 C790 255 650 255 540 290 C340 350 200 480 190 640 Z" fill="url(#arc)"/>
+  </g>
+  <path d="M200 610 C210 470 340 360 520 305" fill="none" stroke="#E6F4FF" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+
+  <!-- texte -->
+  <g filter="url(#ombre)" font-family="DejaVu Serif, Georgia, 'Times New Roman', serif" font-style="italic" font-weight="bold">
+    <text x="512" y="672" font-size="166" text-anchor="middle" letter-spacing="-3"><tspan fill="url(#texte)" stroke="#2A3E66" stroke-width="3">Atlas</tspan><tspan fill="url(#orange)" stroke="#7A3300" stroke-width="3">SQL</tspan></text>
+  </g>
+</svg>

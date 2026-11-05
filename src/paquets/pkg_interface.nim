@@ -164,12 +164,20 @@ proc iconOf(s: string): typeof(iconStop) =
   of "aucune", "none": iconNone
   else: iconInformation
 
-proc themeOf(name: string, dark: bool): Theme =
+proc themeOf(name: string, dark: bool, density = ""): Theme =
   case name.toLowerAscii
   of "windows", "windows11", "natif", "native": result = themeNative(dark = dark)
   of "macos", "mac": result = themeMacOS(dark = dark)
   of "linux", "gnome", "adwaita": result = themeLinux(dark = dark)
   else: result = themeFor(dark)
+  case density.toLowerAscii
+  of "compacte", "compact", "dense":
+    # densité compacte : marges, espacements et hauteurs réduits (plus de place pour l'information)
+    result.margin = 6
+    result.spacing = 4
+    result.controlHeight = max(24.0, result.controlHeight - 4)
+    result.lineHeight = max(22.0, result.lineHeight - 4)
+  else: discard
 
 proc chartKindOf(s: string): typeof(ckColumn) =
   case s.toLowerAscii
@@ -400,7 +408,9 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
       let th = themeOf(L.tostr(v), false)
       setAny(id.theme, th, key)
   of "ancrage", "poids", "largeurfixe", "hauteurfixe", "etirer", "marge", "espacement", "colonnes":
-    let o = c.ctl
+    var o = c.ctl
+    if o.isNil and c.family == "fenetre" and key in ["marge", "espacement"] and c.win != nil:
+      o = c.win.root                   # marge et espacement d'une fenêtre : ceux de sa racine
     if o.isNil: rtError("propriété « " & key & " » indisponible pour une fenêtre")
     case key
     of "ancrage":
@@ -928,7 +938,7 @@ proc defineMethods() =
     setWindowState(L.self(a, "pleinecran").id, if optBool(a, 2, true): wsFullscreen else: wsNormal)
   mfn "fenetre", "fixertheme", proc (L: Interp, a: seq[Value]): seq[Value] =
     let w = L.self(a, "fixertheme")
-    let th = themeOf(L.optStr(a, 2, "fixertheme", "natif"), optBool(a, 3, false))
+    let th = themeOf(L.optStr(a, 2, "fixertheme", "natif"), optBool(a, 3, false), L.optStr(a, 4, "fixertheme", ""))
     setAny(w.id.theme, th, "theme")
 
   # onglets
@@ -2039,7 +2049,8 @@ proc openInterface(L: Interp): Value =
     let title = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "titre", "wdlexis+")
     let w = newWindow(title, optField(o, "largeur", 640), optField(o, "hauteur", 480), scriptHandler,
                       layout = layoutOf(optField(o, "disposition", "vertical")),
-                      theme = themeOf(optField(o, "theme", "natif"), optField(o, "sombre", false)))
+                      theme = themeOf(optField(o, "theme", "natif"), optField(o, "sombre", false),
+                                      optField(o, "densite", "")))
     if field(o, "x").kind != vkNil or field(o, "y").kind != vkNil:
       w.placed = true                  # position initiale à l'écran (sinon : centrée)
       w.placeX = optField(o, "x", 0)
@@ -2055,6 +2066,7 @@ proc openInterface(L: Interp): Value =
     let o = optsArg(a, 2)
     let b = newButton(L.optStr(a, 1, "bouton", "OK"), isDefault = optField(o, "defaut", false),
                       isCancel = optField(o, "annuler", false))
+    b.flat = optField(o, "plat", false)   # rendu de barre d'outils, sans largeur minimale
     @[L.newCtl(b, "bouton")]
   m.fn "saisie", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = optsArg(a, 1)
