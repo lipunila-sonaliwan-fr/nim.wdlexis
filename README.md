@@ -203,3 +203,8 @@ SSH et SFTP utilisent le client OpenSSH installé.
 
 Sans DuckDB, l'atelier et le runtime démarrent normalement ; seules les
 instructions de base de données signalent l'absence de la bibliothèque.
+
+### Encore une chose !
+Un p'tit geste qui peut - grandement - nous aider... \[La caféïne c'est important pour une équipe de neuro-atypiques : TSA, TDAH, TAG, HPI et/ou THPI (membres de **mensa.fr** et de **triplenine.org**).\]
+
+[![Buy Me a Coffee](buymeacoffe-fre.png)](https://buymeacoffee.com/sonaliwan.fr)
