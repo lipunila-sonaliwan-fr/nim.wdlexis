@@ -96,10 +96,12 @@ procedure MENU(ev)
       STATUT("ARCHITECTURE.md introuvable à côté du programme.")
     finessayer
   cas choix = "À propos"
-    ui.alerte("Atlas SQL 1.0 - Cartographie et analyse du patrimoine SQL Server" + car(10) +
-              "Écrit en Lexis+ (wdlexis+) · entrepôt DuckDB local" + car(10) + car(10) +
-              "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
-              "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" +
+    ui.alerte("Atlas SQL 1.0" + car(10) +
+              "Cartographie et analyse du patrimoine SQL Server" + car(10) +
+              "- Écrit en Lexis+" + car(10) +
+              "- Entrepôt DuckDB local → https://duckdb.org" + car(10) + car(10) +
+              "Tous droits réservés 2026 - Jean-Marc QUÉRÉ" + car(10) +
+              "⛶ https://sonaliwan.fr  ✉ metalab(at)sonaliwan.fr" + car(10) +
               "SIRET 13033319800013"
               , "information", "À propos")
   fincas
