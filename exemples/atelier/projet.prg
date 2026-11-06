@@ -7,7 +7,7 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [S]tudio 1.8.3 - " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [S]tudio 1.8.4 - " + fichier.nom(dossier)
   ARBRE_PROJET()
   vb:projet(dossier)        && procédures du projet : palette et liens d'appel entre fichiers
   locale s = LIRE_SESSION()
@@ -33,17 +33,83 @@ procedure ARBRE_PROJET
   si outils = nul
     retourner
   finsi
-  outils.titre = "Projet - " + fichier.nom(dossier)
   arbre:vider()
   pour chaque nom dans fichier.liste(dossier, vrai)
     si finitpar(nom, "/") ou commencepar(nom, ".") ou ("/." $ nom) ou commencepar(nom, "distribution/")
       boucler
     finsi
-    si minuscule(fichier.extension(nom)) $ ".prg.md.txt.json.csv.sql.ini.cfg.htm.html"
+    si minuscule(fichier.extension(nom)) $ ".prg.md.txt.json.csv.sql.ini.cfg.htm.html.png.jpg.jpeg.gif.bmp.pdf.log"
       arbre:ajouter(nom)
+      locale t = TYPE_FICHIER(nom)
+      si t <> nul
+        arbre:icone(nom, t[1], t[2])
+      finsi
     finsi
   suivant
+  CADENAS()
 retourner
+
+fonction TYPE_FICHIER(nom)
+  && symbole et couleur du type de fichier (comme les pastilles des onglets)
+  locale x = minuscule(fichier.extension(nom))
+  faire cas
+  cas x = ".prg" et EST_FORMULAIRE(nom)
+    retourner {"formulaire", "#F59E0B"}
+  cas x = ".prg" et EST_ETAT(nom)
+    retourner {"etat", "#EAB308"}
+  cas x = ".prg"
+    retourner {"code", "#E5484D"}
+  cas x $ ".png.jpg.jpeg.gif.bmp"
+    retourner {"image", "#A855F7"}
+  cas x = ".md"
+    retourner {"markdown", "#14B8A6"}
+  cas x = ".sql"
+    retourner {"sql", "#3B82F6"}
+  cas x = ".pdf"
+    retourner {"pdf", "#DC2626"}
+  cas x $ ".txt.log.csv.json.ini.cfg.htm.html"
+    retourner {"texte", "#8C8F96"}
+  fincas
+retourner nul
+
+procedure CADENAS
+  && cadenas fermé devant les fichiers ouverts dans l'éditeur ou l'un des concepteurs
+  si outils = nul ou dossier = ""
+    retourner
+  finsi
+  locale ouverts = {}
+  pour chaque d dans ed:documents(vrai)
+    si d.chemin <> nul et d.chemin <> ""
+      ouverts[fichier.absolu(d.chemin)] = vrai
+    finsi
+  suivant
+  pour chaque f dans FICHIERS_CONCEPTEURS()
+    ouverts[fichier.absolu(f)] = vrai
+  suivant
+  pour chaque c dans arbre:feuilles()
+    locale p = fichier.absolu(fichier.joindre(dossier, joindre(decouper(c, ui.sep), "/")))
+    arbre:cadenas(c, ouverts[p] = vrai)
+  suivant
+retourner
+
+fonction FICHIERS_CONCEPTEURS()
+  locale l = {}
+  si condlg <> nul et canevas <> nul
+    essayer
+      inserer(l, fichier.joindre(dossier, "form_" + canevas:nom() + ".prg"))
+    capturer err
+    finessayer
+  finsi
+  si etdlg <> nul et etcanevas <> nul
+    essayer
+      inserer(l, fichier.joindre(dossier, "etat_" + etcanevas:nom() + ".prg"))
+    capturer err
+    finessayer
+  finsi
+retourner l
+
+fonction EST_IMAGE(p)
+retourner minuscule(fichier.extension(p)) $ ".png.jpg.jpeg.gif.bmp"
 
 procedure ARBRE(ev)
   && ev.chemin n'existe que pour les nœuds imbriqués : on découpe ev.texte
@@ -51,10 +117,169 @@ procedure ARBRE(ev)
     retourner
   finsi
   locale p = fichier.joindre(dossier, joindre(decouper(ev.texte, ui.sep), "/"))
-  si fichier.estfichier(p)
-    ed:ouvrir(p)
-    ANALYSER(vrai)
+  si non fichier.estfichier(p)
+    retourner
   finsi
+  faire cas
+  cas EST_IMAGE(p)
+    ed:image(p)                       && aperçu de l'image dans un onglet
+    etat.libelle = "Aperçu de l'image " + fichier.nom(p)
+  cas minuscule(fichier.extension(p)) = ".pdf"
+    PDF_OUVRIR(p)
+  autrement
+    ed:ouvrir(p)                      && texte brut, Markdown, SQL, Lexis+
+    ANALYSER(vrai)
+  fincas
+  CADENAS()
+retourner
+
+procedure PDF_OUVRIR(p)
+  && consultation dans une fenêtre dédiée : pages, vignettes et signets, zoom, recherche,
+  && sélection et copie du texte, rotation, annotations
+  locale f = ui.fenetre{titre = fichier.nom(p) + " - wdlexis+", largeur = 1000, hauteur = 900, ;
+                        disposition = "bordure", sombre = reglages.sombre, densite = "compacte"}
+  f.marge = 0
+  locale v = f:ajouter(ui.pdf())
+  v.ancrage = "centre"
+  essayer
+    v:ouvrir(p)
+    inserer(fenpdf, f)
+    etat.libelle = "PDF : " + fichier.nom(p)
+  capturer e
+    etat.libelle = "PDF illisible : " + e
+  finessayer
+retourner
+
+&&
+&& Dupliquer, Renommer, Supprimer (boutons en haut de la page Projet)
+&&
+
+fonction FICHIER_CHOISI()
+  locale v = arbre.valeur
+  si v = nul ou v = "" ou dossier = ""
+    retourner nul
+  finsi
+  locale p = fichier.joindre(dossier, joindre(decouper(v, ui.sep), "/"))
+  si fichier.existe(p)
+    retourner p
+  finsi
+retourner nul
+
+fonction OUVERT_DANS_CONCEPTEUR(p)
+  pour chaque f dans FICHIERS_CONCEPTEURS()
+    si fichier.absolu(f) = fichier.absolu(p)
+      retourner vrai
+    finsi
+  suivant
+retourner faux
+
+fonction FERMER_ONGLETS_DE(p)
+  && ferme les onglets du fichier avant de le renommer ou de le supprimer
+  locale a = fichier.absolu(p)
+  pour chaque d dans ed:documents(vrai)
+    si d.chemin <> nul et d.chemin <> "" et fichier.absolu(d.chemin) = a
+      FERMER_DOCUMENT(d.uid)
+    finsi
+  suivant
+  pour chaque d dans ed:documents(vrai)
+    si d.chemin <> nul et d.chemin <> "" et fichier.absolu(d.chemin) = a
+      retourner faux          && l'utilisateur a gardé un document modifié
+    finsi
+  suivant
+retourner vrai
+
+procedure FICHIER_DUPLIQUER(ev)
+  locale p = FICHIER_CHOISI()
+  si p = nul
+    etat.libelle = "Choisissez d'abord un fichier dans la page Projet."
+    retourner
+  finsi
+  locale x = fichier.extension(p)
+  locale base = souschaine(p, 1, #p - #x)
+  locale n = 1
+  tantque fichier.existe(base + n + x)
+    n += 1
+  fintantque
+  locale dest = base + n + x
+  si non ui.confirmer("Dupliquer « " + fichier.nom(p) + " » en « " + fichier.nom(dest) + " » ?")
+    retourner
+  finsi
+  si fichier.copier(p, dest) = nul
+    ui.alerte("Copie impossible : " + fichier.nom(p), "erreur", "Dupliquer")
+    retourner
+  finsi
+  ARBRE_PROJET()
+  ANALYSER(vrai)
+  etat.libelle = "Copie créée : " + fichier.nom(dest)
+retourner
+
+procedure FICHIER_RENOMMER(ev)
+  locale p = FICHIER_CHOISI()
+  si p = nul
+    etat.libelle = "Choisissez d'abord un fichier dans la page Projet."
+    retourner
+  finsi
+  si OUVERT_DANS_CONCEPTEUR(p)
+    ui.alerte("« " + fichier.nom(p) + " » est ouvert dans un concepteur : fermez-le d'abord.", "information", "Renommer")
+    retourner
+  finsi
+  locale nom = ui.demander("Nouveau nom de « " + fichier.nom(p) + " » :", fichier.nom(p))
+  si nom = nul ou nom = "" ou nom = fichier.nom(p)
+    retourner
+  finsi
+  si "/" $ nom ou "\\" $ nom
+    ui.alerte("Le nom ne doit pas contenir de séparateur de dossier.", "erreur", "Renommer")
+    retourner
+  finsi
+  locale dest = fichier.joindre(fichier.dossier(p), nom)
+  si fichier.existe(dest)
+    ui.alerte("« " + nom + " » existe déjà.", "erreur", "Renommer")
+    retourner
+  finsi
+  locale etaitouvert = faux
+  pour chaque d dans ed:documents()
+    si d.chemin <> "" et fichier.absolu(d.chemin) = fichier.absolu(p)
+      etaitouvert = vrai
+    finsi
+  suivant
+  si non FERMER_ONGLETS_DE(p)
+    retourner
+  finsi
+  si fichier.deplacer(p, dest) = nul
+    ui.alerte("Renommage impossible : " + fichier.nom(p), "erreur", "Renommer")
+    retourner
+  finsi
+  ARBRE_PROJET()
+  si etaitouvert
+    ed:ouvrir(dest)
+  finsi
+  ANALYSER(vrai)
+  etat.libelle = "Renommé : " + fichier.nom(p) + " → " + nom
+retourner
+
+procedure FICHIER_SUPPRIMER(ev)
+  locale p = FICHIER_CHOISI()
+  si p = nul
+    etat.libelle = "Choisissez d'abord un fichier dans la page Projet."
+    retourner
+  finsi
+  si OUVERT_DANS_CONCEPTEUR(p)
+    ui.alerte("« " + fichier.nom(p) + " » est ouvert dans un concepteur : fermez-le d'abord.", "information", "Supprimer")
+    retourner
+  finsi
+  si non ui.confirmer("Supprimer définitivement « " + fichier.nom(p) + " » ?", "attention")
+    retourner
+  finsi
+  si non FERMER_ONGLETS_DE(p)
+    retourner
+  finsi
+  si fichier.supprimer(p) = nul
+    ui.alerte("Suppression impossible : " + fichier.nom(p), "erreur", "Supprimer")
+    retourner
+  finsi
+  ARBRE_PROJET()
+  ANALYSER(vrai)
+  etat.libelle = "Supprimé : " + fichier.nom(p)
 retourner
 
 && configuration du projet : arguments, fichier principal, session
@@ -231,6 +456,12 @@ procedure FERMER_DOCUMENT(uid)
     vb:fermer(uid)
     retourner
   finsi
+  && vue aperçu (Markdown) ou image : rien à enregistrer
+  si ed:nature(uid) = "apercu" ou ed:nature(uid) = "image"
+    ed:fermer(uid)
+    CADENAS()
+    retourner
+  finsi
   locale d = nul
   pour chaque x dans ed:documents()
     si x.uid = uid
@@ -246,7 +477,12 @@ procedure FERMER_DOCUMENT(uid)
     finsi
   finsi
   vb:fermer(uid)            && sa vue blueprint éventuelle
+  locale lien = ed:lien(uid)
+  si lien <> nul et ed:nature(lien) = "apercu"
+    ed:fermer(lien)        && sa vue aperçu éventuelle
+  finsi
   ed:fermer(uid)
+  CADENAS()
 retourner
 
 fonction MODIFICATIONS_EN_ATTENTE()

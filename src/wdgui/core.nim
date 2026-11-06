@@ -93,6 +93,13 @@ type
     style*: Style
     hovered*, pressed*, focus*: bool
     focusable*: bool
+    vScroll*, hScroll*: ScrollTrack      # ascenseurs dessinés par drawScrollBar (gérés par la fenêtre).
+
+  ScrollTrack* = object
+    # Ascenseur d'un contrôle : zone, taille totale, partie visible et position (mêmes unités).
+    area*: Rect
+    total*, span*, pos*: float
+    active*: bool
 
   Container* = ref object of Control
     children*: seq[Control]
@@ -126,6 +133,10 @@ type
     mouseMoveEvents*: bool    # emit evMouseMove on every move (costly: disabled by default).
     sdlTextInputActive*: bool
     mouseX*, mouseY*: float
+    barDrag*: Control         # contrôle dont l'ascenseur est saisi (glissement du curseur).
+    barVertical*: bool
+    barGrab*: float           # décalage entre la souris et le début du curseur saisi.
+    safeTop*: float           # marge haute réservée (encoche des MacBook en plein écran / agrandi).
     hoverSince*: uint64
     tooltipShown*: bool
     caretVisible*: bool
@@ -332,7 +343,8 @@ proc flushDisposals*(f: Window) =
   let pending = f.pendingDispose
   f.pendingDispose.setLen(0)
   for c in pending:
-    if c.parent == nil: disposeTree(c)
+    # retiré (sans parent), ou arrivé d'une autre fenêtre (c.win = f) : caches à libérer
+    if c.parent == nil or c.win == f: disposeTree(c)
 
 method acceptsText*(c: Control): bool {.base.} = false
 
@@ -640,6 +652,46 @@ proc drawScrollIndicator*(d: Drawing, t: Theme, area: Rect, total, span, pos: fl
   let lp = max(18.0, area.h * span / total)
   let y = area.y + (area.h - lp) * clamp(pos / (total - span), 0.0, 1.0)
   d.fillRoundRect(rect(area.x + area.w - 6, y, 4, lp), 2, withAlpha(t.textSecondary, 140))
+
+const ScrollBarSize* = 10.0     # épaisseur des ascenseurs.
+
+method scrollTrackTo*(c: Control, vertical: bool, pos: float) {.base.} =
+  # Appelé par la fenêtre quand l'utilisateur agit sur un ascenseur (molette exclue) :
+  # le contrôle doit adopter la nouvelle position `pos` (unités de drawScrollBar).
+  discard
+
+proc thumbRect*(tr: ScrollTrack, vertical: bool): Rect =
+  let a = tr.area
+  let room = if vertical: a.h else: a.w
+  let lp = if tr.total <= tr.span or tr.total <= 0: room else: max(22.0, room * tr.span / tr.total)
+  let k = if tr.total > tr.span: clamp(tr.pos / (tr.total - tr.span), 0.0, 1.0) else: 0.0
+  if vertical: rect(a.x, a.y + (room - lp) * k, a.w, lp)
+  else: rect(a.x + (room - lp) * k, a.y, lp, a.h)
+
+proc drawScrollBar*(c: Control, d: Drawing, t: Theme, area: Rect, total, span, pos: float, vertical = true) =
+  # Ascenseur interactif : le vertical est toujours affiché (rail seul quand tout est visible),
+  # l'horizontal seulement si le contenu déborde. Molette : contrôle ; clic sur le rail :
+  # une page dans la direction indiquée ; curseur saisi : défilement rapide.
+  let need = total > span + 0.001 and span > 0
+  var tr = ScrollTrack(area: area, total: total, span: span, pos: pos, active: need)
+  if vertical: c.vScroll = tr else: c.hScroll = tr
+  if area.w <= 0 or area.h <= 0: return
+  if not vertical and not need: return
+  d.fillRoundRect(area, min(area.w, area.h) / 2, withAlpha(t.textSecondary, 28))
+  if not need: return
+  let th = tr.thumbRect(vertical)
+  let inset = if vertical: rect(th.x + 2, th.y + 1, th.w - 4, th.h - 2) else: rect(th.x + 1, th.y + 2, th.w - 2, th.h - 4)
+  let w = c.win
+  let hot = w != nil and (w.barDrag == c or th.containsPoint(w.mouseX, w.mouseY))
+  d.fillRoundRect(inset, min(inset.w, inset.h) / 2, withAlpha(t.textSecondary, if hot: 210 else: 140))
+
+proc vBarArea*(r: Rect): Rect =
+  # Zone standard de l'ascenseur vertical au bord droit d'un rectangle.
+  rect(r.x + r.w - ScrollBarSize - 1, r.y + 1, ScrollBarSize, r.h - 2)
+
+proc hBarArea*(r: Rect, vbar = true): Rect =
+  # Zone standard de l'ascenseur horizontal au bas d'un rectangle.
+  rect(r.x + 1, r.y + r.h - ScrollBarSize - 1, r.w - 2 - (if vbar: ScrollBarSize + 1 else: 0.0), ScrollBarSize)
 
 proc scrollFromBar*(area: Rect, total, span, y: float): float =
   if total <= span: return 0

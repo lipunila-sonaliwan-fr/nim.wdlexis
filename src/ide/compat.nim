@@ -205,6 +205,12 @@ proc themeFor*(dark: bool): Theme =
   # elif defined(linux): result = themeLinux(dark = dark)
   # else: result = themeNative(dark = dark)
   result = themeMacOS(dark = dark)
+  # densité compacte de l'atelier : marges et espacements réduits, contrôles moins hauts
+  # (plus de place pour le code, les concepteurs et les panneaux).
+  result.margin = 4
+  result.spacing = 3
+  result.controlHeight = result.controlHeight - 4
+  result.lineHeight = result.lineHeight - 3
 
 proc themeFor*(dark: bool, fontDelta: int): Theme =
   # Thème avec une police agrandie ou réduite de `fontDelta` points (menu Affichage) :

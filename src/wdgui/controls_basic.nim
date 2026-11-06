@@ -3,7 +3,7 @@
 # Slider, Range Slider, Scrollbar, Rating, Shape, Image, Bar Code,
 # and containers: Cell, Tab, Splitter, Toolbar.
 import std/[math, strutils, unicode]
-import ../sdl3, core, imageload
+import ../sdl3, core, imageload, icons
 
 # shared drawing helpers
 
@@ -110,6 +110,7 @@ type
     isDefault*: bool    # default button (Enter) - accent-colored rendering.
     isCancel*: bool     # cancel button (Escape).
     flat*: bool         # flat rendering (toolbars).
+    icon*: string       # symbole vectoriel (icons.nim) affiché à la place du libellé (libellé en infobulle).
 
 proc newButton*(caption: string, isDefault = false, isCancel = false): Button =
   result = Button(isDefault: isDefault, isCancel: isCancel)
@@ -124,6 +125,9 @@ method isDefaultButton*(c: Button): bool = c.isDefault
 method isCancelButton*(c: Button): bool = c.isCancel
 
 method preferredSize*(c: Button, d: Drawing, t: Theme): tuple[w, h: float] =
+  if c.icon.len > 0:
+    let h = max(22.0, t.controlHeight - 4)
+    return (h + 2, h)
   let w = d.textWidth(c.caption) + 2 * t.margin + 8
   let lw = if c.flat: w else: max(w, 88.0)
   (lw, t.controlHeight)
@@ -133,7 +137,10 @@ method draw*(c: Button, d: Drawing, t: Theme) =
   if not c.flat or c.hovered or c.pressed or c.focus:
     drawPanel(d, t, c, r, c.isDefault)
   let col = if c.isDefault and not c.isGrayed: c.style.text.get(t.textOnAccent) else: textColor(c, t)
-  d.textIn(r, c.caption, col, alCenter, 6)
+  if c.icon.len > 0:
+    let k = min(r.w, r.h) * 0.7
+    d.drawIcon(c.icon, rect(r.x + (r.w - k) / 2, r.y + (r.h - k) / 2, k, k), col)
+  else: d.textIn(r, c.caption, col, alCenter, 6)
   if c.focus: d.drawFocus(t, r, radiusOf(c, t))
 
 method onKey*(c: Button, e: KeyEvent): bool =
@@ -385,7 +392,7 @@ proc lineOf(ls: seq[tuple[a, b: int]], pos: int): int =
 
 proc textArea(c: Edit): Rect =
   let r = c.rect
-  if c.multiline: rect(r.x + 8, r.y + 5, max(0.0, r.w - 16 - c.rightMargin), max(0.0, r.h - 10))
+  if c.multiline: rect(r.x + 6, r.y + 4, max(0.0, r.w - 12 - ScrollBarSize - c.rightMargin), max(0.0, r.h - 8))
   else: rect(r.x + 8, r.y + 2, max(0.0, r.w - 16 - c.rightMargin), max(0.0, r.h - 4))
 
 proc contentH(c: Edit, t: Theme): float = float(c.lineRanges.len) * t.lineHeight
@@ -394,7 +401,7 @@ proc maxScrollY(c: Edit, t: Theme): float = max(0.0, c.contentH(t) - c.textArea.
 
 proc barTrack(c: Edit): Rect =
   let r = c.rect
-  rect(r.x + r.w - 12, r.y + 3, 9, max(0.0, r.h - 6))
+  vBarArea(r.shrink(1, 2))
 
 proc barThumb(c: Edit, t: Theme): Rect =
   let tr = c.barTrack
@@ -514,11 +521,11 @@ method draw*(c: Edit, d: Drawing, t: Theme) =
     let y = c.lineY(t, z, li)
     d.fillRect(rect(z.x - c.scrollX + cx, y + (lh - th) / 2 - 1, 1.5, th + 2), c.style.text.get(t.text))
   d.popClip()
-  if c.hasBar(t):
-    let tr = c.barTrack
-    let tb = c.barThumb(t)
-    d.fillRoundRect(tr, 4.5, withAlpha(t.textSecondary, if c.barDrag: 34 else: 18))
-    d.fillRoundRect(tb, 4.5, withAlpha(t.textSecondary, if c.barDrag: 210 else: 130))
+  if c.multiline:
+    c.drawScrollBar(d, t, c.barTrack, c.contentH(t), c.textArea.h, c.scrollY)
+
+method scrollTrackTo*(c: Edit, vertical: bool, pos: float) =
+  if vertical and c.multiline and c.win != nil: c.scrollY = clamp(pos, 0.0, c.maxScrollY(c.win.theme))
 
 method onText*(c: Edit, s: string) =
   if c.state != csActive: return
@@ -1494,7 +1501,7 @@ method draw*(b: Toolbar, d: Drawing, t: Theme) =
 
 
 method dispose*(c: Image) =
-  ## Texture de l'image (rechargée si l'image est de nouveau affichée).
+  # Texture de l'image (rechargée si l'image est de nouveau affichée).
   if c.tex != nil: SDL_DestroyTexture(c.tex)
   c.tex = nil
   c.texPath = ""

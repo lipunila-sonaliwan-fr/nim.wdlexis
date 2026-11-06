@@ -4,9 +4,9 @@
 #   -d:sdlttf    use SDL3_ttf for TrueType fonts (otherwise SDL3's built-in bitmap font)
 #   -d:sdlimage  use SDL3_image for formats other than PNG/JPEG/BMP (GIF, WEBP, TIFF...)
 import std/os
+import wdgpath
 
 proc sdlLibName(sfx: string): string =
-  var env = getEnv("WDGUI_PATH")
   var SdlLib =
     when defined(windows):
       "winOS/SDL3" & sfx & ".dll"
@@ -14,11 +14,9 @@ proc sdlLibName(sfx: string): string =
       "macOS/libSDL3" & sfx & ".dylib"
     else:
       "linOS/libSDL3" & sfx & ".so"
-  if env.len > 0 and dirExists(env):
-    env = env & "/" & SdlLib
-  else:
-    env = SdlLib
-  result = env
+  # dossier de WDGUI_PATH, sinon celui de l'exécutable (double-clic), sinon le dossier courant
+  let base = wdguiBase(SdlLib)
+  result = if base == ".": SdlLib else: base / SdlLib
 
 type
   SDL_Window* = ptr object
@@ -170,6 +168,7 @@ proc SDL_CreateWindow*(title: cstring, w, h: cint, flags: uint64): SDL_Window
 proc SDL_DestroyWindow*(w: SDL_Window)
 proc SDL_GetWindowID*(w: SDL_Window): uint32
 proc SDL_GetWindowSize*(w: SDL_Window, pw, ph: ptr cint): bool
+proc SDL_GetWindowSafeArea*(w: SDL_Window, r: ptr SDL_Rect): bool
 proc SDL_SetWindowTitle*(w: SDL_Window, title: cstring): bool
 proc SDL_SetWindowParent*(w, parent: SDL_Window): bool
 proc SDL_SetWindowModal*(w: SDL_Window, modal: bool): bool

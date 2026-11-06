@@ -20,7 +20,7 @@
 import std/[strutils, os, math, options, locks]
 from std/unicode import toUpper
 import ../wdgui
-import formmodel, codeeditor
+import formmodel, codeeditor, dockpane
 
 type
   DragMode = enum
@@ -126,6 +126,7 @@ proc nodeLayout(n: DNode): string =
 # construction de l'aperçu (mêmes constructeurs que le paquet interface)
 
 var designImageBase*: string
+var designerClosed*: proc () {.nimcall, gcsafe.}   # fermeture du concepteur (cadenas de la page Projet).
   # Dossier du projet : un chemin d'image relatif s'y rapporte (comme à l'exécution,
   # où il se rapporte au dossier du programme principal).
 
@@ -914,7 +915,7 @@ method draw*(p: PaletteView, d: Drawing, t: Theme) =
   for i, r in p.rows:
     let y = p.rect.y + 4 + float(i) * rh - p.scroll
     if y + rh < p.rect.y or y > p.rect.y + p.rect.h: continue
-    let rr = rect(p.rect.x + 6, y, p.rect.w - 12, rh)
+    let rr = rect(p.rect.x + 6, y, p.rect.w - 12 - ScrollBarSize, rh)
     if r.header:
       d.textIn(rr, r.text, t.textSecondary, alLeft, 4)
       continue
@@ -924,6 +925,10 @@ method draw*(p: PaletteView, d: Drawing, t: Theme) =
     d.textIn(badge, r.letter, t.accent, alCenter)
     d.textIn(rect(rr.x + 36, y, rr.w - 36, rh), r.text, t.text)
   d.popClip()
+  p.drawScrollBar(d, t, vBarArea(p.rect), float(p.rows.len) * rh + 8, p.rect.h, p.scroll)
+
+method scrollTrackTo*(p: PaletteView, vertical: bool, pos: float) =
+  if vertical: p.scroll = max(0.0, pos)
 
 method onMouse*(p: PaletteView, e: MouseEvent) =
   let t = p.win.theme
@@ -936,7 +941,8 @@ method onMouse*(p: PaletteView, e: MouseEvent) =
     p.dragging = false
   of maMove:
     if p.pressIdx >= 0 and p.pressed:
-      if not p.dragging and abs(e.x - p.pressX) + abs(e.y - p.pressY) > 5: p.dragging = true
+      # glisser-déposer seulement si la palette est dans la fenêtre du canevas (sinon : clic).
+      if not p.dragging and p.win == c.win and abs(e.x - p.pressX) + abs(e.y - p.pressY) > 5: p.dragging = true
       if p.dragging:
         let kind = p.rows[p.pressIdx].kind
         c.drag = dmNew
@@ -1009,6 +1015,7 @@ var
   dColorButtons: seq[tuple[id: ControlId, prop: string, edit: ControlId]]
   dTreePaths: seq[tuple[path: string, uid: int]]
   dTools: seq[tuple[id: ControlId, cmd: string]]
+  dPane: DockPane                    # palette + hiérarchie : affichées, masquées ou détachées.
   dNameRow: tuple[id: ControlId, uid: int, text: string]   # champ « nom » de l'inspecteur.
   designerFileCreated*: proc (path: string) {.nimcall, gcsafe.}   # posé par l'atelier (arbre du projet).
   designerCodeChanged*: proc (path: string) {.nimcall, gcsafe.}   # posé par l'atelier (analyse, index).
@@ -1378,9 +1385,13 @@ proc designerEvent(ev: var Event) =
               p = p.parent
       rebuildInspector()
       return
+    if ev.kind == evWindowClose and dPane != nil and dPane.handleClose(ev.id): return
     if ev.kind == evWindowClose and ev.id == dWin:
       guarded: dOpen = false
+      if dPane != nil and dPane.isDetached: closeWindow(dPane.winId)
+      if designerClosed != nil: designerClosed()
       return
+    if ev.kind == evClick and dPane != nil and dPane.handleClick(ev.id): return
     if ev.kind == evClick:
       var cmd = ""
       guarded:
@@ -1488,55 +1499,64 @@ proc openDesigner*(root, codePath, formFile: string, editorId: ControlId, theme:
     win.root.margin = 0
     win.root.spacing = 0
     dWin = win.id
-    # barre d'outils
+    # barre d'outils : symboles, libellés en infobulle.
     let tb = win.addChild(newToolbar())
     tb.dock = dkTop
-    for (caption, cmd, tip) in [("Enregistrer", "save", "Régénère form_<nom>.prg"),
-                                ("Supprimer", "delete", "Supprime le contrôle sélectionné (Suppr)"),
-                                ("Monter", "up", "Plus tôt dans l'ordre d'affichage"),
-                                ("Descendre", "down", "Plus tard dans l'ordre d'affichage"),
-                                ("Sortir", "out", "Sort le contrôle de son conteneur"),
-                                ("Formulaire", "form", "Sélectionne le formulaire (propriétés de la fenêtre)"),
-                                ("Câbler le code", "wire",
+    tb.margin = 2
+    tb.spacing = 2
+    for (icon, caption, cmd, tip) in [("enregistrer", "Enregistrer", "save", "Régénère form_<nom>.prg"),
+                                ("supprimer", "Supprimer", "delete", "Supprime le contrôle sélectionné (Suppr)"),
+                                ("monter", "Monter", "up", "Plus tôt dans l'ordre d'affichage"),
+                                ("descendre", "Descendre", "down", "Plus tard dans l'ordre d'affichage"),
+                                ("sortir", "Sortir", "out", "Sort le contrôle de son conteneur"),
+                                ("formulaire", "Formulaire", "form", "Sélectionne le formulaire (propriétés de la fenêtre)"),
+                                ("cabler", "Câbler le code", "wire",
                                  "Ajoute au code le bloc des procédures et l'appel d'ouverture (programme principal)"),
-                                ("Contrôle personnalisé…", "custom",
+                                ("personnalise", "Contrôle personnalisé…", "custom",
                                  "Ajoute à la palette un contrôle créé par une fonction Lexis+ du projet"),
-                                ("Voir le code", "code", "Affiche le code édité dans l'atelier")]:
-      let b = tb.addTool(caption, tip)
+                                ("code", "Voir le code", "code", "Affiche le code édité dans l'atelier")]:
+      let b = tb.iconTool(icon, caption, tip)
       dTools.add((b.id, cmd))
+    tb.toolSpacer()
+    let bToggle = tb.iconTool("masquer", "Palette / Hiérarchie", "")
+    let bDetach = tb.iconTool("fenetre", "Palette / Hiérarchie", "")
     # barre d'état.
     let st = win.addChild(newLabel("Glisser depuis la palette · clic pour sélectionner · poignées pour " &
                                    "redimensionner · Suppr supprime · Échap sélectionne le parent"))
     st.dock = dkBottom
+    st.fixedHeight = 20
     dStatus = st.id
-    # canevas (défilant), palette, hiérarchie et inspecteur.
+    # canevas (défilant), palette et hiérarchie (un même ensemble de pages, à gauche), inspecteur.
     let canvas = newFormCanvas(model)
     canvas.selected = model.root
     let pal = newPaletteView(canvas)
     let left = win.addChild(newContainer(lkBorder, 0, 0))
     left.dock = dkLeft
-    left.fixedWidth = 200
-    let lt = left.addChild(newLabel("  PALETTE"))
-    lt.dock = dkTop
+    left.fixedWidth = 230
+    let pages = left.addChild(newTab())
+    pages.dock = dkCenter
+    let pgPal = pages.addPage("Palette", lkBorder)
     pal.dock = dkCenter
-    discard left.addChild(pal)
+    discard pgPal.addChild(pal)
     dPalette = pal.id
-    let right = win.addChild(newContainer(lkBorder, 6, 6))
-    right.dock = dkRight
-    right.fixedWidth = 360
-    let top = right.addChild(newContainer(lkVertical, 0, 4))
-    top.dock = dkTop
-    discard top.addChild(newLabel("HIÉRARCHIE"))
-    let tree = top.addChild(newTreeView())
-    tree.fixedHeight = 210
+    let pgTree = pages.addPage("Hiérarchie", lkVertical)
+    let tree = pgTree.addChild(newTreeView())
+    tree.weight = 1
     dTree = tree.id
+    dPane = newDockPane("Palette et hiérarchie - formulaire", left, pages, bToggle, bDetach,
+                        designerHandler, 280, 720)
+    let right = win.addChild(newContainer(lkBorder, 2, 2))
+    right.dock = dkRight
+    right.fixedWidth = 340
+    let top = right.addChild(newContainer(lkVertical, 0, 2))
+    top.dock = dkTop
     let title = top.addChild(newLabel(""))
     title.style.text = some(theme.accent)
     dTitle = title.id
-    let insp = right.addChild(newPanel(lkVertical, smAutomatic, 2, 4))
+    let insp = right.addChild(newPanel(lkVertical, smAlways, 2, 4))
     insp.dock = dkCenter
     dInspector = insp.id
-    let area = win.addChild(newPanel(lkVertical, smAutomatic, 0, 0))
+    let area = win.addChild(newPanel(lkVertical, smAlways, 0, 0))
     area.dock = dkCenter
     discard area.addChild(canvas)
     dCanvas = canvas.id
@@ -1546,6 +1566,22 @@ proc openDesigner*(root, codePath, formFile: string, editorId: ControlId, theme:
   rebuildTree()
   rebuildInspector()
   true
+
+proc designerFormFile*(): string =
+  # Fichier form_<nom>.prg en cours de conception ("" si le concepteur est fermé).
+  var open = false
+  guarded: open = dOpen
+  if not open: return ""
+  var name = ""
+  readControl(dCanvas, FormCanvas, c): name = c.model.root.name
+  if name.len > 0: result = dRoot / formFileName(name)
+
+proc designerWindowIds*(): seq[ControlId] =
+  # Fenêtres du concepteur (principale et ensemble détaché), pour le changement de thème.
+  guarded:
+    if dOpen:
+      result.add dWin
+  if dPane != nil and dPane.isDetached: result.add dPane.winId
 
 proc designerIsOpen*(): bool =
   guarded: result = dOpen

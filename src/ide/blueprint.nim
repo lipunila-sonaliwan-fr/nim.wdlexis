@@ -97,6 +97,12 @@ type
     pane*: Container
     canvas*: BpCanvas
     lastBp: int
+    viewer*: Container           # vue aperçu (Markdown) ou image, superposée au corps de l'éditeur.
+    mdView*: MarkdownView
+    imgBox*: Container
+    imgView*: Image
+    imgInfo*: Label
+    viewKey: string
 
 var
   bpCodeChanged*: proc (srcUid: int) {.nimcall, gcsafe.}          # code régénéré (analyse, titre)
@@ -119,8 +125,9 @@ proc status(msg: string) =
   if bpStatus != nil:
     {.cast(gcsafe).}: bpStatus(msg)
 
-# ---------------------------------------------------------------------------
+#
 # signatures (pour les broches des appels)
+#
 
 proc apiSignature(name: string, isMethod: bool): string {.nimcall, gcsafe.} =
   var owner = ""
@@ -139,13 +146,14 @@ proc apiSignature(name: string, isMethod: bool): string {.nimcall, gcsafe.} =
 bpSignatureOf = apiSignature
 
 proc summaryFor(title: string, isMethod: bool): string =
-  ## Fiche courte d'une fonction (paquet pris en compte : « interface.executer »).
+  # Fiche courte d'une fonction (paquet pris en compte : « interface.executer »).
   let dot = title.rfind('.')
   if dot > 0 and not isMethod: apiSummary(title[dot + 1 .. ^1], false, title[0 ..< dot])
   else: apiSummary(title, isMethod)
 
-# ---------------------------------------------------------------------------
+#
 # couleurs
+#
 
 type BpColors = object
   bg, gridMinor, gridMajor, body, border, text, textDim, boxBg, boxBorder, boxText,
@@ -205,8 +213,9 @@ proc pinColor(g: Graph, n: Node, p: Pin): Color =
   if n.kind == nkUnary and n.title.toLowerAscii == "non": return hex"#D35454"
   hex"#5DB7E8"
 
-# ---------------------------------------------------------------------------
+#
 # canevas : polices et texte
+#
 
 proc newBpCanvas*(): BpCanvas =
   result = BpCanvas(cur: -1, hoverNode: -1, hoverPin: -1, hoverPinNode: -1, ctxNode: -1, ctxPin: -1,
@@ -252,8 +261,8 @@ proc measurer(c: BpCanvas): TextMeasure =
 const FontSteps = [8, 10, 13, 16, 20, 26, 34]
 
 proc fontStep(px: int): int =
-  ## Taille de police réellement ouverte (peu de tailles : peu de fichiers ouverts) ;
-  ## le texte est ensuite mis à l'échelle demandée.
+  # Taille de police réellement ouverte (peu de tailles : peu de fichiers ouverts) ;
+  # le texte est ensuite mis à l'échelle demandée.
   for s in FontSteps:
     if s >= px: return s
   FontSteps[^1]
@@ -287,7 +296,7 @@ proc txt(c: BpCanvas, d: Drawing, t: Theme, x, y: float, s: string, col: Color, 
   d.text(x, y, s, col)
 
 proc fit(c: BpCanvas, s: string, maxW: float): string =
-  ## Texte raccourci (« … ») pour tenir dans maxW (unités du monde).
+  # Texte raccourci (« … ») pour tenir dans maxW (unités du monde).
   if c.measureBase(s) <= maxW: return s
   let key = $int(maxW) & "|" & s
   if key in c.fits: return c.fits[key]
@@ -303,8 +312,9 @@ proc fit(c: BpCanvas, s: string, maxW: float): string =
   if c.fits.len > 8000: c.fits.clear()
   c.fits[key] = result
 
-# ---------------------------------------------------------------------------
+#
 # repères monde <-> écran
+#
 
 proc toSx(c: BpCanvas, doc: BpDoc, x: float): float = c.rect.x + (x - doc.vx) * doc.zoom
 proc toSy(c: BpCanvas, doc: BpDoc, y: float): float = c.rect.y + (y - doc.vy) * doc.zoom
@@ -331,7 +341,7 @@ proc visibleBounds(g: Graph): tuple[x, y, w, h: float] =
   (x0, y0, x1 - x0, y1 - y0)
 
 proc fitView*(c: BpCanvas, doc: BpDoc, minZoom = 0.2) =
-  ## Ajuste la vue au graphe (sans descendre sous minZoom : le début du graphe reste lisible).
+  # Ajuste la vue au graphe (sans descendre sous minZoom : le début du graphe reste lisible).
   let b = doc.g.visibleBounds
   let w = max(200.0, c.rect.w)
   let h = max(200.0, c.rect.h)
@@ -347,8 +357,8 @@ proc zoomAt(c: BpCanvas, doc: BpDoc, factor, sx, sy: float) =
   doc.vy = wy - (sy - c.rect.y) / doc.zoom
 
 proc toggleFold*(doc: BpDoc, e: Node) =
-  ## Plie ou déplie le contenu d'une entrée ; les entrées situées dessous remontent
-  ## (ou redescendent) de la hauteur du contenu.
+  # Plie ou déplie le contenu d'une entrée ; les entrées situées dessous remontent
+  # (ou redescendent) de la hauteur du contenu.
   let g = doc.g
   let owned = g.reachableFrom(e.id)
   var bottom = e.y + e.h
@@ -414,8 +424,9 @@ proc ensureLayout(c: BpCanvas, doc: BpDoc) =
       doc.pendingLine = -1
       emit(c, evSelection, text = "bp:sel")
 
-# ---------------------------------------------------------------------------
+#
 # canevas : dessin
+#
 
 proc bezier(d: Drawing, x1, y1, x2, y2: float, col: Color, w: float) =
   let dx = max(36.0, abs(x2 - x1) * 0.5)
@@ -452,7 +463,7 @@ proc drawDataPin(d: Drawing, x, y, z: float, col: Color, filled: bool) =
     d.fillCircle(x, y, r * 0.35, col.withAlpha(120))
 
 proc boxRect(c: BpCanvas, doc: BpDoc, n: Node, idx: int): Rect =
-  ## Case de saisie d'une entrée de données non reliée (écran).
+  # Case de saisie d'une entrée de données non reliée (écran).
   let p = c.pinScreen(doc, n, idx)
   let z = doc.zoom
   let label = n.pinLabel(n.pins[idx])
@@ -575,8 +586,8 @@ proc localEntries(g: Graph): Table[string, int] =
     if e != nil and e.mode in ["procedure", "fonction"]: result[e.title.toUpperAscii] = id
 
 proc computeCalls(c: BpCanvas, doc: BpDoc): seq[tuple[a, b: int]] =
-  ## Liens d'appel (appelant -> entrée appelée, dans ce fichier) et icônes « fichier »
-  ## (appels de procédures d'autres fichiers) ; un appelant plié est représenté par son entrée.
+  # Liens d'appel (appelant -> entrée appelée, dans ce fichier) et icônes « fichier »
+  # (appels de procédures d'autres fichiers) ; un appelant plié est représenté par son entrée.
   let g = doc.g
   let locals = g.localEntries
   c.extIcons.clear()
@@ -772,14 +783,15 @@ method draw*(c: BpCanvas, d: Drawing, t: Theme) =
           col.textDim, 12)
   d.popClip()
 
-# ---------------------------------------------------------------------------
+#
 # canevas : édition
+#
 
 proc emitChange(c: BpCanvas) = emit(c, evChange, text = "graph")
 proc emitSel(c: BpCanvas) = emit(c, evSelection, text = "bp:sel")
 
 proc mutate*(doc: BpDoc) =
-  ## À appeler avant toute modification du graphe (annulation).
+  # À appeler avant toute modification du graphe (annulation).
   doc.undo.add doc.g.clone
   if doc.undo.len > 60: doc.undo.delete(0)
   doc.redo.setLen(0)
@@ -825,7 +837,7 @@ proc pinAt(c: BpCanvas, doc: BpDoc, x, y: float): tuple[node, pid: int] =
         result = (n.id, p.pid)
 
 proc boxAt(c: BpCanvas, doc: BpDoc, n: Node, x, y: float): int =
-  ## Broche dont la case de saisie est sous (x, y), -1 sinon.
+  # Broche dont la case de saisie est sous (x, y), -1 sinon.
   result = -1
   for i, p in n.pins:
     if p.dir == pdIn and p.kind == pkData and not doc.g.isLinkedIn(n, p.pid):
@@ -874,8 +886,8 @@ proc placeNode(c: BpCanvas, doc: BpDoc, n: Node, wx, wy: float) =
   n.y = wy - 12
 
 proc autoInsert(c: BpCanvas, doc: BpDoc, n: Node): bool =
-  ## Relie un nouveau nœud au nœud sélectionné : instruction insérée après lui,
-  ## expression branchée sur sa première entrée libre.
+  # Relie un nouveau nœud au nœud sélectionné : instruction insérée après lui,
+  # expression branchée sur sa première entrée libre.
   if doc.sel.len != 1: return false
   var sid = -1
   for id in doc.sel: sid = id
@@ -901,8 +913,8 @@ proc autoInsert(c: BpCanvas, doc: BpDoc, n: Node): bool =
   false
 
 proc addItem*(c: BpCanvas, it: PaletteItem, atX = NaN, atY = NaN) =
-  ## Ajoute un nœud de palette : au point donné (écran), sinon relié au nœud sélectionné
-  ## ou au centre de la vue.
+  # Ajoute un nœud de palette : au point donné (écran), sinon relié au nœud sélectionné
+  # ou au centre de la vue.
   let doc = c.curDoc
   if doc == nil or doc.g.error.len > 0: return
   doc.mutate()
@@ -1362,8 +1374,9 @@ method onKey*(c: BpCanvas, e: KeyEvent): bool =
     return true
   false
 
-# ---------------------------------------------------------------------------
+#
 # palette
+#
 
 proc paletteItems(p: BpPalette): seq[PaletteItem] =
   template item(cat, lbl: string, k: NodeKind, ti = "", te = "", mo = "", st = false, dc = "") =
@@ -1477,7 +1490,7 @@ method draw*(p: BpPalette, d: Drawing, t: Theme) =
   for i, it in rs:
     let y = p.rect.y + 4 + float(i) * rh - p.scroll
     if y + rh < p.rect.y or y > p.rect.y + p.rect.h: continue
-    let rr = rect(p.rect.x + 4, y, p.rect.w - 8, rh)
+    let rr = rect(p.rect.x + 4, y, p.rect.w - 8 - ScrollBarSize, rh)
     if it.header:
       if i == p.hoverIdx: d.fillRoundRect(rr, 5, t.surfaceHover)
       let open = p.filter.strip.len > 0 or it.category in p.expanded
@@ -1489,7 +1502,10 @@ method draw*(p: BpPalette, d: Drawing, t: Theme) =
     d.fillRoundRect(badge, 3, kindColorOf(it))
     d.textIn(rect(rr.x + 26, y, rr.w - 28, rh), it.label, t.text)
   d.popClip()
-  drawScrollIndicator(d, t, rect(p.rect.x + p.rect.w - 9, p.rect.y, 8, p.rect.h), total, p.rect.h, p.scroll)
+  p.drawScrollBar(d, t, vBarArea(p.rect), total, p.rect.h, p.scroll)
+
+method scrollTrackTo*(p: BpPalette, vertical: bool, pos: float) =
+  if vertical: p.scroll = max(0.0, pos)
 
 method onMouse*(p: BpPalette, e: MouseEvent) =
   let t = p.win.theme
@@ -1535,13 +1551,62 @@ method onWheel*(p: BpPalette, dx, dy: float): bool =
   p.scroll = max(0.0, p.scroll - dy * 36)
   true
 
-# ---------------------------------------------------------------------------
+#
 # hôte : éditeur + vue blueprint superposée
+#
+
+proc imageSize(path: string): string =
+  # « L × H px · taille » d'après l'en-tête PNG / JPEG / GIF / BMP (sans décoder l'image).
+  try:
+    let f = readFile(path)
+    let kb = (if f.len >= 1024 * 1024: formatFloat(f.len / (1024 * 1024), ffDecimal, 1) & " Mo"
+              else: $((f.len + 1023) div 1024) & " Ko")
+    proc be16(i: int): int = (ord(f[i]) shl 8) or ord(f[i + 1])
+    proc be32(i: int): int = (be16(i) shl 16) or be16(i + 2)
+    proc le16(i: int): int = ord(f[i]) or (ord(f[i + 1]) shl 8)
+    proc le32(i: int): int = le16(i) or (le16(i + 2) shl 16)
+    var w, hh = 0
+    if f.len > 24 and f[1 .. 3] == "PNG": (w, hh) = (be32(16), be32(20))
+    elif f.len > 10 and f[0 .. 2] == "GIF": (w, hh) = (le16(6), le16(8))
+    elif f.len > 26 and f[0 .. 1] == "BM": (w, hh) = (le32(18), abs(int32(le32(22))))
+    elif f.len > 4 and ord(f[0]) == 0xFF and ord(f[1]) == 0xD8:
+      var i = 2
+      while i + 9 < f.len:
+        if ord(f[i]) != 0xFF: break
+        let m = ord(f[i + 1])
+        if m in {0xC0 .. 0xC3, 0xC5 .. 0xC7, 0xC9 .. 0xCB, 0xCD .. 0xCF}:
+          (hh, w) = (be16(i + 5), be16(i + 7))
+          break
+        i += 2 + be16(i + 2)
+    result = (if w > 0: $w & " × " & $hh & " px · " else: "") & kb
+  except CatchableError: result = ""
 
 method layoutChildren*(h: DocHost, d: Drawing, t: Theme) =
   let r = h.rect
   layoutControl(h.editor, r, d, t)
   let doc = h.editor.doc
+  # vue aperçu (Markdown) ou image
+  let isView = doc != nil and doc.kind in {dkPreview, dkImage}
+  h.viewer.visible = isView
+  if isView:
+    var key = $doc.uid
+    if doc.kind == dkPreview:
+      var src: Document
+      for x in h.editor.docs:
+        if x.uid == doc.linkUid: src = x
+      if src != nil:
+        key &= ":" & $src.version
+        if key != h.viewKey:
+          h.mdView.setValueText(src.lines.join("\n"))
+      h.viewer.activePage = 0
+    else:
+      key &= ":" & doc.path
+      if key != h.viewKey:
+        h.imgView.path = doc.path
+        h.imgInfo.caption = "  " & extractFilename(doc.path) & "   " & imageSize(doc.path)
+      h.viewer.activePage = 1
+    h.viewKey = key
+    layoutControl(h.viewer, rect(r.x, r.y + EditorTabBarH, r.w, max(0.0, r.h - EditorTabBarH)), d, t)
   let isBp = doc != nil and doc.kind == dkBlueprint
   h.pane.visible = isBp
   if isBp:
@@ -1564,7 +1629,7 @@ method typeName*(h: DocHost): string = "DocHost"
 method preferredSize*(h: DocHost, d: Drawing, t: Theme): tuple[w, h: float] = (600.0, 400.0)
 
 proc newDocHost*(editor: CodeEditor, theme: Theme): DocHost =
-  ## Éditeur de code + vue blueprint (barre d'outils, palette, canevas, détails).
+  # Éditeur de code + vue blueprint (barre d'outils, palette, canevas, détails).
   result = DocHost(layout: lkAbsolute, margin: 0, spacing: 0, lastBp: -1, editor: editor)
   initControl(result)
   editor.kindDots = true
@@ -1608,7 +1673,7 @@ proc newDocHost*(editor: CodeEditor, theme: Theme): DocHost =
   discard left.addChild(pal)
   paletteId = pal.id
   # détails
-  let right = pane.addChild(newPanel(lkVertical, smAutomatic, 8, 6))
+  let right = pane.addChild(newPanel(lkVertical, smAlways, 8, 6))
   right.dock = dkRight
   right.fixedWidth = DetailsW
   detailsId = right.id
@@ -1617,24 +1682,45 @@ proc newDocHost*(editor: CodeEditor, theme: Theme): DocHost =
   discard pane.addChild(canvas)
   canvasId = canvas.id
   editorId = editor.id
+  # vues aperçu Markdown et image (onglets dkPreview / dkImage).
+  let viewer = newContainer(lkStack, 0, 0)
+  result.viewer = viewer
+  discard result.addChild(viewer)
+  viewer.visible = false
+  let md = newMarkdownView("")
+  result.mdView = md
+  discard viewer.addChild(md)
+  let ib = newContainer(lkBorder, 0, 0)
+  result.imgBox = ib
+  discard viewer.addChild(ib)
+  let imInfo = newLabel("")
+  imInfo.dock = dkTop
+  imInfo.style.text = some(theme.textSecondary)
+  result.imgInfo = imInfo
+  discard ib.addChild(imInfo)
+  let im = newImage("", imFit)
+  im.dock = dkCenter
+  result.imgView = im
+  discard ib.addChild(im)
 
 method onAttach*(h: DocHost, w: Window) =
   hostId = h.id
 
-# ---------------------------------------------------------------------------
+#
 # API de l'atelier (sûre entre fils)
+#
 
 proc bpCanvasId*(): ControlId = canvasId
 
 proc bpHostInUse*(): bool =
-  ## Vrai si une vue blueprint a déjà été créée dans ce processus (l'état est global).
+  # Vrai si une vue blueprint a déjà été créée dans ce processus (l'état est global).
   int(canvasId) != 0
 
 proc bpIsLoaded*(bpUid: int): bool =
   readControl(canvasId, BpCanvas, c): result = bpUid in c.docs
 
 proc bpRefreshExternals*(bpUid: int) =
-  ## Procédures appelées par la vue et définies dans un autre fichier du projet.
+  # Procédures appelées par la vue et définies dans un autre fichier du projet.
   var names: seq[string]
   var locals: HashSet[string]
   var src = -1
@@ -1663,7 +1749,7 @@ proc bpRefreshExternals*(bpUid: int) =
 proc loadDoc(bpUid, srcUid: int, text: string, version: int, force: bool)
 
 proc bpOpen*(bpUid, srcUid: int, text: string, version: int, force = false) =
-  ## Charge (ou recharge si le code a changé) la vue bpUid du document srcUid.
+  # Charge (ou recharge si le code a changé) la vue bpUid du document srcUid.
   loadDoc(bpUid, srcUid, text, version, force)
   bpRefreshExternals(bpUid)
 
@@ -1704,7 +1790,7 @@ proc bpSourceOf*(bpUid: int): int =
     if doc != nil: result = doc.srcUid
 
 proc bpSync*() =
-  ## Régénère le code du document représenté par la vue affichée.
+  # Régénère le code du document représenté par la vue affichée.
   var code = ""
   var src = -1
   var bp = -1
@@ -1734,7 +1820,7 @@ proc bpSetProjectProcs*(names: seq[string]) =
       p.rebuildPalette()
 
 proc bpInsertApi*(e: ApiDoc) =
-  ## Ajoute à la vue affichée un nœud pour une entrée de la référence.
+  # Ajoute à la vue affichée un nœud pour une entrée de la référence.
   var it = PaletteItem(label: e.name, doc: e.signature)
   if e.isMethod:
     it.kind = nkMethod
@@ -1749,15 +1835,16 @@ proc bpInsertApi*(e: ApiDoc) =
   withControl(canvasId, BpCanvas, c): c.addItem(it)
 
 proc bpShowLine*(bpUid, line: int) =
-  ## Sélectionne et montre le nœud de l'instruction de la ligne `line` (0-based).
+  # Sélectionne et montre le nœud de l'instruction de la ligne `line` (0-based).
   withControl(canvasId, BpCanvas, c):
     let doc = c.docs.getOrDefault(bpUid)
     if doc != nil:
       if doc.laidOut and doc.fitted and c.rect.w > 0: c.showLineNow(doc, line)
       else: doc.pendingLine = line          # montrée après la première mise en page
 
-# ---------------------------------------------------------------------------
+#
 # panneau des détails
+#
 
 type NodeInfo = object
   ok: bool
@@ -1819,8 +1906,8 @@ proc addButtons(buttons: openArray[(string, string)]) =
   discard addChild(detailsId, row)
 
 var docView: MarkdownView
-  ## Vue Markdown unique du panneau des détails, réutilisée à chaque reconstruction
-  ## (chaque nouvelle vue ouvrirait ses propres polices).
+  # Vue Markdown unique du panneau des détails, réutilisée à chaque reconstruction
+  # (chaque nouvelle vue ouvrirait ses propres polices).
 
 proc showDoc(md: string, height: float) =
   guarded:
@@ -1950,7 +2037,7 @@ proc isIdentLike(s: string, dotted = false): bool =
   true
 
 proc applyDetail(action, value: string) =
-  ## Applique la valeur d'un champ des détails au nœud affiché.
+  # Applique la valeur d'un champ des détails au nœud affiché.
   var msg = ""
   var structural = false
   var changed = false
@@ -2114,7 +2201,7 @@ proc toolCommand(cmd: string) =
     bpRebuildDetails()
 
 proc bpHandleEvent*(ev: var Event): bool =
-  ## Événements de la vue blueprint ; vrai si l'événement a été traité.
+  # Événements de la vue blueprint ; vrai si l'événement a été traité.
   if ev.id == canvasId:
     case ev.kind
     of evChange:
@@ -2201,7 +2288,7 @@ proc bpHandleEvent*(ev: var Event): bool =
 
 
 method dispose*(c: BpCanvas) =
-  ## Polices (quelques tailles) et textes rendus.
+  # Polices (quelques tailles) et textes rendus.
   when defined(sdlttf):
     for f in c.fonts.values:
       if f != nil: TTF_CloseFont(f)

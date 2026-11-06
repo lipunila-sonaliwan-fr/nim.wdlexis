@@ -5,7 +5,8 @@ fonction MENUS()
 retourner { ;
   {"Fichier", {"Nouveau projet…", "Ouvrir un projet…", "Ouvrir un dossier par son chemin…", ;
                "Nouveau fichier…", "Ouvrir un fichier…", "Enregistrer", "Enregistrer sous…", ;
-               "Enregistrer tout", "Fermer l'onglet", "Quitter"}}, ;
+               "Enregistrer tout", "Fermer l'onglet", "-", "Dupliquer le fichier…", "Renommer le fichier…", ;
+               "Supprimer le fichier…", "-", "Quitter"}}, ;
   {"Édition", {"Annuler", "Rétablir", "Couper", "Copier", "Coller", "Tout sélectionner", ;
                "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter"}}, ;
   {"Recherche", {"Rechercher…", "Remplacer…", "Occurrence suivante", "Aller à la ligne…", ;
@@ -17,7 +18,10 @@ retourner { ;
                 "Arguments et fichier principal…", "Générer l'application…"}}, ;
   {"Conception", {"Vue blueprint du fichier courant", "-", "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
                   "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"}}, ;
-  {"Affichage", {"Fenêtre Projet / Structure / Référence", "-", "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)", ;
+  {"Affichage", {"Projet / Structure / Référence : afficher ou masquer", ;
+                 "Projet / Structure / Référence : fenêtre dédiée", ;
+                 "Problèmes / Console / Variables / Pile : afficher ou masquer", ;
+                 "Problèmes / Console / Variables / Pile : fenêtre dédiée", "-", "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)", ;
                  "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)", ;
                  "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites", ;
                  "Signaler les procédures inconnues"}}, ;
@@ -129,8 +133,20 @@ procedure MENU(ev)
   cas choix = "Ouvrir un état…"
     ETAT_CHOISIR()
   && Affichage
-  cas choix = "Fenêtre Projet / Structure / Référence"
-    AFFICHER_OUTILS(nul)
+  cas choix = "Projet / Structure / Référence : afficher ou masquer"
+    GAUCHE_BASCULER(nul)
+  cas choix = "Projet / Structure / Référence : fenêtre dédiée"
+    GAUCHE_FENETRE(nul)
+  cas choix = "Problèmes / Console / Variables / Pile : afficher ou masquer"
+    BAS_BASCULER(nul)
+  cas choix = "Problèmes / Console / Variables / Pile : fenêtre dédiée"
+    BAS_FENETRE(nul)
+  cas choix = "Dupliquer le fichier…"
+    FICHIER_DUPLIQUER(nul)
+  cas choix = "Renommer le fichier…"
+    FICHIER_RENOMMER(nul)
+  cas choix = "Supprimer le fichier…"
+    FICHIER_SUPPRIMER(nul)
   cas choix = "Copier la console"
     COPIER_CONSOLE()
   cas choix = "Effacer la console"
@@ -155,7 +171,7 @@ procedure MENU(ev)
   cas choix = "Référence des fonctions et paquets"
     AFFICHER_OUTILS(3)
   cas choix = "À propos"
-    ui.alerte("wdlexis+ [S]tudio 1.8.3\nAtelier du langage Lexis+\n" +
+    ui.alerte("wdlexis+ [S]tudio 1.8.4\nAtelier du langage Lexis+\n" +
               "Développez naturellement vos applications métier\n\n" +
               "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
               "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" +

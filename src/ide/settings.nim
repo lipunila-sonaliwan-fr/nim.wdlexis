@@ -13,6 +13,10 @@ type
     programArgs*: string     # arguments passés au programme (séparés par des espaces).
     mainFile*: string        # fichier lancé par Exécuter ("" = principal.prg, sinon le fichier actif).
     fontDelta*: int          # écart de taille de police (points) par rapport au thème : Affichage > Police.
+    leftHidden*: bool        # ensemble Projet / Structure / Référence masqué.
+    bottomHidden*: bool      # ensemble Problèmes / Console / Variables / Pile d'appels masqué.
+    leftPos*: float          # position du séparateur gauche (0..1, 0 = défaut).
+    bottomPos*: float        # position du séparateur bas (0..1, 0 = défaut).
 
 const
   FontDeltaMin* = -4
@@ -37,6 +41,10 @@ proc loadSettings*(): Settings =
     get(programArgs, getStr)
     get(mainFile, getStr)
     get(fontDelta, getInt)
+    get(leftHidden, getBool)
+    get(bottomHidden, getBool)
+    get(leftPos, getFloat)
+    get(bottomPos, getFloat)
     result.fontDelta = clamp(result.fontDelta, FontDeltaMin, FontDeltaMax)
   except CatchableError:
     discard

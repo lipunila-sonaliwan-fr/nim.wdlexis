@@ -16,7 +16,7 @@
 import std/[strutils, os, math, options, locks, tables, sets]
 import ../wdgui
 import ../sdl3
-import etats, pdfwriter, codeeditor, imagedecode
+import etats, pdfwriter, codeeditor, imagedecode, dockpane
 from formmodel import PropKind, PropDef
 
 type
@@ -77,7 +77,9 @@ proc fmt1(v: float): string =
   if abs(v - round(v)) < 0.001: $int(round(v))
   else: formatFloat(v, ffDecimal, 1)
 
-# ------------------------------------------------------------------ géométrie
+#
+#  géométrie
+#
 
 proc bodyW(c: ReportCanvas): float = c.model.bandWidth * c.scale
 
@@ -116,7 +118,7 @@ proc bandAt(c: ReportCanvas, x, y: float): tuple[b: RBand, onBar: bool] =
   (nil, false)
 
 proc nearestBand(c: ReportCanvas, y: float): RBand =
-  ## Zone dont le corps est le plus proche verticalement (dépôt entre deux zones).
+  # Zone dont le corps est le plus proche verticalement (dépôt entre deux zones).
   var best = Inf
   for b in c.model.bands:
     let r = c.bodyRect(b)
@@ -164,12 +166,14 @@ proc handleAt(c: ReportCanvas, x, y: float): int =
   -1
 
 proc bandEdgeAt(c: ReportCanvas, x, y: float): RBand =
-  ## Bord bas d'une zone (réglage de la hauteur).
+  # Bord bas d'une zone (réglage de la hauteur).
   for b in c.model.bands:
     let r = c.bodyRect(b)
     if x >= r.x and x <= r.x + r.w and abs(y - (r.y + r.h)) <= 4: return b
 
-# ------------------------------------------------------------------ sélection, événements
+#
+#  sélection, événements
+#
 
 proc selectNone*(c: ReportCanvas) =
   c.sel = skReport
@@ -196,10 +200,12 @@ proc newReportCanvas*(model: ReportModel, baseDir: string): ReportCanvas =
   initControl(result)
   result.focusable = true
 
-# ------------------------------------------------------------------ modifications
+#
+#  modifications
+#
 
 proc targetBand(c: ReportCanvas): RBand =
-  ## Zone qui reçoit un élément cliqué dans la palette.
+  # Zone qui reçoit un élément cliqué dans la palette.
   if c.selBand != nil: return c.selBand
   for b in c.model.bands:
     if b.name notin ["entete", "pied"]: return b
@@ -239,7 +245,7 @@ proc clampItem(c: ReportCanvas, b: RBand, i: RItem) =
   if i.y + i.h > b.height: b.height = snapHalf(i.y + i.h)
 
 proc addBand*(c: ReportCanvas, kind: string, after: RBand = nil): RBand =
-  ## kind : "zone", "entete" ou "pied" (en-tête en premier, pied en dernier).
+  # kind : "zone", "entete" ou "pied" (en-tête en premier, pied en dernier).
   let m = c.model
   if kind in ["entete", "pied"]:
     let existing = m.findBand(kind)
@@ -298,7 +304,7 @@ proc deleteSelected*(c: ReportCanvas) =
   markDirty(c)
 
 proc moveSelected*(c: ReportCanvas, delta: int) =
-  ## Zone : ordre des zones ; élément : ordre de dessin dans sa zone.
+  # Zone : ordre des zones ; élément : ordre de dessin dans sa zone.
   case c.sel
   of skBand:
     let bs = c.model.bands
@@ -317,7 +323,9 @@ proc moveSelected*(c: ReportCanvas, delta: int) =
   c.changed()
   markDirty(c)
 
-# ------------------------------------------------------------------ repères
+#
+#  repères
+#
 
 proc snapCandidates(c: ReportCanvas, b: RBand, exclude: RItem): tuple[xs, ys: seq[float]] =
   let bw = c.model.bandWidth
@@ -337,7 +345,7 @@ proc snapValue(v: float, cands: seq[float], thr: float): tuple[v: float, hit: bo
       result = (cnd, true, cnd)
 
 proc snapMove(c: ReportCanvas, b: RBand, i: RItem, x, y: var float) =
-  ## Aligne les bords / le centre de l'élément (mm) sur ceux des autres et de la zone.
+  # Aligne les bords / le centre de l'élément (mm) sur ceux des autres et de la zone.
   c.guides.setLen(0)
   let (xs, ys) = c.snapCandidates(b, i)
   let thr = snapPx / c.scale
@@ -367,7 +375,9 @@ proc snapMove(c: ReportCanvas, b: RBand, i: RItem, x, y: var float) =
   if gx >= 0: c.guides.add((br.x + gx * c.scale, br.y, br.x + gx * c.scale, br.y + br.h))
   if gy >= 0: c.guides.add((br.x, br.y + gy * c.scale, br.x + br.w, br.y + gy * c.scale))
 
-# ------------------------------------------------------------------ dessin : polices et images
+#
+#  dessin : polices et images
+#
 
 proc fontFiles(family: string, style: int): seq[string] =
   # style : 0 normal, 1 gras, 2 italique, 3 gras italique.
@@ -452,7 +462,9 @@ proc imageFor(c: ReportCanvas, d: Drawing, path: string): tuple[tex: SDL_Texture
   except CatchableError: discard
   c.images[path] = result
 
-# ------------------------------------------------------------------ dessin
+#
+#  dessin
+#
 
 proc dashedLine(d: Drawing, x1, y1, x2, y2: float, col: Color) =
   let len = hypot(x2 - x1, y2 - y1)
@@ -641,7 +653,9 @@ proc drawSelection(c: ReportCanvas, d: Drawing, t: Theme) =
     d.fillRoundRect(lr, 4, guideColor)
     d.textIn(lr, c.badge, White, alCenter)
 
-# ------------------------------------------------------------------ souris et clavier
+#
+# souris et clavier
+#
 
 method mouseCursor*(c: ReportCanvas, x, y: float): int =
   if c.drag == rdBand or c.bandEdgeAt(x, y) != nil: SDL_SYSTEM_CURSOR_NS_RESIZE
@@ -798,7 +812,9 @@ method onKey*(c: ReportCanvas, e: KeyEvent): bool =
   else: return false
   true
 
-# ------------------------------------------------------------------ palette
+#
+# palette
+#
 
 const PaletteRows = [("ZONES", ""), ("zone", "▤"), ("entete", "▔"), ("pied", "▁"),
                      ("ÉLÉMENTS", ""), ("texte", "A"), ("champ", "{}"), ("rectangle", "▭"),
@@ -824,7 +840,7 @@ method draw*(p: ReportPalette, d: Drawing, t: Theme) =
   if not p.hovered: p.hoverIdx = -1
   for i, r in PaletteRows:
     let y = p.rect.y + 4 + float(i) * rh - p.scroll
-    let rr = rect(p.rect.x + 6, y, p.rect.w - 12, rh)
+    let rr = rect(p.rect.x + 6, y, p.rect.w - 12 - ScrollBarSize, rh)
     if r[1].len == 0:
       d.textIn(rr, r[0], t.textSecondary, alLeft, 4)
       continue
@@ -834,6 +850,10 @@ method draw*(p: ReportPalette, d: Drawing, t: Theme) =
     d.textIn(badge, r[1], t.accent, alCenter)
     d.textIn(rect(rr.x + 36, y, rr.w - 36, rh), r[0], t.text)
   d.popClip()
+  p.drawScrollBar(d, t, vBarArea(p.rect), float(PaletteRows.len) * rh + 8, p.rect.h, p.scroll)
+
+method scrollTrackTo*(p: ReportPalette, vertical: bool, pos: float) =
+  if vertical: p.scroll = max(0.0, pos)
 
 method onMouse*(p: ReportPalette, e: MouseEvent) =
   let t = p.win.theme
@@ -846,7 +866,7 @@ method onMouse*(p: ReportPalette, e: MouseEvent) =
     p.dragging = false
   of maMove:
     if p.pressIdx >= 0 and p.pressed:
-      if not p.dragging and abs(e.x - p.pressX) + abs(e.y - p.pressY) > 5: p.dragging = true
+      if not p.dragging and p.win == c.win and abs(e.x - p.pressX) + abs(e.y - p.pressY) > 5: p.dragging = true
       if p.dragging:
         let kind = PaletteRows[p.pressIdx][0]
         c.drag = rdNew
@@ -896,8 +916,10 @@ method onWheel*(p: ReportPalette, dx, dy: float): bool =
   p.scroll = clamp(p.scroll - dy * 30, 0.0, max(0.0, total - p.rect.h))
   true
 
-# ------------------------------------------------------------------ API du canevas
+#
+# API du canevas
 # (aussi utilisée par le paquet interface : éditeur d'états de l'atelier en Lexis+)
+#
 
 proc findNode*(c: ReportCanvas, uid: int): tuple[found: bool, kind: SelKind, band: RBand, item: RItem] =
   if c.model.uid == uid: return (true, skReport, nil, nil)
@@ -913,7 +935,7 @@ proc selectedUid*(c: ReportCanvas): int =
   else: c.model.uid
 
 proc selectUid*(c: ReportCanvas, uid: int) =
-  ## Sélection sans événement (hiérarchie).
+  # Sélection sans événement (hiérarchie).
   let n = c.findNode(uid)
   if not n.found: return
   c.sel = n.kind
@@ -928,7 +950,7 @@ proc selectionTitle*(c: ReportCanvas): string =
   of skItem: c.selItem.kind & "  " & c.selItem.name
 
 proc inspectorRows*(c: ReportCanvas): seq[tuple[target: string, d: PropDef, v: string]] =
-  ## Lignes de l'inspecteur pour la sélection : géométrie (mm), puis propriétés.
+  # Lignes de l'inspecteur pour la sélection : géométrie (mm), puis propriétés.
   case c.sel
   of skReport:
     for d in reportProps(): result.add(("prop", d, c.model.getProp(d.name)))
@@ -953,8 +975,8 @@ proc selectionHelp*(c: ReportCanvas): string =
       return "chemin : PNG ou JPEG, relatif au dossier du programme ; peut contenir une {variable}."
 
 proc setSelectionValue*(c: ReportCanvas, target, prop: string, value: string): string =
-  ## Modifie la sélection (target "geom" : position, taille, hauteur ; "prop" : propriété).
-  ## "" si c'est fait, sinon le message.
+  # Modifie la sélection (target "geom" : position, taille, hauteur ; "prop" : propriété).
+  # "" si c'est fait, sinon le message.
   var kind = pkString
   case c.sel
   of skReport:
@@ -993,8 +1015,8 @@ proc setSelectionValue*(c: ReportCanvas, target, prop: string, value: string): s
   ""
 
 proc renameNode*(c: ReportCanvas, uid: int, newName, root: string): tuple[msg, oldReport: string] =
-  ## Renomme l'état, une zone ou un élément. Pour l'état, oldReport donne l'ancien nom :
-  ## l'appelant supprime alors l'ancien fichier etat_<ancien>.prg.
+  # Renomme l'état, une zone ou un élément. Pour l'état, oldReport donne l'ancien nom :
+  # l'appelant supprime alors l'ancien fichier etat_<ancien>.prg.
   let v = newName.strip
   let m = c.model
   let n = c.findNode(uid)
@@ -1017,7 +1039,7 @@ proc renameNode*(c: ReportCanvas, uid: int, newName, root: string): tuple[msg, o
   markDirty(c)
 
 proc reportExampleCode*(m: ReportModel): string =
-  ## Code Lexis+ qui remplit l'état : une ligne par zone, avec ses variables.
+  # Code Lexis+ qui remplit l'état : une ligne par zone, avec ses variables.
   proc varsOf(b: RBand): seq[string] =
     var seen = initHashSet[string]()
     for i in b.items:
@@ -1051,16 +1073,18 @@ proc reportExampleCode*(m: ReportModel): string =
   l.join("\n") & "\n"
 
 proc writePreview*(m: ReportModel, path, root: string): seq[string] =
-  ## Aperçu PDF (chaque zone trois fois, variables affichées) ; renvoie les images illisibles.
+  # Aperçu PDF (chaque zone trois fois, variables affichées) ; renvoie les images illisibles.
   let run = sampleRun(m, path, root)
   let d = run.render()
   d.save(path)
   d.imageErrors
 
-# ------------------------------------------------------------------ fenêtre de l'éditeur
+#
+# fenêtre de l'éditeur
+#
 
 type ReportFrame = ref object of Container
-  ## Conteneur du canevas.
+  # Conteneur du canevas.
   canvas: ReportCanvas
 
 
@@ -1074,6 +1098,8 @@ var
   rColorButtons: seq[tuple[id: ControlId, prop: string, edit: ControlId]]
   rTreePaths: seq[tuple[path: string, kind: SelKind, uid: int]]
   rTools: seq[tuple[id: ControlId, cmd: string]]
+  rPane: DockPane
+  reportClosed*: proc () {.nimcall, gcsafe.}     # fermeture de l'éditeur d'états (cadenas de la page Projet).                    # palette + hiérarchie : affichées, masquées ou détachées.
   rNameRow: tuple[id: ControlId, kind: SelKind, uid: int, text: string]
   reportFileCreated*: proc (path: string) {.nimcall, gcsafe.}     # posé par l'atelier (arbre du projet).
   rOpLock: Lock
@@ -1305,9 +1331,13 @@ proc reportEvent(ev: var Event) =
       withControl(rCanvas, ReportCanvas, c): c.selectUid(uid)
       rebuildInspector()
       return
+    if ev.kind == evWindowClose and rPane != nil and rPane.handleClose(ev.id): return
     if ev.kind == evWindowClose and ev.id == rWin:
       guarded: rOpen = false
+      if rPane != nil and rPane.isDetached: closeWindow(rPane.winId)
+      if reportClosed != nil: reportClosed()
       return
+    if ev.kind == evClick and rPane != nil and rPane.handleClick(ev.id): return
     var nameRow: tuple[id: ControlId, kind: SelKind, uid: int, text: string]
     guarded: nameRow = rNameRow
     if ev.id == nameRow.id:
@@ -1372,8 +1402,8 @@ proc reportHandler(ev: var Event) {.nimcall, gcsafe.} =
     withLock rOpLock: reportEvent(ev)
 
 proc openReportDesigner*(root, reportFile: string, editorId: ControlId, theme: Theme): string =
-  ## Ouvre l'éditeur d'états ; reportFile : etat_<nom>.prg à rouvrir, "" pour un état neuf.
-  ## Renvoie "" si c'est fait, sinon la raison.
+  # Ouvre l'éditeur d'états ; reportFile : etat_<nom>.prg à rouvrir, "" pour un état neuf.
+  # Renvoie "" si c'est fait, sinon la raison.
   var already = false
   guarded: already = rOpen
   if already: return "L'éditeur d'états est déjà ouvert."
@@ -1398,46 +1428,55 @@ proc openReportDesigner*(root, reportFile: string, editorId: ControlId, theme: T
     rWin = win.id
     let tb = win.addChild(newToolbar())
     tb.dock = dkTop
-    for (caption, cmd, tip) in [("Enregistrer", "save", "Régénère etat_<nom>.prg"),
-                                ("Supprimer", "delete", "Supprime l'élément ou la zone sélectionné (Suppr)"),
-                                ("Monter", "up", "Zone : plus haut dans l'état ; élément : dessiné plus tôt"),
-                                ("Descendre", "down", "Zone : plus bas dans l'état ; élément : dessiné plus tard"),
-                                ("Nouvelle zone", "zone", "Ajoute une zone nommée après la zone sélectionnée"),
-                                ("État", "report", "Sélectionne l'état (format, orientation, marges)"),
-                                ("Aperçu PDF", "preview", "Génère le PDF avec chaque zone trois fois, variables affichées"),
-                                ("Insérer le code", "code", "Insère dans l'éditeur le code Lexis+ qui remplit l'état"),
-                                ("Zoom +", "zoomin", "Agrandit la page"), ("Zoom −", "zoomout", "Réduit la page")]:
-      let b = tb.addTool(caption, tip)
+    tb.margin = 2
+    tb.spacing = 2
+    for (icon, caption, cmd, tip) in [("enregistrer", "Enregistrer", "save", "Régénère etat_<nom>.prg"),
+                                ("supprimer", "Supprimer", "delete", "Supprime l'élément ou la zone sélectionné (Suppr)"),
+                                ("monter", "Monter", "up", "Zone : plus haut dans l'état ; élément : dessiné plus tôt"),
+                                ("descendre", "Descendre", "down", "Zone : plus bas dans l'état ; élément : dessiné plus tard"),
+                                ("plus", "Nouvelle zone", "zone", "Ajoute une zone nommée après la zone sélectionnée"),
+                                ("etat", "État", "report", "Sélectionne l'état (format, orientation, marges)"),
+                                ("apercu", "Aperçu PDF", "preview", "Génère le PDF avec chaque zone trois fois, variables affichées"),
+                                ("code", "Insérer le code", "code", "Insère dans l'éditeur le code Lexis+ qui remplit l'état"),
+                                ("zoomplus", "Zoom +", "zoomin", "Agrandit la page"),
+                                ("zoommoins", "Zoom −", "zoomout", "Réduit la page")]:
+      let b = tb.iconTool(icon, caption, tip)
       rTools.add((b.id, cmd))
+    tb.toolSpacer()
+    let bToggle = tb.iconTool("masquer", "Palette / Hiérarchie", "")
+    let bDetach = tb.iconTool("fenetre", "Palette / Hiérarchie", "")
     let st = win.addChild(newLabel("Glisser depuis la palette · bord bas d'une zone : hauteur · Suppr supprime · " &
                                    "flèches : 0,5 mm (Maj : 5 mm)"))
     st.dock = dkBottom
+    st.fixedHeight = 20
     rStatus = st.id
     let canvas = newReportCanvas(model, root)
     let pal = newReportPalette(canvas)
     let left = win.addChild(newContainer(lkBorder, 0, 0))
     left.dock = dkLeft
-    left.fixedWidth = 200
-    let lt = left.addChild(newLabel("  PALETTE"))
-    lt.dock = dkTop
+    left.fixedWidth = 230
+    let pages = left.addChild(newTab())
+    pages.dock = dkCenter
+    let pgPal = pages.addPage("Palette", lkBorder)
     pal.dock = dkCenter
-    discard left.addChild(pal)
-    let right = win.addChild(newContainer(lkBorder, 6, 6))
-    right.dock = dkRight
-    right.fixedWidth = 360
-    let top = right.addChild(newContainer(lkVertical, 0, 4))
-    top.dock = dkTop
-    discard top.addChild(newLabel("HIÉRARCHIE"))
-    let tree = top.addChild(newTreeView())
-    tree.fixedHeight = 220
+    discard pgPal.addChild(pal)
+    let pgTree = pages.addPage("Hiérarchie", lkVertical)
+    let tree = pgTree.addChild(newTreeView())
+    tree.weight = 1
     rTree = tree.id
+    rPane = newDockPane("Palette et hiérarchie - état", left, pages, bToggle, bDetach, reportHandler, 280, 720)
+    let right = win.addChild(newContainer(lkBorder, 2, 2))
+    right.dock = dkRight
+    right.fixedWidth = 340
+    let top = right.addChild(newContainer(lkVertical, 0, 2))
+    top.dock = dkTop
     let title = top.addChild(newLabel(""))
     title.style.text = some(theme.accent)
     rTitle = title.id
-    let insp = right.addChild(newPanel(lkVertical, smAutomatic, 2, 4))
+    let insp = right.addChild(newPanel(lkVertical, smAlways, 2, 4))
     insp.dock = dkCenter
     rInspector = insp.id
-    let area = win.addChild(newPanel(lkVertical, smAutomatic, 0, 0))
+    let area = win.addChild(newPanel(lkVertical, smAlways, 0, 0))
     area.dock = dkCenter
     let frame = ReportFrame(layout: lkVertical, margin: 0, spacing: 0, canvas: canvas)
     initControl(frame)
@@ -1450,6 +1489,21 @@ proc openReportDesigner*(root, reportFile: string, editorId: ControlId, theme: T
   rebuildTree()
   rebuildInspector()
   ""
+
+proc reportDesignerFile*(): string =
+  # Fichier etat_<nom>.prg en cours d'édition ("" si l'éditeur d'états est fermé).
+  var open = false
+  guarded: open = rOpen
+  if not open: return ""
+  var name = ""
+  readControl(rCanvas, ReportCanvas, c): name = c.model.name
+  if name.len > 0: result = rRoot / reportFileName(name)
+
+proc reportWindowIds*(): seq[ControlId] =
+  # Fenêtres de l'éditeur d'états (principale, ensemble détaché), pour le changement de thème.
+  guarded:
+    if rOpen: result.add rWin
+  if rPane != nil and rPane.isDetached: result.add rPane.winId
 
 proc reportDesignerIsOpen*(): bool =
   guarded: result = rOpen

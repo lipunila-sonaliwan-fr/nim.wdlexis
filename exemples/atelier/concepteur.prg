@@ -113,54 +113,68 @@ procedure CONCEPTEUR_OUVRIR(formulaire)
   CON_ARBRE()
   CON_INSPECTEUR()
   etat.libelle = "Concepteur : form_" + canevas:nom() + ".prg · code : " + fichier.nom(concode)
+  CADENAS()
 retourner
 
 procedure CONCEPTEUR_FENETRE
   globale condlg, conctl
   conctl = {lignes = {}, evts = {}, noeuds = {}, nomligne = nul}
   condlg = ui.fenetre{titre = "Concepteur de formulaires", largeur = 1320, hauteur = 820, ;
-                      disposition = "bordure", sombre = reglages.sombre}
+                      disposition = "bordure", sombre = reglages.sombre, densite = "compacte"}
+  condlg.marge = 0
+  condlg.espacement = 0
   condlg.surfermeture = @CON_FERMETURE
-  && barre d'outils
+  && barre d'outils : symboles, libellés en infobulle
   locale outils = condlg:ajouter(ui.rangee())
   outils.ancrage = "haut"
-  CON_OUTIL(outils, "Enregistrer", @CON_ENREGISTRER, "Régénère form_<nom>.prg")
-  CON_OUTIL(outils, "Supprimer", @CON_SUPPRIMER, "Supprime le contrôle sélectionné (Suppr)")
-  CON_OUTIL(outils, "Monter", @CON_MONTER, "Plus tôt dans l'ordre d'affichage")
-  CON_OUTIL(outils, "Descendre", @CON_DESCENDRE, "Plus tard dans l'ordre d'affichage")
-  CON_OUTIL(outils, "Sortir", @CON_SORTIR, "Sort le contrôle de son conteneur")
-  CON_OUTIL(outils, "Formulaire", @CON_FORMULAIRE, "Sélectionne le formulaire (propriétés de la fenêtre)")
-  CON_OUTIL(outils, "Câbler le code", @CON_CABLER, ;
+  outils.marge = 2
+  outils.espacement = 1
+  CON_OUTIL(outils, "enregistrer", "Enregistrer", @CON_ENREGISTRER, "Régénère form_<nom>.prg")
+  CON_OUTIL(outils, "supprimer", "Supprimer", @CON_SUPPRIMER, "Supprime le contrôle sélectionné (Suppr)")
+  CON_OUTIL(outils, "monter", "Monter", @CON_MONTER, "Plus tôt dans l'ordre d'affichage")
+  CON_OUTIL(outils, "descendre", "Descendre", @CON_DESCENDRE, "Plus tard dans l'ordre d'affichage")
+  CON_OUTIL(outils, "sortir", "Sortir", @CON_SORTIR, "Sort le contrôle de son conteneur")
+  CON_OUTIL(outils, "formulaire", "Formulaire", @CON_FORMULAIRE, "Sélectionne le formulaire (propriétés de la fenêtre)")
+  CON_OUTIL(outils, "cabler", "Câbler le code", @CON_CABLER, ;
             "Ajoute au code le bloc des procédures et l'appel d'ouverture (programme principal)")
-  CON_OUTIL(outils, "Contrôle personnalisé…", @CON_PERSONNALISE, ;
+  CON_OUTIL(outils, "personnalise", "Contrôle personnalisé…", @CON_PERSONNALISE, ;
             "Ajoute à la palette un contrôle créé par une fonction Lexis+ du projet")
-  CON_OUTIL(outils, "Voir le code", @CON_VOIR_CODE, "Affiche le code édité dans l'atelier")
+  CON_OUTIL(outils, "code", "Voir le code", @CON_VOIR_CODE, "Affiche le code édité dans l'atelier")
+  ESPACE(outils, nul)
+  locale bmasq = OUTIL_SYMBOLE(outils, "masquer", "Palette / Hiérarchie", "", @PALETTE_BASCULER)
+  locale bfen = OUTIL_SYMBOLE(outils, "fenetre", "Palette / Hiérarchie", "", @PALETTE_FENETRE)
   && barre d'état
   conctl.etat = condlg:ajouter(ui.etiquette("Glisser depuis la palette · clic pour sélectionner · poignées pour " + ;
                                             "redimensionner · Suppr supprime · Échap sélectionne le parent"))
   conctl.etat.ancrage = "bas"
-  && palette
-  locale cg = condlg:ajouter(ui.colonne())
+  conctl.etat.hauteurfixe = 20
+  && palette et hiérarchie : un même ensemble de pages, à gauche
+  locale cg = condlg:ajouter(ui.conteneur("bordure"))
   cg.ancrage = "gauche"
-  cg.largeurfixe = 200
-  cg:ajouter(ui.etiquette("PALETTE"))
-  conctl.palette = cg:ajouter(ui.palette(canevas))
-  conctl.palette.poids = 1
-  && hiérarchie et inspecteur
+  cg.largeurfixe = 230
+  cg.marge = 0
+  locale pages = cg:ajouter(ui.onglets())
+  pages.ancrage = "centre"
+  locale ppal = pages:ajouterpage("Palette", "bordure")
+  conctl.palette = ppal:ajouter(ui.palette(canevas))
+  conctl.palette.ancrage = "centre"
+  locale phier = pages:ajouterpage("Hiérarchie")
+  conctl.arbre = phier:ajouter(ui.arbre())
+  conctl.arbre.poids = 1
+  conctl.arbre.surselection = @CON_ARBRE_CHOIX
+  ENSEMBLE("palette", "Palette et hiérarchie - formulaire", cg, pages, bmasq, bfen, 280, 720, "masquer", "afficher")
+  && inspecteur
   locale cd = condlg:ajouter(ui.colonne())
   cd.ancrage = "droite"
-  cd.largeurfixe = 360
-  cd:ajouter(ui.etiquette("HIÉRARCHIE"))
-  conctl.arbre = cd:ajouter(ui.arbre())
-  conctl.arbre.hauteurfixe = 210
-  conctl.arbre.surselection = @CON_ARBRE_CHOIX
+  cd.largeurfixe = 340
+  cd.marge = 2
   conctl.titre = cd:ajouter(ui.etiquette(""))
   conctl.titre.couleur = "#3B82F6"
-  conctl.insp = cd:ajouter(ui.panneau{defilement = "automatique"})
+  conctl.insp = cd:ajouter(ui.panneau{defilement = "toujours"})
   conctl.insp.poids = 1
   conctl.contenu = conctl.insp:ajouter(ui.colonne())
   && canevas
-  locale centre = condlg:ajouter(ui.panneau{defilement = "automatique"})
+  locale centre = condlg:ajouter(ui.panneau{defilement = "toujours"})
   centre.ancrage = "centre"
   centre:ajouter(canevas)
   canevas.surselection = @CON_SELECTION
@@ -168,16 +182,24 @@ procedure CONCEPTEUR_FENETRE
   canevas:focus()
 retourner
 
-procedure CON_OUTIL(barre, libelle, proc, aide)
-  locale b = barre:ajouter(ui.bouton(libelle))
-  b.infobulle = aide
-  b.surclic = proc
+procedure CON_OUTIL(barre, icone, libelle, proc, aide)
+  OUTIL_SYMBOLE(barre, icone, libelle, aide, proc)
 retourner
 
 procedure CON_FERMETURE(ev)
   globale condlg, canevas
   condlg = nul
   canevas = nul
+  && palette et hiérarchie détachées : leur fenêtre se ferme avec le concepteur
+  si ensembles.palette <> nul et ensembles.palette.fen <> nul
+    locale f = ensembles.palette.fen
+    ensembles.palette.fen = nul
+    essayer
+      f:fermer()
+    capturer err
+    finessayer
+  finsi
+  CADENAS()
 retourner
 
 procedure CON_ETAT(message)

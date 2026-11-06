@@ -20,7 +20,7 @@
 import std/[strutils, unicode, tables, os, math, sequtils, streams, sets, algorithm]
 import ../sdl3
 import ../wdgui
-import lexistok, sqltok, langdocs, lexislint
+import lexistok, sqltok, mdtok, langdocs, lexislint
 import compat except KHome, KEnd
 from lexislang import Keywords
 from lsptypes import CompletionItem, kindBadge
@@ -33,7 +33,7 @@ type
   DocKind* = enum
     # Nature d'un document (pastille de l'onglet quand kindDots est actif).
     dkText = "texte", dkCode = "code Lexis+", dkForm = "formulaire", dkReport = "état",
-    dkBlueprint = "blueprint"
+    dkBlueprint = "blueprint", dkPreview = "aperçu", dkImage = "image"
 
   CsdKind* = enum
     cbRoutine, cbIf, cbWhen, cbCase, cbLoop, cbTry, cbBlock, cbSection
@@ -236,6 +236,17 @@ proc isSql*(doc: Document): bool =
   # Document SQL : imposé par ed:langage("sql"), sinon d'après l'extension .sql.
   if doc.lang.len > 0: doc.lang == "sql" else: doc.path.toLowerAscii.endsWith(".sql")
 
+proc isMarkdown*(doc: Document): bool =
+  # Document Markdown (.md, .markdown) : coloration dédiée, vue aperçu par la pastille.
+  if doc.lang.len > 0: return doc.lang == "markdown"
+  let p = doc.path.toLowerAscii
+  p.endsWith(".md") or p.endsWith(".markdown")
+
+proc isPlainText*(doc: Document): bool =
+  # Texte brut (.txt, .csv, .json…) : ni coloration Lexis+ ni analyse.
+  let p = (if doc.path.len > 0: doc.path else: doc.title).toLowerAscii
+  not p.endsWith(".prg") and not doc.isSql and not doc.isMarkdown and p.len > 0 and '.' in p
+
 proc analyze(doc: Document) =
   if doc.analyzed: return
   var state = lsNormal
@@ -243,6 +254,12 @@ proc analyze(doc: Document) =
   doc.tokens.setLen(doc.lines.len)
   if doc.isSql:
     for i, l in doc.lines: doc.tokens[i] = lexSqlLine(l, state, depth)
+    doc.csd = @[]
+  elif doc.isMarkdown:
+    for i, l in doc.lines: doc.tokens[i] = lexMdLine(l, state, depth)
+    doc.csd = @[]
+  elif doc.isPlainText:
+    for i, l in doc.lines: doc.tokens[i] = (if l.len > 0: @[Token(kind: tkText, start: 0, len: l.len)] else: @[])
     doc.csd = @[]
   else:
     for i, l in doc.lines: doc.tokens[i] = lexLine(l, state, depth)
@@ -261,6 +278,8 @@ proc kindColor*(k: DocKind): Color =
   of dkForm: hex"#F59E0B"
   of dkReport: hex"#EAD019"
   of dkBlueprint: hex"#3B82F6"
+  of dkPreview: hex"#14B8A6"
+  of dkImage: hex"#A855F7"
   of dkText: hex"#8C8F96"
 
 proc defaultKind(title, path: string): DocKind =
@@ -639,6 +658,12 @@ proc clampScroll(ed: CodeEditor) =
   d.scroll = clamp(d.scroll, 0.0, max(0.0, float(d.lines.len) - 1))
   d.scrollX = max(0.0, d.scrollX)
 
+method scrollTrackTo*(ed: CodeEditor, vertical: bool, pos: float) =
+  let d = ed.doc
+  if d == nil: return
+  if vertical: d.scroll = clamp(floor(pos), 0.0, max(0.0, float(d.lines.len) - 1))
+  else: d.scrollX = max(0.0, pos)
+
 proc ensureCursorVisible(ed: CodeEditor) =
   let d = ed.doc
   if d == nil: return
@@ -917,9 +942,9 @@ method preferredSize*(ed: CodeEditor, d: Drawing, t: Theme): tuple[w, h: float] 
 
 method typeName*(ed: CodeEditor): string = "CodeEditor"
 
-method acceptsText*(ed: CodeEditor): bool = ed.doc != nil and ed.doc.kind != dkBlueprint
+method acceptsText*(ed: CodeEditor): bool = ed.doc != nil and ed.doc.kind notin {dkBlueprint, dkPreview, dkImage}
 
-method acceptsTab*(ed: CodeEditor): bool = ed.doc != nil and ed.doc.kind != dkBlueprint
+method acceptsTab*(ed: CodeEditor): bool = ed.doc != nil and ed.doc.kind notin {dkBlueprint, dkPreview, dkImage}
 
 method mouseCursor*(ed: CodeEditor, x, y: float): int =
   if ed.doc != nil and ed.codeRect.containsPoint(x, y): SDL_SYSTEM_CURSOR_TEXT
@@ -958,7 +983,7 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
       d.textIn(br, doc.badge, hex"#FFFFFF", alCenter)
     var tx = tr.x + 12
     if ed.kindDots:
-      let dc = kindColor(doc.kind)
+      let dc = (if doc.kind == dkText and doc.isMarkdown: kindColor(dkPreview) elif doc.kind == dkText and doc.isSql: hex"#3B82F6" else: kindColor(doc.kind))
       let dy = tr.y + tr.h / 2
       if i == ed.hoverDot: d.fillCircle(tr.x + 14, dy, 8, dc.withAlpha(70))
       d.fillCircle(tr.x + 14, dy, 5, dc)
@@ -979,7 +1004,7 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
   if doc == nil:
     ed.drawWelcome(d, t, colors)
     return
-  if doc.kind == dkBlueprint:            # le corps est dessiné par la vue blueprint (dochost).
+  if doc.kind in {dkBlueprint, dkPreview, dkImage}:   # le corps est dessiné par l'hôte (dochost).
     d.fillRect(ed.bodyRect, colors.bg)
     return
   doc.analyze()
@@ -1069,8 +1094,12 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
       if dgSeverity(dg) > 2: continue
       let y = m.y + 4 + float(dg.line) / float(n) * (m.h - 8)
       d.fillRect(rect(m.x + m.w - 5, y, 4, 3), severityColor(dgSeverity(dg)))
-  drawScrollIndicator(d, t, rect(c.x + c.w - 10, c.y, 8, c.h),
-                      float(doc.lines.len + ed.visibleLines - 1), float(ed.visibleLines), doc.scroll)
+  ed.drawScrollBar(d, t, vBarArea(c), float(doc.lines.len + ed.visibleLines - 1),
+                   float(ed.visibleLines), doc.scroll)
+  # ascenseur horizontal : seulement si une ligne dépasse la largeur visible.
+  var maxCols = 0
+  for l in doc.lines: maxCols = max(maxCols, l.len)
+  ed.drawScrollBar(d, t, hBarArea(c), float(maxCols + 4) * ed.charW, c.w - 24, doc.scrollX, vertical = false)
   # completion popup and information bubble (over everything).
   d.pushClip(ed.rect)
   ed.drawCompletion(d, t, colors)
@@ -1214,11 +1243,14 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
           of dkBlueprint: "Vue blueprint - cliquer la pastille : revenir au code"
           of dkForm: "Formulaire - cliquer la pastille : concepteur de formulaires"
           of dkReport: "État - cliquer la pastille : éditeur d'états"
-          of dkText: "Texte"
+          of dkPreview: "Vue aperçu - cliquer la pastille : revenir au texte Markdown"
+          of dkImage: "Image (aperçu)"
+          of dkText:
+            if ed.docs[ed.hoverDot].isMarkdown: "Markdown - cliquer la pastille : vue aperçu" else: "Texte"
     return
   ed.tooltip = ""
   let doc = ed.doc
-  if doc == nil or doc.kind == dkBlueprint: return
+  if doc == nil or doc.kind in {dkBlueprint, dkPreview, dkImage}: return
   let m = ed.minimapRect
   case e.action
   of maPress:
@@ -1300,7 +1332,7 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
 
 method onWheel*(ed: CodeEditor, dx, dy: float): bool =
   let doc = ed.doc
-  if doc == nil or doc.kind == dkBlueprint: return false
+  if doc == nil or doc.kind in {dkBlueprint, dkPreview, dkImage}: return false
   var h = dx
   var v = dy
   if h == 0 and (SDL_GetModState() and KMOD_SHIFT) != 0:
@@ -1313,7 +1345,7 @@ method onWheel*(ed: CodeEditor, dx, dy: float): bool =
 
 method onText*(ed: CodeEditor, s: string) =
   let doc = ed.doc
-  if doc == nil or s.len == 0 or doc.kind == dkBlueprint: return
+  if doc == nil or s.len == 0 or doc.kind in {dkBlueprint, dkPreview, dkImage}: return
   if ed.suppressSpace and s == " ":          # Ctrl+Space already handled as "complete".
     ed.suppressSpace = false
     return
@@ -1337,7 +1369,7 @@ method onText*(ed: CodeEditor, s: string) =
 method onKey*(ed: CodeEditor, e: KeyEvent): bool =
   let doc = ed.doc
   if doc == nil: return false
-  if doc.kind == dkBlueprint:
+  if doc.kind in {dkBlueprint, dkPreview, dkImage}:
     # vue blueprint : seul Ctrl+Tab (document suivant) est traité ici.
     if int(e.key) == KTab and (e.mods and (KMOD_CTRL or KMOD_CMD)) != 0 and ed.docs.len > 1:
       ed.switchTo((ed.current + (if (e.mods and KMOD_SHIFT) != 0: ed.docs.len - 1 else: 1)) mod ed.docs.len)
@@ -1660,13 +1692,13 @@ proc editorDocs*(id: ControlId, withBlueprints = false): seq[tuple[uid: int, pat
   # Documents ouverts (sans les vues blueprint, sauf withBlueprints).
   readControl(id, CodeEditor, ed):
     for d in ed.docs:
-      if d.kind != dkBlueprint or withBlueprints:
+      if d.kind notin {dkBlueprint, dkPreview, dkImage} or withBlueprints:
         result.add (uid: d.uid, path: d.path, title: d.title, dirty: d.modified)
 
 proc editorSetKind*(id: ControlId, uid: int, kind: DocKind) =
   withControl(id, CodeEditor, ed):
     for d in ed.docs:
-      if d.uid == uid and d.kind != dkBlueprint: d.kind = kind
+      if d.uid == uid and d.kind notin {dkBlueprint, dkPreview, dkImage}: d.kind = kind
 
 proc editorKind*(id: ControlId, uid: int): DocKind =
   readControl(id, CodeEditor, ed):
@@ -1678,7 +1710,7 @@ proc editorLinkUid*(id: ControlId, uid: int): int =
   result = -1
   readControl(id, CodeEditor, ed):
     for d in ed.docs:
-      if d.uid == uid and d.kind == dkBlueprint: return d.linkUid
+      if d.uid == uid and d.kind in {dkBlueprint, dkPreview}: return d.linkUid
 
 proc editorBlueprintFor*(id: ControlId, srcUid: int): int =
   # Vue blueprint ouverte sur le document srcUid, -1 sinon.
@@ -1705,6 +1737,51 @@ proc editorNewBlueprint*(id: ControlId, srcUid: int): int =
     ed.current = at + 1
     ed.signal("doc:" & $d.uid)
     result = d.uid
+
+proc editorNewPreview*(id: ControlId, srcUid: int): int =
+  # Ouvre (ou active) l'onglet « vue aperçu » du document Markdown srcUid, juste après lui.
+  result = -1
+  withControl(id, CodeEditor, ed):
+    var at = -1
+    for i, d in ed.docs:
+      if d.kind == dkPreview and d.linkUid == srcUid:
+        ed.switchTo(i)
+        return d.uid
+      if d.uid == srcUid: at = i
+    if at < 0: return -1
+    let d = newDocument("Aperçu " & ed.docs[at].title)
+    d.kind = dkPreview
+    d.linkUid = srcUid
+    ed.docs.insert(d, at + 1)
+    ed.current = at + 1
+    ed.signal("doc:" & $d.uid)
+    result = d.uid
+
+proc editorOpenImage*(id: ControlId, path: string): int =
+  # Ouvre (ou active) un onglet d'aperçu d'image.
+  let full = normalizedPath(absolutePath(path))
+  withControl(id, CodeEditor, ed):
+    for i, d in ed.docs:
+      if d.kind == dkImage and d.path == full:
+        ed.switchTo(i)
+        return d.uid
+    let d = newDocument(extractFilename(full), "", full)
+    d.kind = dkImage
+    ed.docs.add d
+    ed.current = ed.docs.high
+    ed.signal("doc:" & $d.uid)
+    result = d.uid
+
+proc editorPreviewFor*(id: ControlId, srcUid: int): int =
+  result = -1
+  readControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.kind == dkPreview and d.linkUid == srcUid: return d.uid
+
+proc editorIsMarkdown*(id: ControlId, uid: int): bool =
+  readControl(id, CodeEditor, ed):
+    for d in ed.docs:
+      if d.uid == uid: return d.isMarkdown
 
 proc editorCodeUid*(id: ControlId): int =
   # Document actif, ou code représenté par la vue blueprint active (-1 : aucun).

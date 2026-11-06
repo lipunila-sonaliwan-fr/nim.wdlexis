@@ -196,6 +196,7 @@ procedure SIGNAL(ev)
   cas commencepar(s, "doc:")
     NATURE_DOCUMENT(nombre(souschaine(s, 5)))
     ANALYSER(vrai)
+    CADENAS()
   cas commencepar(s, "bp:")
     POINTS_ARRET_MODIFIES(nombre(souschaine(s, 4)))
   cas cmd = "save"
@@ -266,7 +267,7 @@ retourner
 fonction CODE_ACTIF()
   && document de code actif (celui que représente la vue blueprint affichée)
   locale uid = ed:actif()
-  si uid >= 0 et ed:nature(uid) = "blueprint"
+  si uid >= 0 et (ed:nature(uid) = "blueprint" ou ed:nature(uid) = "apercu")
     retourner ed:lien(uid)
   finsi
 retourner uid
@@ -277,7 +278,7 @@ procedure NATURE_DOCUMENT(uid)
     retourner
   finsi
   locale n = ed:nature(uid)
-  si n = nul ou n = "blueprint"
+  si n = nul ou n = "blueprint" ou n = "apercu" ou n = "image"
     retourner
   finsi
   locale p = ed:chemin(uid)
@@ -317,6 +318,14 @@ procedure PASTILLE(uid)
     CONCEPTEUR_OUVRIR(ed:chemin(uid))
   cas n = "etat"
     ETAT_OUVRIR(ed:chemin(uid))
+  cas n = "apercu"
+    ed:activer(ed:lien(uid))
+  cas n = "image"
+    etat.libelle = TITRE_DOCUMENT(uid) + " : aperçu d'image"
+  cas ed:markdown(uid)
+    && Markdown : « Vue aperçu », comme la vue blueprint du code
+    ed:apercu(uid)
+    etat.libelle = "Vue aperçu de " + TITRE_DOCUMENT(uid) + " - cliquer la pastille pour revenir au texte"
   autrement
     etat.libelle = "Document texte : pas de vue associée."
   fincas
@@ -464,8 +473,25 @@ procedure BASCULER_MINICARTE
 retourner
 
 procedure BASCULER_THEME
+  && le thème clair / sombre s'applique à toutes les fenêtres ouvertes de l'atelier
   reglages.sombre = non reglages.sombre
-  fen:fixertheme("natif", reglages.sombre)
+  fen:fixertheme("natif", reglages.sombre, "compacte")
+  ENSEMBLE_THEME(reglages.sombre)
+  THEME_FENETRE(condlg)
+  THEME_FENETRE(etdlg)
+  THEME_FENETRE(gendlg)
+  pour chaque f dans fenpdf
+    THEME_FENETRE(f)
+  suivant
+retourner
+
+procedure THEME_FENETRE(f)
+  si f <> nul
+    essayer
+      f:fixertheme("natif", reglages.sombre, "compacte")
+    capturer err
+    finessayer
+  finsi
 retourner
 
 procedure BASCULER_GLOBALES

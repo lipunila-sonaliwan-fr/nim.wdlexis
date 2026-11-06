@@ -78,53 +78,67 @@ procedure ETAT_OUVRIR(chemin)
   ET_ARBRE()
   ET_INSPECTEUR()
   etat.libelle = "Éditeur d'états : etat_" + etcanevas:nom() + ".prg"
+  CADENAS()
 retourner
 
 procedure ETAT_FENETRE
   globale etdlg, etctl
   etctl = {lignes = {}, noeuds = {}, nomligne = nul}
   etdlg = ui.fenetre{titre = "Éditeur d'états", largeur = 1320, hauteur = 860, ;
-                     disposition = "bordure", sombre = reglages.sombre}
+                     disposition = "bordure", sombre = reglages.sombre, densite = "compacte"}
+  etdlg.marge = 0
+  etdlg.espacement = 0
   etdlg.surfermeture = @ET_FERMETURE
-  && barre d'outils
+  && barre d'outils : symboles, libellés en infobulle
   locale outils = etdlg:ajouter(ui.rangee())
   outils.ancrage = "haut"
-  CON_OUTIL(outils, "Enregistrer", @ET_ENREGISTRER, "Régénère etat_<nom>.prg")
-  CON_OUTIL(outils, "Supprimer", @ET_SUPPRIMER, "Supprime l'élément ou la zone sélectionné (Suppr)")
-  CON_OUTIL(outils, "Monter", @ET_MONTER, "Zone : plus haut dans l'état ; élément : dessiné plus tôt")
-  CON_OUTIL(outils, "Descendre", @ET_DESCENDRE, "Zone : plus bas dans l'état ; élément : dessiné plus tard")
-  CON_OUTIL(outils, "Nouvelle zone", @ET_ZONE, "Ajoute une zone nommée après la zone sélectionnée")
-  CON_OUTIL(outils, "État", @ET_ETAT, "Sélectionne l'état (format, orientation, marges)")
-  CON_OUTIL(outils, "Aperçu PDF", @ET_APERCU, "Génère le PDF avec chaque zone trois fois, variables affichées")
-  CON_OUTIL(outils, "Insérer le code", @ET_CODE, "Insère dans l'éditeur le code Lexis+ qui remplit l'état")
-  CON_OUTIL(outils, "Zoom +", @ET_ZOOM_PLUS, "Agrandit la page")
-  CON_OUTIL(outils, "Zoom −", @ET_ZOOM_MOINS, "Réduit la page")
+  outils.marge = 2
+  outils.espacement = 1
+  CON_OUTIL(outils, "enregistrer", "Enregistrer", @ET_ENREGISTRER, "Régénère etat_<nom>.prg")
+  CON_OUTIL(outils, "supprimer", "Supprimer", @ET_SUPPRIMER, "Supprime l'élément ou la zone sélectionné (Suppr)")
+  CON_OUTIL(outils, "monter", "Monter", @ET_MONTER, "Zone : plus haut dans l'état ; élément : dessiné plus tôt")
+  CON_OUTIL(outils, "descendre", "Descendre", @ET_DESCENDRE, "Zone : plus bas dans l'état ; élément : dessiné plus tard")
+  CON_OUTIL(outils, "plus", "Nouvelle zone", @ET_ZONE, "Ajoute une zone nommée après la zone sélectionnée")
+  CON_OUTIL(outils, "etat", "État", @ET_ETAT, "Sélectionne l'état (format, orientation, marges)")
+  CON_OUTIL(outils, "apercu", "Aperçu PDF", @ET_APERCU, "Génère le PDF avec chaque zone trois fois, variables affichées")
+  CON_OUTIL(outils, "code", "Insérer le code", @ET_CODE, "Insère dans l'éditeur le code Lexis+ qui remplit l'état")
+  CON_OUTIL(outils, "zoomplus", "Zoom +", @ET_ZOOM_PLUS, "Agrandit la page")
+  CON_OUTIL(outils, "zoommoins", "Zoom −", @ET_ZOOM_MOINS, "Réduit la page")
+  ESPACE(outils, nul)
+  locale bmasq = OUTIL_SYMBOLE(outils, "masquer", "Palette / Hiérarchie", "", @PALETTEETAT_BASCULER)
+  locale bfen = OUTIL_SYMBOLE(outils, "fenetre", "Palette / Hiérarchie", "", @PALETTEETAT_FENETRE)
   && barre d'état
   etctl.etat = etdlg:ajouter(ui.etiquette("Glisser depuis la palette · bord bas d'une zone : hauteur · " + ;
                                           "Suppr supprime · flèches : 0,5 mm (Maj : 5 mm)"))
   etctl.etat.ancrage = "bas"
-  && palette
-  locale cg = etdlg:ajouter(ui.colonne())
+  etctl.etat.hauteurfixe = 20
+  && palette et hiérarchie : un même ensemble de pages, à gauche
+  locale cg = etdlg:ajouter(ui.conteneur("bordure"))
   cg.ancrage = "gauche"
-  cg.largeurfixe = 200
-  cg:ajouter(ui.etiquette("PALETTE"))
-  etctl.palette = cg:ajouter(ui.paletteetat(etcanevas))
-  etctl.palette.poids = 1
-  && hiérarchie et inspecteur
+  cg.largeurfixe = 230
+  cg.marge = 0
+  locale pages = cg:ajouter(ui.onglets())
+  pages.ancrage = "centre"
+  locale ppal = pages:ajouterpage("Palette", "bordure")
+  etctl.palette = ppal:ajouter(ui.paletteetat(etcanevas))
+  etctl.palette.ancrage = "centre"
+  locale phier = pages:ajouterpage("Hiérarchie")
+  etctl.arbre = phier:ajouter(ui.arbre())
+  etctl.arbre.poids = 1
+  etctl.arbre.surselection = @ET_ARBRE_CHOIX
+  ENSEMBLE("paletteetat", "Palette et hiérarchie - état", cg, pages, bmasq, bfen, 280, 720, "masquer", "afficher")
+  && inspecteur
   locale cd = etdlg:ajouter(ui.colonne())
   cd.ancrage = "droite"
-  cd.largeurfixe = 360
-  cd:ajouter(ui.etiquette("HIÉRARCHIE"))
-  etctl.arbre = cd:ajouter(ui.arbre())
-  etctl.arbre.hauteurfixe = 220
-  etctl.arbre.surselection = @ET_ARBRE_CHOIX
+  cd.largeurfixe = 340
+  cd.marge = 2
   etctl.titre = cd:ajouter(ui.etiquette(""))
   etctl.titre.couleur = "#3B82F6"
-  etctl.insp = cd:ajouter(ui.panneau{defilement = "automatique"})
+  etctl.insp = cd:ajouter(ui.panneau{defilement = "toujours"})
   etctl.insp.poids = 1
   etctl.contenu = etctl.insp:ajouter(ui.superconteneur("vertical"))
   && page de l'état
-  locale centre = etdlg:ajouter(ui.panneau{defilement = "automatique"})
+  locale centre = etdlg:ajouter(ui.panneau{defilement = "toujours"})
   centre.ancrage = "centre"
   centre:ajouter(etcanevas)
   etcanevas.surselection = @ET_SELECTION
@@ -136,6 +150,16 @@ procedure ET_FERMETURE(ev)
   globale etdlg, etcanevas
   etdlg = nul
   etcanevas = nul
+  && palette et hiérarchie détachées : leur fenêtre se ferme avec l'éditeur d'états
+  si ensembles.paletteetat <> nul et ensembles.paletteetat.fen <> nul
+    locale f = ensembles.paletteetat.fen
+    ensembles.paletteetat.fen = nul
+    essayer
+      f:fermer()
+    capturer err
+    finessayer
+  finsi
+  CADENAS()
 retourner
 
 procedure ET_ETAT_MESSAGE(message)

@@ -107,8 +107,14 @@ method draw*(c: ShellView, d: Drawing, t: Theme) =
     y += c.lineH
     inc i
   d.popClip()
-  drawScrollIndicator(d, t, rect(r.x, r.y + 4, r.w - 2, r.h - 8), total, area.h, c.scroll)
+  c.drawScrollBar(d, t, vBarArea(r), total, area.h, c.scroll)
   if c.focus: d.strokeRoundRect(r, 6, withAlpha(t.accent, 160), 1)
+
+method scrollTrackTo*(c: ShellView, vertical: bool, pos: float) =
+  if vertical:
+    let total = float(c.wrapped.len) * c.lineH
+    c.scroll = clamp(pos, 0.0, max(0.0, total - c.textArea.h))
+    c.follow = c.scroll >= total - c.textArea.h - 1
 
 proc scrollBy(c: ShellView, dy: float) =
   let area = c.textArea

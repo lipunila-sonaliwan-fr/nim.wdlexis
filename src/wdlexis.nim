@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.8.3,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.8.4,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -31,7 +31,7 @@
 
 ]#
 
-import std/[os, strutils, sets, tables, atomics, locks, algorithm, deques]
+import std/[os, strutils, sets, tables, atomics, locks, algorithm, deques, sequtils]
 from std/unicode import nil
 import wdgui
 import ide/[compat, settings, lexislang, langdocs, lexislint, codeeditor, session]
@@ -41,6 +41,7 @@ from ide/formmodel import isFormFile
 import ide/reportdesigner
 import ide/appicon
 import ide/blueprint
+import ide/dockpane
 from ide/etats import isReportFile
 import lexis/api
 import paquets/tous
@@ -104,18 +105,23 @@ type
     apiRows: seq[ApiDoc]
     pause: PauseInfo
     paused: bool
+    varFrame: int                                   # cadre affiché dans la page Variables
+    varRows: seq[tuple[name, value, kind, scope: string]]
+    varSel: int                                     # ligne choisie pour la modification (-1 : aucune)
     consoleBuf: string
 
 var
   win: Window
   gWin: typeof(Event().window)
   haveWin: Atomic[bool]
-  gTool: ControlId                # fenêtre d'outils (Projet, Structure, Référence)
-  toolOpen: Atomic[bool]
+  paneL, paneB: DockPane          # ensembles Projet/Structure/Référence et Problèmes/Console/Variables/Pile
+  spL, spB: ControlId             # séparateurs gauche et bas
+  pdfWins: seq[ControlId]         # fenêtres de consultation PDF
   mnu, edId, trProj, trOutline, trApi, edApiDoc, edApiSearch, tabLeft, tabBottom,
     tblProb, edOut, edIn, btnSend, btnCopy, btnClear, tblVars, lstStack, lblStatus, lblPos,
     btnOpen, btnNew, btnSave, btnCheck, btnRun, btnDebug, btnStepIn, btnStepOver,
-    btnStepOut, btnCont, btnPause, btnStop: ControlId
+    btnStepOut, btnCont, btnPause, btnStop, btnPaneL, btnWinL, btnPaneB, btnWinB,
+    btnDup, btnRen, btnDel, edVar, lblVar, btnVarSet: ControlId
   gLock: Lock
   st: AppState
   lintGen: Atomic[int]
@@ -251,6 +257,46 @@ proc reindex() =
   procs.sort()
   bpSetProjectProcs(procs)
 
+proc fileIcon(path: string): (string, Color) =
+  ## Symbole et couleur du type de fichier (pastilles des onglets : rouge code, orange
+  ## formulaire, jaune état) ; ("", …) si le type est inconnu.
+  let e = path.splitFile.ext.toLowerAscii
+  case e
+  of ".prg":
+    if isFormFile(path): ("formulaire", hex"#F59E0B")
+    elif isReportFile(path): ("etat", hex"#EAB308")
+    else: ("code", hex"#E5484D")
+  of ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico": ("image", hex"#A855F7")
+  of ".md", ".markdown": ("markdown", hex"#14B8A6")
+  of ".txt", ".log", ".csv", ".ini", ".cfg", ".json", ".html": ("texte", hex"#8C8F96")
+  of ".sql": ("sql", hex"#3B82F6")
+  of ".pdf": ("pdf", hex"#DC2626")
+  else: ("", hex"#000000")
+
+proc isImageFile(path: string): bool =
+  path.splitFile.ext.toLowerAscii in [".png", ".jpg", ".jpeg", ".gif", ".bmp"]
+
+proc designerFiles(): seq[string] =
+  let f = designerFormFile()
+  if f.len > 0: result.add f
+  let e = reportDesignerFile()
+  if e.len > 0: result.add e
+
+proc refreshLocks() =
+  ## Cadenas fermé devant les fichiers ouverts dans l'éditeur ou l'un des concepteurs.
+  let r = root()
+  if r.len == 0: return
+  var open: HashSet[string]
+  for d in editorDocs(edId, withBlueprints = true):
+    if d.path.len > 0: open.incl normalizedPath(absolutePath(d.path))
+  for f in designerFiles(): open.incl normalizedPath(absolutePath(f))
+  let top = extractFilename(r)
+  for p in treeLeafPaths(trProj):
+    let parts = p.split(TreeSep)
+    if parts.len < 2 or parts[0] != top: continue
+    let full = normalizedPath(absolutePath(r / parts[1 .. ^1].join($DirSep)))
+    treeSetLock(trProj, p, full in open)
+
 proc fillProjectTree() =
   let r = root()
   treeDeleteAll(trProj)
@@ -262,8 +308,16 @@ proc fillProjectTree() =
     files.add u
   files.sort()
   let top = extractFilename(r)
-  for f in files: treeAdd(trProj, top & TreeSep & f.replace("/", $TreeSep))
+  for f in files:
+    let path = top & TreeSep & f.replace("/", $TreeSep)
+    treeAdd(trProj, path)
+    let full = r / f
+    if dirExists(full): treeSetIcon(trProj, path, "dossier")
+    else:
+      let (icon, col) = fileIcon(full)
+      if icon.len > 0: treeSetIcon(trProj, path, icon, col)
   treeExpand(trProj, top)
+  refreshLocks()
 
 proc openProject(dir: string) =
   if not dirExists(dir):
@@ -372,6 +426,9 @@ proc refreshOutline(syms: seq[Symbol], uid: int) =
 proc lintDoc(uid0: int) =
   let uid = codeOf(uid0)
   if uid < 0: return
+  if editorKind(edId, uid) == dkText and editorInfo(edId, uid).path.len > 0 and
+     not editorInfo(edId, uid).path.toLowerAscii.endsWith(".prg"):
+    return                       # texte, Markdown, SQL… : pas d'analyse Lexis+.
   let snap = editorSnapshot(edId, uid)
   let info = editorInfo(edId, uid)
   if snap.lines.len == 0: return
@@ -452,6 +509,13 @@ proc closeDoc(uid: int) =
     bpClose(uid)
     updateTitle()
     return
+  if editorKind(edId, uid) in {dkPreview, dkImage}:   # vue aperçu / image : rien à enregistrer.
+    editorClose(edId, uid)
+    refreshLocks()
+    updateTitle()
+    return
+  let pv = editorPreviewFor(edId, uid)
+  if pv >= 0: editorClose(edId, pv)
   let info = editorInfo(edId, uid)
   if info.dirty:
     if confirm(iconQuestion, "« " & info.title & " » a été modifié.\n" &
@@ -463,6 +527,7 @@ proc closeDoc(uid: int) =
     bpClose(bp)
   editorClose(edId, uid)
   withState: st.diagByUid.del(uid)
+  refreshLocks()
   refreshProblems()
   lintDoc(activeUid())
   updateTitle()
@@ -609,11 +674,70 @@ proc allBreakpoints(): seq[(string, seq[int])] =
 
 proc showPause(info: PauseInfo, frameIdx: int) =
   tableDeleteAll(tblVars)
+  var rows: seq[tuple[name, value, kind, scope: string]]
   if frameIdx < info.frames.len:
-    for v in info.frames[frameIdx].vars:
-      discard tableAddLine(tblVars, v.name, v.value, v.kind, v.scope)
-  for v in info.globals:
-    discard tableAddLine(tblVars, v.name, v.value, v.kind, v.scope)
+    for v in info.frames[frameIdx].vars: rows.add (v.name, v.value, v.kind, v.scope)
+  for v in info.globals: rows.add (v.name, v.value, v.kind, v.scope)
+  for r in rows: discard tableAddLine(tblVars, r.name, r.value, r.kind, r.scope)
+  withState:
+    st.varFrame = frameIdx
+    st.varRows = rows
+    st.varSel = -1
+  lblVar.caption = "Choisir une variable (chaîne, entier, décimal, booléen) pour modifier sa valeur :"
+  edVar.value = ""
+  edVar.state = csGrayed
+  btnVarSet.state = csGrayed
+
+proc editableKind(kind: string): bool = kind in ["chaine", "entier", "décimal", "logique"]
+
+proc selectVariable(i: int) =
+  ## Ligne i (0-based) de la page Variables : la valeur passe dans le champ de modification.
+  var row: tuple[name, value, kind, scope: string]
+  var paused = false
+  withState:
+    paused = st.paused
+    if i >= 0 and i < st.varRows.len:
+      row = st.varRows[i]
+      st.varSel = i
+  if row.name.len == 0: return
+  if not paused or not editableKind(row.kind):
+    lblVar.caption = row.name & " (" & row.kind & ") : modifiable seulement en pause, pour les chaînes, " &
+                     "entiers, décimaux et booléens"
+    edVar.state = csGrayed
+    btnVarSet.state = csGrayed
+    return
+  var v = row.value
+  if row.kind == "chaine" and v.len >= 2 and v[0] == '"' and v[^1] == '"': v = v[1 .. ^2]
+  lblVar.caption = row.name & " (" & row.kind & ", " & row.scope & ") ="
+  edVar.state = csActive
+  btnVarSet.state = csActive
+  edVar.value = v
+
+proc applyVariable() =
+  ## Nouvelle valeur de la variable choisie, appliquée au programme arrêté.
+  var row: tuple[name, value, kind, scope: string]
+  var frame = 0
+  var i = -1
+  withState:
+    i = st.varSel
+    frame = st.varFrame
+    if i >= 0 and i < st.varRows.len: row = st.varRows[i]
+  if row.name.len == 0: return
+  let (ok, shown) = setVariable(frame, row.name, row.scope, edVar.value)
+  if not ok:
+    status("Modification refusée : " & shown)
+    return
+  withState:
+    if i < st.varRows.len: st.varRows[i].value = shown
+    # l'instantané de pause suit (changement de cadre dans la pile d'appels).
+    if row.scope == "globale":
+      for g in st.pause.globals.mitems:
+        if cmpIgnoreCase(g.name, row.name) == 0: g.value = shown
+    elif frame < st.pause.frames.len:
+      for v in st.pause.frames[frame].vars.mitems:
+        if cmpIgnoreCase(v.name, row.name) == 0: v.value = shown
+  tableSetCell(tblVars, i + 1, 2, shown)
+  status(row.name & " = " & shown & " (valeur modifiée ; F5 continuer, F10 / F11 pas à pas)")
 
 proc onPaused(info: PauseInfo) =
   if not running.load() or stopAsked.load(): return   # arrêt en cours : pas de pause.
@@ -629,6 +753,7 @@ proc onPaused(info: PauseInfo) =
   for f in info.frames:
     discard listAdd(lstStack, f.name & "    " & extractFilename(f.source) & ":" & $f.line)
   showPause(info, 0)
+  if paneB.isHidden and not paneB.isDetached: paneB.setHidden(false)
   tabBottom.value = "3"
   status("En pause : " & extractFilename(info.source) & " ligne " & $info.line &
          " - F5 continuer, F10 pas principal, F11 pas à pas, Maj+F11 sortir")
@@ -1173,8 +1298,19 @@ proc applyView() =
   let o = opts()
   editorSetOptions(edId, o.minimap, o.dark)
   editorSetFontSize(edId, EditorBaseFont + float(o.fontDelta))
-  if haveWin.load(): gWin.theme = themeFor(o.dark, o.fontDelta)
-  if toolOpen.load(): gTool.theme = themeFor(o.dark, o.fontDelta)
+  # thème appliqué à toutes les fenêtres de l'atelier : principale, ensembles détachés,
+  # concepteurs (formulaires, états) et fenêtres PDF.
+  let th = themeFor(o.dark, o.fontDelta)
+  if haveWin.load(): gWin.theme = th
+  var ids: seq[ControlId]
+  for p in [paneL, paneB]:
+    if p != nil and p.isDetached: ids.add p.winId
+  ids.add designerWindowIds()
+  ids.add reportWindowIds()
+  ids.add pdfWins
+  let open = windowIds()
+  for id in ids:
+    if id in open: id.theme = th
 
 proc changeFont(delta: int, reset = false) =
   var o = opts()
@@ -1228,6 +1364,7 @@ proc openFormDesigner(formFile: string) =
     alert(iconStop, "« " & extractFilename(formFile) & " » ne contient pas de dessin de formulaire " &
           "(lignes « &&§ » écrites par le concepteur).", title = "Concepteur de formulaires")
   else:
+    refreshLocks()
     status("Concepteur : " & (if formFile.len > 0: extractFilename(formFile) else: "nouveau formulaire") &
            " · code : " & extractFilename(code))
 
@@ -1240,6 +1377,9 @@ proc designerButton() =
 proc onDesignerFile(path: string) {.nimcall, gcsafe.} =
   {.cast(gcsafe).}: (fillProjectTree(); reindex())
 
+proc onDesignerClosed() {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}: refreshLocks()
+
 proc onDesignerCode(path: string) {.nimcall, gcsafe.} =
   {.cast(gcsafe).}: reindex()
 
@@ -1250,7 +1390,9 @@ proc openReport(reportFile: string) =
     return
   let msg = openReportDesigner(r, reportFile, edId, theme(gWin))
   if msg.len > 0: alert(iconInformation, msg, title = "Éditeur d'états")
-  else: status("Éditeur d'états : " & (if reportFile.len > 0: extractFilename(reportFile) else: "nouvel état"))
+  else:
+    refreshLocks()
+    status("Éditeur d'états : " & (if reportFile.len > 0: extractFilename(reportFile) else: "nouvel état"))
 
 #
 # Vues blueprint et pastilles des onglets
@@ -1286,49 +1428,161 @@ proc onDot(uid: int) =
     if info.path.len > 0: openFormDesigner(info.path)
   of dkReport:
     if info.path.len > 0: openReport(info.path)
-  of dkText: status("Document texte : pas de vue associée.")
+  of dkText:
+    if editorIsMarkdown(edId, uid):
+      discard editorNewPreview(edId, uid)
+      status("Vue aperçu de " & info.title & " - cliquer la pastille pour revenir au texte")
+      updateTitle()
+    else: status("Document texte : pas de vue associée.")
+  of dkPreview:
+    let src = editorLinkUid(edId, uid)
+    if src >= 0: editorActivate(edId, src)
+  of dkImage: status(info.title & " : aperçu d'image")
 
 proc handler(ev: var Event) {.nimcall, gcsafe.}
 
-proc buildToolWindow() =
-  ## Fenêtre d'outils : Projet, Structure, Référence.
-  let o = opts()
-  let tw = newWindow("Projet - " & AppName, 380, 860, handler, layout = lkBorder, theme = themeFor(o.dark, o.fontDelta))
-  tw.placed = true
-  tw.placeX = 16
-  tw.placeY = 48
-  gTool = tw.id
-  let left = tw.addChild(newTab())
-  left.dock = dkCenter
-  tabLeft = left.id
-  let pgProj = left.addPage("Projet", lkVertical)
-  let tp = pgProj.addChild(newTreeView())
-  tp.weight = 1
-  trProj = tp.id
-  let pgOut = left.addPage("Structure", lkVertical)
-  let lo = pgOut.addChild(newTreeView())
-  lo.weight = 1
-  trOutline = lo.id
-  let pgApi = left.addPage("Référence", lkBorder)
-  let search = pgApi.addChild(newEdit(placeholder = "Rechercher (nom, paquet, description…)"))
-  search.dock = dkTop
-  edApiSearch = search.id
-  # arbre des paquets et fiche Markdown, séparés par un séparateur horizontal déplaçable.
-  let sp = pgApi.addChild(newSplitter(vertical = false, position = 0.5))
-  sp.dock = dkCenter
-  let ta = sp.addChild(newTreeView())
-  trApi = ta.id
-  let ad = sp.addChild(newMarkdownView(ApiDocWelcome))
-  edApiDoc = ad.id
-  toolOpen.store(true)
+proc showLeftPage(page: string) =
+  ## Affiche l'ensemble Projet / Structure / Référence (s'il est masqué) sur la page voulue.
+  if paneL.isHidden and not paneL.isDetached: paneL.setHidden(false)
+  tabLeft.value = page
 
-proc showToolWindow() =
-  if toolOpen.load(): return
-  buildToolWindow()
+#
+# Fichiers du projet : ouvrir (texte, image, PDF), dupliquer, renommer, supprimer
+#
+
+proc selectedProjectPath(): string =
+  ## Chemin complet du fichier ou dossier choisi dans la page Projet ("" : aucun).
+  let r = root()
+  let parts = trProj.value.split(TreeSep)
+  if r.len == 0 or parts.len < 2: return ""
+  r / parts[1 .. ^1].join($DirSep)
+
+proc openPdfWindow(path: string) =
+  ## Consultation d'un PDF dans une fenêtre dédiée (pages, vignettes et signets, zoom,
+  ## recherche, sélection de texte, rotation, annotations, impression par l'enregistrement).
+  if not pdfAvailable():
+    alert(iconInformation, "La consultation des PDF nécessite la bibliothèque PDFium :\n" & pdfError(),
+          title = "PDF")
+    return
+  let o = opts()
+  let w = newWindow(extractFilename(path) & " - " & AppName, 1000, 900, handler, layout = lkVertical,
+                    theme = themeFor(o.dark, o.fontDelta))
+  w.root.margin = 0
+  w.root.spacing = 0
+  let v = w.addChild(newPdfViewer())
+  v.weight = 1
+  pdfWins.add w.id
+  if not pdfOpen(v.id, path): status("PDF illisible : " & path)
+  else: status("PDF : " & relPath(path))
+
+proc openProjectFile(p: string) =
+  ## Clic sur un fichier de la page Projet : image -> onglet d'aperçu ; PDF -> fenêtre
+  ## dédiée ; sinon l'éditeur (texte brut, Markdown, SQL, Lexis+).
+  if isImageFile(p):
+    discard editorOpenImage(edId, p)
+    status("Aperçu de l'image " & relPath(p))
+  elif p.toLowerAscii.endsWith(".pdf"): openPdfWindow(p)
+  else:
+    discard openFile(p)
+    lintDoc(activeUid())
+  refreshLocks()
+  updateTitle()
+
+proc closeTabsOf(path: string): bool =
+  ## Ferme les onglets du fichier (et ses vues) avant de le renommer ou de le supprimer ;
+  ## faux si l'utilisateur garde un document modifié.
+  let full = normalizedPath(absolutePath(path))
+  for d in editorDocs(edId, withBlueprints = true):
+    if d.path.len > 0 and (normalizedPath(d.path) == full or normalizedPath(d.path).startsWith(full & $DirSep)):
+      let k = editorKind(edId, d.uid)
+      if k == dkImage: editorClose(edId, d.uid)
+      else:
+        closeDoc(d.uid)
+        if editorUidOf(edId, d.path) >= 0: return false
+  true
+
+proc inDesigner(path: string): bool =
+  let full = normalizedPath(absolutePath(path))
+  for f in designerFiles():
+    if normalizedPath(absolutePath(f)) == full: return true
+
+proc duplicateSelected() =
+  let p = selectedProjectPath()
+  if p.len == 0 or not (fileExists(p) or dirExists(p)):
+    status("Choisissez d'abord un fichier dans la page Projet.")
+    return
+  let (dir, name, ext) = p.splitFile
+  var n = 1
+  while fileExists(dir / name & $n & ext) or dirExists(dir / name & $n & ext): inc n
+  let dest = dir / name & $n & ext
+  if confirm(iconQuestion, "Dupliquer « " & extractFilename(p) & " » en « " & extractFilename(dest) & " » ?",
+             title = "Dupliquer") != drOk: return
+  try:
+    if dirExists(p): copyDir(p, dest) else: copyFile(p, dest)
+  except CatchableError as e:
+    alert(iconStop, "Copie impossible :\n" & e.msg, title = "Dupliquer")
+    return
   fillProjectTree()
-  fillApiTree()
-  withState: st.outlineKey = ""
-  lintDoc(activeUid())
+  reindex()
+  let r = root()
+  treeSelectPlus(trProj, extractFilename(r) & TreeSep & relativePath(dest, r).replace($DirSep, TreeSep))
+  status("Copie créée : " & relPath(dest))
+
+proc renameSelected() =
+  let p = selectedProjectPath()
+  if p.len == 0 or not (fileExists(p) or dirExists(p)):
+    status("Choisissez d'abord un fichier dans la page Projet.")
+    return
+  if inDesigner(p):
+    alert(iconInformation, "« " & extractFilename(p) & " » est ouvert dans un concepteur : fermez-le d'abord.",
+          title = "Renommer")
+    return
+  var nom = extractFilename(p)
+  if not promptOk(iconQuestion, "Nouveau nom de « " & extractFilename(p) & " » :", nom, title = "Renommer"): return
+  nom = nom.strip
+  if nom.len == 0 or nom == extractFilename(p): return
+  if '/' in nom or '\\' in nom:
+    alert(iconStop, "Le nom ne doit pas contenir de séparateur de dossier.", title = "Renommer")
+    return
+  let dest = p.parentDir / nom
+  if fileExists(dest) or dirExists(dest):
+    alert(iconStop, "« " & nom & " » existe déjà.", title = "Renommer")
+    return
+  let wasOpen = fileExists(p) and editorUidOf(edId, p) >= 0
+  if not closeTabsOf(p): return
+  try:
+    if dirExists(p): moveDir(p, dest) else: moveFile(p, dest)
+  except CatchableError as e:
+    alert(iconStop, "Renommage impossible :\n" & e.msg, title = "Renommer")
+    return
+  fillProjectTree()
+  reindex()
+  if wasOpen: openProjectFile(dest)
+  let r = root()
+  treeSelectPlus(trProj, extractFilename(r) & TreeSep & relativePath(dest, r).replace($DirSep, TreeSep))
+  status("Renommé : " & relPath(p) & " → " & relPath(dest))
+
+proc deleteSelected() =
+  let p = selectedProjectPath()
+  if p.len == 0 or not (fileExists(p) or dirExists(p)):
+    status("Choisissez d'abord un fichier dans la page Projet.")
+    return
+  if inDesigner(p):
+    alert(iconInformation, "« " & extractFilename(p) & " » est ouvert dans un concepteur : fermez-le d'abord.",
+          title = "Supprimer")
+    return
+  let what = if dirExists(p): "le dossier « " & extractFilename(p) & " » et tout son contenu"
+             else: "« " & extractFilename(p) & " »"
+  if confirm(iconExclamation, "Supprimer définitivement " & what & " ?", title = "Supprimer") != drOk: return
+  if not closeTabsOf(p): return
+  try:
+    if dirExists(p): removeDir(p) else: removeFile(p)
+  except CatchableError as e:
+    alert(iconStop, "Suppression impossible :\n" & e.msg, title = "Supprimer")
+    return
+  fillProjectTree()
+  reindex()
+  status("Supprimé : " & relPath(p))
 
 proc onMenu(path: string) =
   let item = path.split(TreeSep)[^1]
@@ -1352,7 +1606,13 @@ proc onMenu(path: string) =
     let uid = editorActiveUid(edId)
     if uid >= 0: closeDoc(uid)
   of "Vue blueprint du fichier courant": openBlueprint(activeUid())
-  of "Fenêtre Projet / Structure / Référence": showToolWindow()
+  of "Projet / Structure / Référence : afficher ou masquer": paneL.toggle()
+  of "Projet / Structure / Référence : fenêtre dédiée": paneL.detach()
+  of "Problèmes / Console / Variables / Pile : afficher ou masquer": paneB.toggle()
+  of "Problèmes / Console / Variables / Pile : fenêtre dédiée": paneB.detach()
+  of "Dupliquer le fichier…": duplicateSelected()
+  of "Renommer le fichier…": renameSelected()
+  of "Supprimer le fichier…": deleteSelected()
   of "Quitter":
     var dirty = false
     for d in editorDocs(edId):
@@ -1379,6 +1639,7 @@ proc onMenu(path: string) =
   of "Vérifier les fichiers ouverts":
     reindex()
     lintAllOpen()
+    if paneB.isHidden and not paneB.isDetached: paneB.setHidden(false)
     tabBottom.value = "1"
   of "Exécuter (Ctrl+R)": runProgramFrom(false, false)
   of "Déboguer / Continuer (F5)": doContinueOrDebug()
@@ -1447,16 +1708,14 @@ proc onMenu(path: string) =
     setOpts(o)
     lintAllOpen()
   of "Raccourcis clavier": alert(iconInformation, Shortcuts, title = "Raccourcis")
-  of "Référence des fonctions et paquets":
-    showToolWindow()
-    tabLeft.value = "3"
+  of "Référence des fonctions et paquets": showLeftPage("3")
   of "Copier la console": consoleCopy()
   of "Effacer la console": consoleClear()
   of "À propos":
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.8.3\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.8.4\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" &
@@ -1469,7 +1728,8 @@ proc buildMenu(m: ControlId) =
   let menus = [
     ("Fichier", @["Nouveau projet…", "Ouvrir un projet…", "Ouvrir un dossier par son chemin…",
                   "Nouveau fichier…", "Ouvrir un fichier…", "Enregistrer", "Enregistrer sous…",
-                  "Enregistrer tout", "Fermer l'onglet", "Quitter"]),
+                  "Enregistrer tout", "Fermer l'onglet", "-", "Dupliquer le fichier…", "Renommer le fichier…",
+                  "Supprimer le fichier…", "-", "Quitter"]),
     ("Édition", @["Annuler", "Rétablir", "Couper", "Copier", "Coller", "Tout sélectionner",
                   "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter"]),
     ("Recherche", @["Rechercher…", "Remplacer…", "Occurrence suivante", "Aller à la ligne…",
@@ -1482,7 +1742,10 @@ proc buildMenu(m: ControlId) =
     ("Conception", @["Vue blueprint du fichier courant", "-",
                      "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…",
                      "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"]),
-    ("Affichage", @["Fenêtre Projet / Structure / Référence", "-",
+    ("Affichage", @["Projet / Structure / Référence : afficher ou masquer",
+                    "Projet / Structure / Référence : fenêtre dédiée",
+                    "Problèmes / Console / Variables / Pile : afficher ou masquer",
+                    "Problèmes / Console / Variables / Pile : fenêtre dédiée", "-",
                     "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
                     "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)",
                     "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",
@@ -1510,6 +1773,7 @@ proc onEditorSignal(text: string) =
         bpOpen(uid, src, editorText(edId, src), editorInfo(edId, src).version)
         bpRebuildDetails()
     lintDoc(activeUid())
+    refreshLocks()
     updateTitle()
   elif text.startsWith("bp:"):
     try: syncBreakpoints(parseInt(text[3 .. ^1])) except ValueError: discard
@@ -1593,7 +1857,7 @@ proc handleEvent(ev: var Event) =
     if bpHandleEvent(ev): return
     case ev.kind
     of evWindowOpen:
-      if ev.id == gTool: return
+      if ev.id != gWin: return
       applyView()
       let uid = activeUid()
       if uid >= 0: lintDoc(uid)
@@ -1606,10 +1870,7 @@ proc handleEvent(ev: var Event) =
         let parts = ev.text.split(TreeSep)
         if r.len > 0 and parts.len > 1:
           let p = r / parts[1 .. ^1].join($DirSep)
-          if fileExists(p):
-            discard openFile(p)
-            lintDoc(activeUid())
-            updateTitle()
+          if fileExists(p): openProjectFile(p)
       elif ev.id == trOutline:
         var line = -1
         withState: line = st.outlinePaths.getOrDefault(ev.text, -1)
@@ -1619,6 +1880,8 @@ proc handleEvent(ev: var Event) =
           else:
             editorGoto(edId, activeUid(), line, 0)
             editorFlush(edId)
+      elif ev.id == tblVars:
+        selectVariable(ev.index - 1)
       elif ev.id == lstStack:
         var info: PauseInfo
         withState: info = st.pause
@@ -1646,7 +1909,10 @@ proc handleEvent(ev: var Event) =
             editorFlush(edId)
           else: gotoFile(row.path, row.line, 0)
     of evDoubleClick:
-      if ev.id == trProj:
+      if ev.id == tblVars:
+        selectVariable(ev.index - 1)
+        if edVar.state == csActive: setFocus(edVar)
+      elif ev.id == trProj:
         let r = root()
         let parts = trProj.value.split(TreeSep)
         if r.len > 0 and parts.len > 1:
@@ -1670,8 +1936,14 @@ proc handleEvent(ev: var Event) =
         scheduleLint()
     of evKeyDown:
       if ev.id == edIn and int(ev.key) in [KReturn, KKpEnter]: sendInput()
+      elif ev.id == edVar and int(ev.key) in [KReturn, KKpEnter]: applyVariable()
     of evClick:
-      if ev.id == btnOpen: onMenu("Fichier" & TreeSep & "Ouvrir un projet…")
+      if paneL.handleClick(ev.id) or paneB.handleClick(ev.id): return
+      if ev.id == btnDup: duplicateSelected()
+      elif ev.id == btnRen: renameSelected()
+      elif ev.id == btnDel: deleteSelected()
+      elif ev.id == btnVarSet: applyVariable()
+      elif ev.id == btnOpen: onMenu("Fichier" & TreeSep & "Ouvrir un projet…")
       elif ev.id == btnNew: newFileInProject()
       elif ev.id == btnSave: discard save(activeUid())
       elif ev.id == btnCheck: onMenu("Exécuter" & TreeSep & "Vérifier les fichiers ouverts")
@@ -1687,9 +1959,20 @@ proc handleEvent(ev: var Event) =
       elif ev.id == btnCopy: consoleCopy()
       elif ev.id == btnClear: consoleClear()
     of evWindowClose:
-      if ev.id == gTool:
-        toolOpen.store(false)          # rouverte par Affichage > Fenêtre Projet / Structure / Référence.
+      if paneL.handleClose(ev.id) or paneB.handleClose(ev.id): return   # ensemble rattaché.
+      if ev.id in pdfWins:
+        pdfWins.keepItIf(it != ev.id)
         return
+      if ev.id != gWin: return
+      var o = opts()
+      o.leftHidden = paneL.isHidden
+      o.bottomHidden = paneB.isHidden
+      o.leftPos = spL.valueNum
+      o.bottomPos = spB.valueNum
+      setOpts(o)
+      for p in [paneL, paneB]:
+        if p.isDetached: closeWindow(p.winId)
+      for w in pdfWins: closeWindow(w)
       doStop()
       closeDesigner()
       closeReportDesigner()
@@ -1730,51 +2013,101 @@ proc buildUi() =
   elif s.lastProject.len > 0 and dirExists(s.lastProject):
     startDir = s.lastProject
 
-  win = newWindow(AppName & " - Lexis+", 1240, 860, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
+  win = newWindow(AppName & " - Lexis+", 1500, 900, handler, layout = lkBorder, theme = themeFor(s.dark, s.fontDelta))
   win.placed = true
-  win.placeX = 408
-  win.placeY = 48
+  win.placeX = 40
+  win.placeY = 40
   {.cast(gcsafe).}: gWin = win.id
   haveWin.store(true)
 
-  let top = win.addChild(newSupercontrol(lkVertical))
+  # fenêtre compacte : menu et barre de boutons collés en haut, état collé en bas
+  # (la zone sûre réserve l'encoche des MacBook en plein écran / fenêtre agrandie).
+  win.root.margin = 0
+  win.root.spacing = 0
+  let top = win.addChild(newContainer(lkVertical, 0, 0))
   top.dock = dkTop
   mnu = top.addChild(newMenuBar()).id
   buildMenu(mnu)
-  let bar = top.addChild(newSupercontrol(lkHorizontal))
-  btnOpen = bar.toolButton("Ouvrir", "Ouvrir un projet")
-  btnNew = bar.toolButton("Nouveau", "Nouveau fichier")
-  btnSave = bar.toolButton("Enregistrer", "Ctrl+S")
-  btnCheck = bar.toolButton("Vérifier", "Analyser les fichiers ouverts")
-  btnRun = bar.toolButton("▶ Exécuter", "Ctrl+R : exécution directe")
-  btnDebug = bar.toolButton("Déboguer", "F5 : exécution jusqu'au prochain point d'arrêt")
-  btnCont = bar.toolButton("Continuer", "F5 (en pause)")
-  btnStepIn = bar.toolButton("Pas à pas", "F11 : entrer dans les procédures")
-  btnStepOver = bar.toolButton("Pas principal", "F10 : passer par-dessus les appels")
-  btnStepOut = bar.toolButton("Sortir", "Maj+F11 : terminer la procédure en cours")
-  btnPause = bar.toolButton("Pause", "Interrompre à la prochaine instruction")
-  btnStop = bar.toolButton("■ Arrêter", "Maj+F5")
-  let spacer = bar.addChild(newLabel(""))
-  spacer.weight = 1
+  let bar = top.addChild(newContainer(lkHorizontal, 2, 1))
+  proc ib(icon, caption, tip: string): ControlId = bar.iconTool(icon, caption, tip).id
+  btnOpen = ib("ouvrir", "Ouvrir un projet", "choisir un fichier du dossier du projet")
+  btnNew = ib("nouveau", "Nouveau fichier", "dans le dossier du projet")
+  btnSave = ib("enregistrer", "Enregistrer", "Ctrl+S")
+  bar.toolSeparator()
+  btnCheck = ib("verifier", "Vérifier", "analyser les fichiers ouverts")
+  btnRun = ib("executer", "Exécuter", "Ctrl+R : exécution directe")
+  btnDebug = ib("deboguer", "Déboguer", "F5 : exécution jusqu'au prochain point d'arrêt")
+  bar.toolSeparator()
+  btnCont = ib("continuer", "Continuer", "F5 (en pause)")
+  btnStepIn = ib("pasapas", "Pas à pas", "F11 : entrer dans les procédures")
+  btnStepOver = ib("pasprincipal", "Pas principal", "F10 : passer par-dessus les appels")
+  btnStepOut = ib("sortir", "Sortir", "Maj+F11 : terminer la procédure en cours")
+  btnPause = ib("pause", "Pause", "interrompre à la prochaine instruction")
+  btnStop = ib("arreter", "Arrêter", "Maj+F5")
+  bar.toolSpacer()
+  btnPaneL = ib("masquer", "Projet / Structure / Référence", "")
+  btnWinL = ib("fenetre", "Projet / Structure / Référence", "")
+  bar.toolSeparator()
+  btnPaneB = ib("descendre", "Problèmes / Console / Variables / Pile d'appels", "")
+  btnWinB = ib("fenetre", "Problèmes / Console / Variables / Pile d'appels", "")
 
-  let sb = win.addChild(newSupercontrol(lkHorizontal))
+  let sb = win.addChild(newContainer(lkHorizontal, 0, 6))
   sb.dock = dkBottom
-  let ls = sb.addChild(newLabel("Prêt"))
+  sb.fixedHeight = 20
+  let ls = sb.addChild(newLabel(" Prêt"))
   ls.weight = 1
   lblStatus = ls.id
   let lp = sb.addChild(newLabel("Ln 1, Col 1"))
-  lp.fixedWidth = 140
+  lp.fixedWidth = 130
   lblPos = lp.id
 
-  # documents (une page par document, pastille de couleur) au-dessus des panneaux d'exécution.
-  let right = win.addChild(newSplitter(vertical = false, position = 0.72))
-  right.dock = dkCenter
+  # Projet / Structure / Référence (gauche) | documents au-dessus des panneaux d'exécution.
+  let spLeft = win.addChild(newSplitter(vertical = true, position = (if s.leftPos > 0.02: s.leftPos else: 0.22)))
+  spLeft.dock = dkCenter
+  spLeft.thickness = 4
+  spL = spLeft.id
+  let hostL = spLeft.addChild(newContainer(lkBorder, 0, 0))
+  let left = hostL.addChild(newTab())
+  left.dock = dkCenter
+  tabLeft = left.id
+  let pgProj = left.addPage("Projet", lkBorder)
+  let projBar = pgProj.addChild(newContainer(lkHorizontal, 1, 1))
+  projBar.dock = dkTop
+  btnDup = projBar.iconTool("dupliquer", "Dupliquer", "copie du fichier choisi avec le suffixe 1, 2… (après confirmation)").id
+  btnRen = projBar.iconTool("renommer", "Renommer", "donner un nouveau nom au fichier choisi").id
+  btnDel = projBar.iconTool("supprimer", "Supprimer", "supprimer le fichier choisi (après confirmation)").id
+  projBar.toolSpacer()
+  let tp = pgProj.addChild(newTreeView())
+  tp.dock = dkCenter
+  trProj = tp.id
+  let pgOut = left.addPage("Structure", lkVertical)
+  let lo = pgOut.addChild(newTreeView())
+  lo.weight = 1
+  trOutline = lo.id
+  let pgApi = left.addPage("Référence", lkBorder)
+  let search = pgApi.addChild(newEdit(placeholder = "Rechercher (nom, paquet, description…)"))
+  search.dock = dkTop
+  edApiSearch = search.id
+  # arbre des paquets et fiche Markdown, séparés par un séparateur horizontal déplaçable.
+  let sp = pgApi.addChild(newSplitter(vertical = false, position = 0.5))
+  sp.dock = dkCenter
+  sp.thickness = 4
+  let ta = sp.addChild(newTreeView())
+  trApi = ta.id
+  let ad = sp.addChild(newMarkdownView(ApiDocWelcome))
+  edApiDoc = ad.id
+
+  let right = spLeft.addChild(newSplitter(vertical = false, position = (if s.bottomPos > 0.02: s.bottomPos else: 0.72)))
+  right.thickness = 4
+  spB = right.id
   let ed = newLexisEditor()
   let host = right.addChild(newDocHost(ed, themeFor(s.dark, s.fontDelta)))
   host.weight = 1
   edId = ed.id
 
-  let bottom = right.addChild(newTab())
+  let hostB = right.addChild(newContainer(lkBorder, 0, 0))
+  let bottom = hostB.addChild(newTab())
+  bottom.dock = dkCenter
   tabBottom = bottom.id
   let pgProb = bottom.addPage("Problèmes", lkVertical)
   let tb = pgProb.addChild(newTable(multiSelection = false))
@@ -1787,27 +2120,37 @@ proc buildUi() =
   tableAddColumn(tblProb, "Message", 700)
 
   let pgCon = bottom.addPage("Console", lkBorder)
-  let conHead = pgCon.addChild(newSupercontrol(lkHorizontal))
+  let conHead = pgCon.addChild(newContainer(lkHorizontal, 1, 1))
   conHead.dock = dkTop
-  btnCopy = conHead.toolButton("Copier", "Copier tout le contenu de la console")
-  btnClear = conHead.toolButton("Effacer", "Vider la console")
-  let conSpacer = conHead.addChild(newLabel(""))
-  conSpacer.weight = 1
-  let inRow = pgCon.addChild(newSupercontrol(lkHorizontal))
+  btnCopy = conHead.iconTool("copier", "Copier", "copier tout le contenu de la console").id
+  btnClear = conHead.iconTool("effacer", "Effacer", "vider la console").id
+  conHead.toolSpacer()
+  let inRow = pgCon.addChild(newContainer(lkHorizontal, 1, 2))
   inRow.dock = dkBottom
   let ei = inRow.addChild(newEdit(placeholder = "Saisie pour saisir() ou es.lire() (Entrée pour envoyer)"))
   ei.weight = 1
   edIn = ei.id
-  btnSend = inRow.toolButton("Envoyer", "Envoie la ligne au programme")
+  btnSend = inRow.iconTool("envoyer", "Envoyer", "envoie la ligne au programme").id
   # zone de texte multiligne : défilement, sélection et Cmd/Ctrl+C natifs (comme wdnim)
   let eo = pgCon.addChild(newEdit("", multiline = true,
                                   placeholder = "Sortie du programme (?, es.ecrire, erreurs)"))
   eo.dock = dkCenter
   edOut = eo.id
 
-  let pgVars = bottom.addPage("Variables", lkVertical)
+  let pgVars = bottom.addPage("Variables", lkBorder)
+  let varRow = pgVars.addChild(newContainer(lkHorizontal, 1, 4))
+  varRow.dock = dkBottom
+  let lv = varRow.addChild(newLabel("Choisir une variable (en pause) pour modifier sa valeur :"))
+  lblVar = lv.id
+  let ev = varRow.addChild(newEdit(placeholder = "nouvelle valeur (Entrée pour appliquer)"))
+  ev.weight = 1
+  ev.state = csGrayed
+  edVar = ev.id
+  let bv = varRow.iconTool("verifier", "Appliquer", "affecte la nouvelle valeur à la variable (Entrée)")
+  bv.state = csGrayed
+  btnVarSet = bv.id
   let tv = pgVars.addChild(newTable(multiSelection = false))
-  tv.weight = 1
+  tv.dock = dkCenter
   tblVars = tv.id
   tableAddColumn(tblVars, "Nom", 160)
   tableAddColumn(tblVars, "Valeur", 520)
@@ -1819,8 +2162,20 @@ proc buildUi() =
   lsk.weight = 1
   lstStack = lsk.id
 
+  # ensembles de pages : masquer / afficher (<< >>) et fenêtre dédiée, comme Atlas SQL.
+  {.cast(gcsafe).}:
+    paneL = newDockPane("Projet / Structure / Référence - " & AppName, hostL, left,
+                        Button(control(btnPaneL)), Button(control(btnWinL)), handler, 380, 860)
+    paneB = newDockPane("Problèmes / Console / Variables / Pile d'appels - " & AppName, hostB, bottom,
+                        Button(control(btnPaneB)), Button(control(btnWinB)), handler, 1000, 360,
+                        hideIcon = "descendre", showIcon = "monter")
+    if s.leftHidden: paneL.setHidden(true)
+    if s.bottomHidden: paneB.setHidden(true)
+
   designerFileCreated = onDesignerFile
   designerCodeChanged = onDesignerCode
+  designerClosed = onDesignerClosed
+  reportClosed = onDesignerClosed
   reportFileCreated = onDesignerFile
   bpCodeChanged = onBlueprintCode
   bpGotoLine = onBlueprintGoto
@@ -1828,7 +2183,6 @@ proc buildUi() =
   bpCommand = onBlueprintCommand
   bpLocate = onBlueprintLocate
   bpOpenEntity = onBlueprintOpenEntity
-  buildToolWindow()
   editorSetOptions(edId, s.minimap, s.dark)
   editorSetFontSize(edId, EditorBaseFont + float(s.fontDelta))
   fillApiTree()

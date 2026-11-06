@@ -145,6 +145,7 @@ procedure PAUSE(ev)
     lpile:ajouter(f.nom + "  -  " + fichier.nom(f.source) + ":" + f.ligne)
   suivant
   MONTRER_CADRE(1)
+  AFFICHER_ENSEMBLE("bas")
   bas.valeur = 3
   etat.libelle = "En pause : " + fichier.nom(ev.source) + ", ligne " + ev.ligne + ;
                  "  (F5 continuer, F10 pas principal, F11 pas à pas, Maj+F11 sortir)"
@@ -158,17 +159,85 @@ procedure MONTRER_CADRE(i)
   si f = nul
     retourner
   finsi
+  globale lignesvars, cadrevars, varchoisie
   tvars:vider()
+  lignesvars = {}
+  cadrevars = i
+  varchoisie = nul
   pour chaque v dans f.variables
     tvars:ajouterligne(v.nom, v.valeur, v.genre, v.portee)
+    inserer(lignesvars, v)
   suivant
   pour chaque v dans pausecourante.globales
     tvars:ajouterligne(v.nom, v.valeur, v.genre, v.portee)
+    inserer(lignesvars, v)
   suivant
+  lblvar.libelle = "Choisir une variable (chaîne, entier, décimal, logique) pour modifier sa valeur :"
+  saisievar.valeur = ""
+  saisievar.actif = faux
+  bvar.actif = faux
   si f.source <> "" et fichier.estfichier(f.source)
     ed:ouvrir(f.source)
     ed:lignexecution(f.ligne)
   finsi
+retourner
+
+&& Modification d'une variable pendant une pause (chaîne, entier, décimal, logique)
+procedure VARIABLE_CHOISIE(ev)
+  globale varchoisie
+  locale i = ev.index
+  si lignesvars = nul ou i = nul ou i < 1 ou i > #lignesvars
+    retourner
+  finsi
+  locale v = lignesvars[i]
+  varchoisie = i
+  locale modifiable = v.genre = "chaine" ou v.genre = "entier" ou v.genre = "décimal" ou v.genre = "logique"
+  si pausecourante = nul ou non modifiable
+    lblvar.libelle = v.nom + " (" + v.genre + ") : modifiable seulement en pause, pour les chaînes, " + ;
+                     "entiers, décimaux et logiques"
+    saisievar.actif = faux
+    bvar.actif = faux
+    retourner
+  finsi
+  locale val = v.valeur
+  si v.genre = "chaine" et #val >= 2 et commencepar(val, car(34)) et finitpar(val, car(34))
+    val = souschaine(val, 2, #val - 1)
+  finsi
+  lblvar.libelle = v.nom + " (" + v.genre + ", " + v.portee + ") ="
+  saisievar.actif = vrai
+  bvar.actif = vrai
+  saisievar.valeur = val
+retourner
+
+procedure VARIABLE_TOUCHE(ev)
+  si ev.touche = 13
+    VARIABLE_APPLIQUER(ev)
+  finsi
+retourner
+
+procedure VARIABLE_APPLIQUER(ev)
+  si varchoisie = nul ou execution = nul ou pausecourante = nul
+    retourner
+  finsi
+  locale v = lignesvars[varchoisie]
+  locale portee = sisinon(v.portee = "globale", "globale", "")
+  locale montre = nul
+  essayer
+    montre = execution:modifier(v.nom, saisievar.valeur, cadrevars, portee)
+  capturer e
+    etat.libelle = "Modification refusée : " + e
+    retourner
+  finessayer
+  v.valeur = montre
+  && l'instantané de la pause suit (changement de cadre dans la pile d'appels)
+  locale liste = sisinon(v.portee = "globale", pausecourante.globales, pausecourante.pile[cadrevars].variables)
+  pour chaque w dans liste
+    si minuscule(w.nom) = minuscule(v.nom)
+      w.valeur = montre
+    finsi
+  suivant
+  tvars:fixercellule(varchoisie, 2, montre)
+  etat.libelle = v.nom + " = " + montre + " (valeur modifiée ; F5 continuer, F10 / F11 pas à pas)"
 retourner
 
 procedure CADRE(ev)

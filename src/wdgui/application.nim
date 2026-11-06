@@ -31,8 +31,8 @@ var
 initLock(iconLock)
 
 proc setApplicationIcon*(w, h: int, rgba: openArray[uint8]) =
-  ## Icône de toutes les fenêtres (barre de titre, barre des tâches, Dock de macOS),
-  ## y compris celles déjà ouvertes. rgba : w * h * 4 octets, ligne par ligne.
+  # Icône de toutes les fenêtres (barre de titre, barre des tâches, Dock de macOS),
+  # y compris celles déjà ouvertes. rgba : w * h * 4 octets, ligne par ligne.
   if w <= 0 or h <= 0 or rgba.len < w * h * 4: return
   {.cast(gcsafe).}:
     withLock iconLock:
@@ -213,7 +213,7 @@ proc realize(f: Window) =
   emit(f, evWindowOpen)
 
 proc applyStateRequest(f: Window) =
-  ## Agrandir, réduire, restaurer, plein écran (sur le fil de l'interface).
+  # Agrandir, réduire, restaurer, plein écran (sur le fil de l'interface).
   f.stateRequested = false
   let w = f.sdlWin
   if w == nil: return
@@ -245,6 +245,40 @@ proc destroyWindow(f: Window) =
   f.opened = false
   f.closed = true
 
+proc barPress(f: Window, c: Control, x, y: float): bool =
+  # Clic sur un ascenseur dessiné par drawScrollBar : page précédente / suivante sur le rail,
+  # saisie du curseur pour un défilement rapide.
+  var o = c
+  while o != nil:
+    for vertical in [true, false]:
+      let tr = if vertical: o.vScroll else: o.hScroll
+      if tr.area.w > 0 and tr.area.containsPoint(x, y) and o.isActive:
+        if not tr.active: return true
+        let th = tr.thumbRect(vertical)
+        let p = if vertical: y else: x
+        let a = if vertical: th.y else: th.x
+        let l = if vertical: th.h else: th.w
+        if p < a: o.scrollTrackTo(vertical, max(0.0, tr.pos - tr.span))
+        elif p > a + l: o.scrollTrackTo(vertical, min(tr.total - tr.span, tr.pos + tr.span))
+        else:
+          f.barDrag = o
+          f.barVertical = vertical
+          f.barGrab = p - a
+        o.markDirty()
+        return true
+    o = o.parent
+  false
+
+proc barMove(f: Window, x, y: float) =
+  let o = f.barDrag
+  let v = f.barVertical
+  let tr = if v: o.vScroll else: o.hScroll
+  let th = tr.thumbRect(v)
+  let room = (if v: tr.area.h - th.h else: tr.area.w - th.w)
+  let p = (if v: y - tr.area.y else: x - tr.area.x) - f.barGrab
+  if room > 0 and tr.total > tr.span:
+    o.scrollTrackTo(v, clamp(p / room, 0.0, 1.0) * (tr.total - tr.span))
+
 proc drawTooltip(f: Window, d: Drawing, t: Theme) =
   let c = f.hoveredControl
   let w = d.textWidth(c.tooltip) + 16
@@ -273,7 +307,15 @@ proc drawWindow(f: Window) =
   discard SDL_GetWindowSize(f.sdlWin, addr w, addr h)
   f.width = int(w)
   f.height = int(h)
-  layoutControl(f.root, rect(0, 0, float(w), float(h)), d, t)
+  # zone sûre : en plein écran ou fenêtre agrandie sur un MacBook à encoche, le haut de
+  # l'écran est réservé (SDL_GetWindowSafeArea) ; ailleurs, toute la fenêtre est utilisée.
+  var top = 0.0
+  let fl = SDL_GetWindowFlags(f.sdlWin)
+  if (fl and (SDL_WINDOW_FULLSCREEN or SDL_WINDOW_MAXIMIZED)) != 0:
+    var sa: SDL_Rect
+    if SDL_GetWindowSafeArea(f.sdlWin, addr sa) and sa.y > 0 and sa.y < h div 4: top = float(sa.y)
+  f.safeTop = top
+  layoutControl(f.root, rect(0, top, float(w), float(h) - top), d, t)
   d.clearWith(t.windowBg)
   drawTree(f.root, d, t)
   if f.popup != nil or (f.tooltipShown and f.hoveredControl != nil and f.hoveredControl.tooltip.len > 0):
@@ -326,6 +368,10 @@ proc handleEvent(e: var SDL_Event) =
     let y = float(me.y)
     f.mouseX = x
     f.mouseY = y
+    if f.barDrag != nil:
+      barMove(f, x, y)
+      f.dirty = true
+      return
     let inPopup = f.popup != nil and f.popup.rect.containsPoint(x, y)
     let under = if inPopup: nil else: controlAt(f.root, x, y)
     let target = if f.capturedControl != nil: f.capturedControl
@@ -359,6 +405,7 @@ proc handleEvent(e: var SDL_Event) =
       return
     let c = controlAt(f.root, x, y)
     if c == nil or not c.isActive: return
+    if b == mbLeft and barPress(f, c, x, y): return
     var fc = c
     while fc != nil and not fc.focusable: fc = fc.parent
     if b == mbLeft and fc != nil: setFocusInternal(f, fc)
@@ -376,6 +423,9 @@ proc handleEvent(e: var SDL_Event) =
     let y = float(be.y)
     let b = buttonFrom(be.button)
     f.dirty = true
+    if f.barDrag != nil:
+      f.barDrag = nil
+      return
     if f.capturedControl == nil and f.popup != nil:
       if f.popup.rect.containsPoint(x, y):
         f.popup.onMouse(MouseEvent(action: maRelease, x: x, y: y, button: b, clicks: int(be.clicks), mods: mods))

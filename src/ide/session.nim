@@ -39,6 +39,7 @@ type
 
 var sLock: Lock
 var current: Interp
+var pausedCtx: Ctx                 # contexte arrêté (débogueur en pause), pour modifier les variables.
 initLock(sLock)
 
 proc active*(): bool =
@@ -110,6 +111,61 @@ proc snapshot(L: Interp, c: Ctx, builtin: HashSet[string]): PauseInfo =
 # Commandes
 #
 
+proc parseLike(old: Value, text: string): (bool, Value, string) =
+  # Nouvelle valeur du même type que l'ancienne (chaîne, entier ; aussi décimal et booléen).
+  let t = text.strip
+  case old.kind
+  of vkStr:
+    var s = text
+    if s.len >= 2 and s[0] == '"' and s[^1] == '"': s = s[1 .. ^2].replace("\\n", "\n")
+    (true, strV(s), "")
+  of vkInt:
+    try: (true, intV(parseBiggestInt(t)), "")
+    except ValueError: (false, old, "entier attendu : « " & t & " »")
+  of vkNum:
+    try: (true, numV(parseFloat(t.replace(',', '.'))), "")
+    except ValueError: (false, old, "nombre décimal attendu : « " & t & " »")
+  of vkBool:
+    case t.toLowerAscii
+    of "vrai", "true", "1", "oui": (true, boolV(true), "")
+    of "faux", "false", "0", "non": (true, boolV(false), "")
+    else: (false, old, "vrai ou faux attendu")
+  else: (false, old, "seules les chaînes, les entiers, les décimaux et les booléens se modifient ici")
+
+proc setVariable*(frameIdx: int, name, scope, text: string): (bool, string) =
+  # Modifie une variable du programme arrêté (débogueur en pause). frameIdx : cadre de
+  # la pile (0 = courant, comme PauseInfo.frames) ; scope "globale" pour une globale.
+  # Rend (vrai, nouvelle valeur affichée) ou (faux, message).
+  {.cast(gcsafe).}:
+    var L: Interp
+    var c: Ctx
+    withLock sLock:
+      L = current
+      c = pausedCtx
+    if L.isNil or c.isNil or L.dbg.isNil: return (false, "le programme n'est pas en pause")
+    if scope == "globale":
+      for k, v in L.globals.pairs:
+        if k.kind == vkStr and cmpIgnoreCase(k.s, name) == 0:
+          let (ok, nv, msg) = parseLike(v, text)
+          if not ok: return (false, msg)
+          L.globals.rawSet(k, nv)
+          return (true, L.short(nv))
+      return (false, "variable globale introuvable : " & name)
+    var n = 0
+    for i in countdown(c.frames.high, 0):
+      let f = c.frames[i]
+      if f.proto.isNil: continue
+      if n == frameIdx:
+        for j, cell in f.slots:
+          if not cell.isNil and j < f.proto.slotNames.len and cmpIgnoreCase(f.proto.slotNames[j], name) == 0:
+            let (ok, nv, msg) = parseLike(cell.v, text)
+            if not ok: return (false, msg)
+            cell.v = nv
+            return (true, L.short(nv))
+        return (false, "variable introuvable : " & name)
+      inc n
+    (false, "cadre de pile introuvable")
+
 proc debugCommand*(mode: StepMode) =
   withCurrent(proc (L: Interp) =
     if not L.dbg.isNil: L.dbg.command(mode))
@@ -127,7 +183,7 @@ proc stopProgram*() =
     L.closeAllWindows())
 
 proc updateBreakpoints*(source: string, lines: seq[int]) =
-  ## lines : 1-based.
+  # lines : 1-based.
   withCurrent(proc (L: Interp) =
     if not L.dbg.isNil: L.dbg.setBreakpoints(source, lines))
 
@@ -136,7 +192,7 @@ proc updateBreakpoints*(source: string, lines: seq[int]) =
 #
 
 proc locate(msg: string): (string, int) =
-  ## « source:ligne: message » -> (source, ligne)
+  # « source:ligne: message » -> (source, ligne)
   var i = msg.toLowerAscii.find(".prg:")
   if i < 0:
     # source sans extension (document non enregistré) : chercher " :N: ".
@@ -183,7 +239,9 @@ proc runProgram*(path: string, args: seq[string], debug: bool, stepFirst: bool,
       d.active = true
       d.mode = if stepFirst: smInto else: smRun
       for (src, lines) in hooks.breakpoints(): d.setBreakpoints(src, lines)
-      d.onPause = proc (L: Interp, c: Ctx) = hooks.paused(snapshot(L, c, builtin))
+      d.onPause = proc (L: Interp, c: Ctx) =
+        withLock sLock: pausedCtx = c
+        hooks.paused(snapshot(L, c, builtin))
       L.dbg = d
     withLock sLock: current = L
     var ok = true
@@ -232,5 +290,7 @@ proc runProgram*(path: string, args: seq[string], debug: bool, stepFirst: bool,
     try: L.shutdown()
     except Exception: discard
     L.leave()
-    withLock sLock: current = nil
+    withLock sLock:
+      current = nil
+      pausedCtx = nil
     hooks.finished(ok, msg, src, line)

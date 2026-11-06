@@ -370,6 +370,11 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
   of "infobulle":
     let txt = L.tostr(v)
     setVia(c, id.tooltip, tooltip, txt, key)
+  of "icone":
+    let txt = L.tostr(v)
+    withControl(c.id, Control, obj):
+      if obj of Button: Button(obj).icon = txt
+      else: unsupported(key)
   of "nom":
     let txt = L.tostr(v)
     setAny(id.name, txt, key)
@@ -631,6 +636,10 @@ proc pathOf(L: Interp, a: seq[Value], start: int, fname: string): string =
     parts = parts[0].split('/')
   parts.join($TreeSep)
 
+proc onePath(p: string): string =
+  # Un seul chemin d'arbre ("A/B" ou "A<TAB>B").
+  if TreeSep notin p and '/' in p: p.split('/').join($TreeSep) else: p
+
 template colArg(v: Value, body: untyped) =
   # Colonne de grille par nom ou par index.
   if v.kind == vkStr:
@@ -708,7 +717,8 @@ var bpLock: Lock
 var bpDefs: Table[string, tuple[path: string, line: int]]   # procédures du projet (majuscules)
 initLock(bpLock)
 
-const natureNames = [dkText: "texte", dkCode: "code", dkForm: "formulaire", dkReport: "etat", dkBlueprint: "blueprint"]
+const natureNames = [dkText: "texte", dkCode: "code", dkForm: "formulaire", dkReport: "etat", dkBlueprint: "blueprint",
+                     dkPreview: "apercu", dkImage: "image"]
 
 proc natureOf(s: string): DocKind =
   case s.toLowerAscii
@@ -1027,6 +1037,18 @@ proc defineMethods() =
   mfn "arbre", "selectionner", proc (L: Interp, a: seq[Value]): seq[Value] =
     let c = L.self(a, "selectionner")
     when compiles(treeSelectPlus(c.id, "")): treeSelectPlus(c.id, L.pathOf(a, 2, "selectionner"))
+  mfn "arbre", "icone", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # arbre:icone(chemin, symbole, [couleur]) : symbole vectoriel devant le libellé du nœud.
+    let col = if arg(a, 4).kind == vkNil: Color(r: 0, g: 0, b: 0, a: 0) else: colorOf(a[3])
+    treeSetIcon(L.self(a, "icone").id, onePath(L.checkStr(a, 2, "icone")), L.optStr(a, 3, "icone", ""), col)
+  mfn "arbre", "cadenas", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # arbre:cadenas(chemin, vrai|faux) : cadenas fermé à gauche du libellé.
+    treeSetLock(L.self(a, "cadenas").id, onePath(L.checkStr(a, 2, "cadenas")), optBool(a, 3, true))
+  mfn "arbre", "feuilles", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # arbre:feuilles() : chemins (séparés par TAB) de toutes les feuilles.
+    let t = newLTable()
+    for p in treeLeafPaths(L.self(a, "feuilles").id): t.arr.add strV(p)
+    @[Value(kind: vkTable, t: t)]
   mfn "arbre", "nombre", proc (L: Interp, a: seq[Value]): seq[Value] =
     let c = L.self(a, "nombre")
     when compiles(treeCount(c.id)): result = @[intV(treeCount(c.id))]
@@ -1474,11 +1496,30 @@ proc defineMethods() =
       ed.kindDots = on
       markDirty(ed)
   mfn "editeur", "lien", proc (L: Interp, a: seq[Value]): seq[Value] =
-    # ed:lien(uid) : vue blueprint -> uid du code ; code -> uid de sa vue (nul : aucune).
+    # ed:lien(uid) : vue blueprint / aperçu -> uid du document ; code -> uid de sa vue (nul : aucune).
     let id = L.edOf(a, "lien")
     let uid = L.uidArg(a, 2, id, "lien")
-    let r = if editorKind(id, uid) == dkBlueprint: editorLinkUid(id, uid) else: editorBlueprintFor(id, uid)
+    let k = editorKind(id, uid)
+    let r = if k in {dkBlueprint, dkPreview}: editorLinkUid(id, uid)
+            elif editorIsMarkdown(id, uid): editorPreviewFor(id, uid)
+            else: editorBlueprintFor(id, uid)
     @[if r < 0: nilV else: intV(r)]
+  mfn "editeur", "apercu", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:apercu([uid]) : ouvre (ou active) la « vue aperçu » d'un document Markdown ; son uid.
+    let id = L.edOf(a, "apercu")
+    let uid = L.uidArg(a, 2, id, "apercu")
+    if not editorIsMarkdown(id, uid): return @[nilV]
+    let r = editorNewPreview(id, uid)
+    @[if r < 0: nilV else: intV(r)]
+  mfn "editeur", "image", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:image(chemin) : aperçu d'une image dans un onglet ; son uid.
+    let id = L.edOf(a, "image")
+    let r = editorOpenImage(id, L.optStr(a, 2, "image", ""))
+    @[if r < 0: nilV else: intV(r)]
+  mfn "editeur", "markdown", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:markdown([uid]) : vrai si le document est du Markdown (.md).
+    let id = L.edOf(a, "markdown")
+    @[boolV(editorIsMarkdown(id, L.uidArg(a, 2, id, "markdown")))]
   mfn "editeur", "noms", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Noms proposés par la complétion (SQL : « table » et « table.colonne »).
     let id = L.edOf(a, "noms")
@@ -2067,6 +2108,13 @@ proc openInterface(L: Interp): Value =
     let b = newButton(L.optStr(a, 1, "bouton", "OK"), isDefault = optField(o, "defaut", false),
                       isCancel = optField(o, "annuler", false))
     b.flat = optField(o, "plat", false)   # rendu de barre d'outils, sans largeur minimale
+    b.icon = optField(o, "icone", "")      # symbole vectoriel à la place du libellé
+    let bulle = optField(o, "bulle", "")
+    if b.icon.len > 0:
+      # bouton à symbole : le libellé (et la bulle éventuelle) s'affichent en infobulle.
+      b.flat = optField(o, "plat", true)
+      b.tooltip = (if bulle.len > 0: b.caption & " - " & bulle else: b.caption)
+    elif bulle.len > 0: b.tooltip = bulle
     @[L.newCtl(b, "bouton")]
   m.fn "saisie", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = optsArg(a, 1)

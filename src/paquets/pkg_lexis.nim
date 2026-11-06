@@ -75,6 +75,7 @@ type
     debug, stepFirst, paused: bool
     breakpoints: seq[(string, seq[int])]    # posés avant le lancement.
     dbg: Debugger
+    pauseCtx: Ctx                  # pile arrêtée (débogueur en pause) : modification des variables.
     runner, dispatcher: ptr Thread[LExec]   # détachés : se terminent avec le programme.
 
 var execMethods {.threadvar.}: LTable
@@ -131,7 +132,7 @@ proc push(x: LExec, e: ExecEvent) =
     broadcast(x.cond)
 
 proc locate(msg: string): (string, int) =
-  ## « source.prg:ligne: message » -> (source, ligne)
+  # « source.prg:ligne: message » -> (source, ligne)
   let i = msg.toLowerAscii.find(".prg:")
   if i < 0: return ("", 0)
   var k = i + 5
@@ -232,7 +233,9 @@ proc runChild(x: LExec) {.thread.} =
       d.mode = if x.stepFirst: smInto else: smRun
       for (src, lines) in x.breakpoints: d.setBreakpoints(src, lines)
       d.onPause = proc (L: Interp, c: Ctx) =
-        withLock x.lock: x.paused = true
+        withLock x.lock:
+          x.paused = true
+          x.pauseCtx = c
         x.push(ExecEvent(kind: ekPause, pause: snapshot(L, c, builtin)))
       L.dbg = d
       withLock x.lock: x.dbg = d
@@ -287,7 +290,7 @@ proc runChild(x: LExec) {.thread.} =
     x.push(ev)
 
 proc deliver(x: LExec, h: Value, args: seq[Value]) =
-  ## Appelle un gestionnaire de l'interpréteur appelant (fil répartiteur).
+  # Appelle un gestionnaire de l'interpréteur appelant (fil répartiteur).
   let L = x.owner
   template closed(): bool =
     (block:
@@ -340,6 +343,7 @@ proc resume(x: LExec, mode: StepMode) =
   withLock x.lock:
     d = x.dbg
     x.paused = false
+    x.pauseCtx = nil
   if not d.isNil: d.command(mode)
 
 proc stopExec(x: LExec) =
@@ -355,7 +359,7 @@ proc stopExec(x: LExec) =
   if not d.isNil: x.resume(smRun)    # débloque un programme en pause.
 
 proc breakpointsOf(L: Interp, v: Value): seq[(string, seq[int])] =
-  ## {{source = chemin, lignes = {…}}, …} ou {["chemin"] = {…}, …}
+  # {{source = chemin, lignes = {…}}, …} ou {["chemin"] = {…}, …}
   proc lines(L: Interp, lv: Value): seq[int] =
     if lv.kind != vkTable: return
     for i in 1 .. lv.t.rawLen:
@@ -474,6 +478,63 @@ proc openLexis(L: Interp): Value =
     if d.isNil: rtError("x:pause : programme lancé sans « deboguer = vrai »")
     d.active = true
     d.requestPause()
+  em.fn "modifier", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # x:modifier(nom, valeur, [cadre], [portee]) : programme en pause, change la valeur d'une
+    # variable (chaîne, entier, décimal, logique ; même type qu'avant). cadre : 1 = courant
+    # (rang dans pause.pile) ; portee « globale » pour une variable globale.
+    # Rend la valeur affichée ; erreur Lexis+ (à capturer) si la modification est refusée.
+    let x = L.checkExec(a, "modifier")
+    let name = L.checkStr(a, 2, "modifier")
+    let text = L.tostr(arg(a, 3))
+    let frameIdx = (if arg(a, 4).kind == vkNil: 1 else: int(L.checkInt(a, 4, "modifier"))) - 1
+    let scope = L.optStr(a, 5, "modifier", "")
+    var c: Ctx
+    var child: Interp
+    withLock x.lock:
+      c = x.pauseCtx
+      child = x.child
+    if c.isNil or child.isNil or not x.paused: rtError("le programme n'est pas en pause")
+    proc parseLike(old: Value): (bool, Value, string) =
+      let t = text.strip
+      case old.kind
+      of vkStr:
+        var s = text
+        if s.len >= 2 and s[0] == '"' and s[^1] == '"': s = s[1 .. ^2].replace("\\n", "\n")
+        (true, strV(s), "")
+      of vkInt:
+        try: (true, intV(parseBiggestInt(t)), "")
+        except ValueError: (false, old, "entier attendu : « " & t & " »")
+      of vkNum:
+        try: (true, numV(parseFloat(t.replace(',', '.'))), "")
+        except ValueError: (false, old, "nombre décimal attendu : « " & t & " »")
+      of vkBool:
+        case t.toLowerAscii
+        of "vrai", "true", "1", "oui": (true, boolV(true), "")
+        of "faux", "false", "0", "non": (true, boolV(false), "")
+        else: (false, old, "vrai ou faux attendu")
+      else: (false, old, "seules les chaînes, les entiers, les décimaux et les logiques se modifient")
+    if scope == "globale":
+      for k, v in child.globals.pairs:
+        if k.kind == vkStr and cmpIgnoreCase(k.s, name) == 0:
+          let (ok, nv, msg) = parseLike(v)
+          if not ok: rtError(msg)
+          child.globals.rawSet(k, nv)
+          return @[strV(child.short(nv))]
+      rtError("variable globale introuvable : " & name)
+    var n = 0
+    for i in countdown(c.frames.high, 0):
+      let f = c.frames[i]
+      if f.proto.isNil: continue
+      if n == frameIdx:
+        for j, cell in f.slots:
+          if not cell.isNil and j < f.proto.slotNames.len and cmpIgnoreCase(f.proto.slotNames[j], name) == 0:
+            let (ok, nv, msg) = parseLike(cell.v)
+            if not ok: rtError(msg)
+            cell.v = nv
+            return @[strV(child.short(nv))]
+        rtError("variable introuvable : " & name)
+      inc n
+    rtError("cadre de pile introuvable")
   em.fn "enpause", proc (L: Interp, a: seq[Value]): seq[Value] =
     let x = L.checkExec(a, "enpause")
     var r = false
@@ -541,7 +602,7 @@ proc openLexis(L: Interp): Value =
     for k in Keywords: ks.add k
     @[toV(ks)]
   m.fn "outil", proc (L: Interp, a: seq[Value]): seq[Value] =
-    ## Chemin d'un outil livré à côté du runtime (wdlexisgen...), nul s'il est absent.
+    # Chemin d'un outil livré à côté du runtime (wdlexisgen...), nul s'il est absent.
     let n = L.checkStr(a, 1, "outil")
     for dir in [getAppDir(), getAppDir().parentDir]:
       for cand in [dir / n, dir / n.addFileExt(ExeExt)]:

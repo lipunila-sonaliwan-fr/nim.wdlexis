@@ -381,11 +381,10 @@ proc bars(g: Grid, t: Theme): tuple[v, h: bool] =
   let z = g.inner
   var availH = z.h - headerH(t) - g.footerH(t)
   let rowsH = float(g.visual.len) * t.lineHeight
-  var v = rowsH > availH + 0.5
-  let h = g.totalWidth > z.w - (if v: gridBar else: 0.0) + 0.5
-  if h:
-    availH -= gridBar
-    v = rowsH > availH + 0.5
+  discard rowsH > availH + 0.5
+  let v = true      # ascenseur vertical toujours affiché (rail seul si tout est visible)
+  let h = g.totalWidth > z.w - gridBar + 0.5
+  if h: availH -= gridBar
   (v, h)
 
 proc bodyRect(g: Grid, t: Theme): Rect =
@@ -451,6 +450,7 @@ proc drawBars(g: Grid, d: Drawing, t: Theme) =
     let th = if k == 1: g.vThumb(t) else: g.hThumb(t)
     let hot = g.barDrag == k or g.hoverBar == k
     d.fillRect(tr, withAlpha(t.textSecondary, if hot: 34 else: 18))
+    if k == 1 and g.visual.len <= g.visibleRowCount(t): continue
     d.fillRoundRect(th, min(th.w, th.h) / 2,
                     withAlpha(t.textSecondary, if g.barDrag == k: 210 elif hot: 170 else: 120))
 
