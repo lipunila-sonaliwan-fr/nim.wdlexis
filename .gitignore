@@ -24,3 +24,6 @@ wdlexisrt
 /winOS
 
 /wdlexis+.app
+exemples/atlassql/.wdlexis/atelier.json
+exemples/veille/.wdlexis/atelier.json
+tests/t_webview

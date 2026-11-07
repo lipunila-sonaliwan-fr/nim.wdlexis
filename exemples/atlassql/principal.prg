@@ -889,8 +889,7 @@ procedure PANNEAU_FENETRE(ev)
     PANNEAU_RATTACHER()
     retourner
   finsi
-  fenpanneau = ui.fenetre{titre = "Atlas SQL — Navigation et propriétés", largeur = 460, hauteur = 900, ;
-                          disposition = "bordure", sombre = reglages.sombre, densite = "compacte"}
+  fenpanneau = ui.fenetre{titre = "Atlas SQL — Navigation et propriétés", largeur = 460, hauteur = 900, disposition = "bordure", sombre = reglages.sombre, densite = "compacte"}
   fenpanneau.marge = 0
   fenpanneau.surfermeture = @PANNEAU_FERME
   fenpanneau.surtouchebas = @TOUCHE
