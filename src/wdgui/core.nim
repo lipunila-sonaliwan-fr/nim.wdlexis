@@ -319,6 +319,7 @@ method preferredSize*(c: Control, d: Drawing, t: Theme): tuple[w, h: float] {.ba
 method onMouse*(c: Control, e: MouseEvent) {.base.} = discard
 
 method onKey*(c: Control, e: KeyEvent): bool {.base.} = false      # true = key consumed
+method onKeyUp*(c: Control, e: KeyEvent) {.base.} = discard        # touche relâchée (contrôle actif)
 
 method onText*(c: Control, s: string) {.base.} = discard
 

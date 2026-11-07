@@ -1466,7 +1466,7 @@ proc defineMethods() =
     let id = L.edOf(a, "langage")
     if arg(a, 2).kind == vkNil: return @[strV(editorLanguage(id, -1))]
     let lang = L.checkStr(a, 2, "langage").toLowerAscii
-    if lang notin ["sql", "lexis", ""]: rtError("editeur:langage : « sql », « lexis » ou \"\" attendu")
+    if lang notin ["sql", "lexis", "markdown", ""]: rtError("editeur:langage : « sql », « lexis », « markdown » ou \"\" attendu")
     let uid = if arg(a, 3).kind == vkNil: -1 else: int(L.checkInt(a, 3, "langage"))
     editorSetLanguage(id, uid, lang)
   mfn "editeur", "pastille", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -2060,8 +2060,12 @@ proc newTimer(L: Interp, ms: int, h: Value, repeat: bool): Value =
       withLock t.lock: t.stopped = true
   L.wrap(t, "interface.minuterie", timerMethods)
 
+include pkg_toile
+
 proc openInterface(L: Interp): Value =
-  if familyMethods.len == 0: defineMethods()
+  if familyMethods.len == 0:
+    defineMethods()
+    defineToileMethods()
   ctlMeta = newLTable()
   ctlMeta.set "__index", fnV("interface.index", ctlIndex)
   ctlMeta.set "__newindex", fnV("interface.newindex", ctlNewIndex)
@@ -2281,6 +2285,19 @@ proc openInterface(L: Interp): Value =
     else:
       model = newReport(optField(o, "nom", "etat1"))
     @[L.newCtl(newReportCanvas(model, root), "etat")]
+  m.fn "toile", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Toile vectorielle : édition directe d'une scène SVG (formes, calques, groupes, Bézier...).
+    # {mode = edition | galerie | plateau | lecture, grille = vrai, taillegrille = 10}
+    let o = optsArg(a, 1)
+    var mode = vmEdit
+    let ms = optField(o, "mode", "edition")
+    for x in VMode:
+      if $x == ms: mode = x
+    let c = newVectorCanvas(mode)
+    c.showGrid = optField(o, "grille", false)
+    c.snapGrid = optField(o, "magnetisme", false)
+    c.gridSize = optField(o, "taillegrille", 10.0)
+    @[L.newCtl(c, "toile")]
   m.fn "diagramme", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Canevas de diagramme : nœuds et liens, déplacement, zoom, liaisons à la souris.
     let o = optsArg(a, 1)

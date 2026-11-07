@@ -213,6 +213,9 @@ proc addButtonRow(st: DialogState, win: Window,
     let btn = row.addChild(newButton(b.caption, isDefault = b.res == drOk, isCancel = b.res == drCancel))
     st.buttons.add((btn.id, b.res))
     result.add btn
+  let last = row.addChild(newLabel(""))
+  last.weight = 0.02
+  result
 
 proc wrapText(s: string, maxChars = 48): seq[string] =
   for para in s.split('\n'):
@@ -234,7 +237,7 @@ proc messageBody(win: Window, icon: IconId, message: string): Container =
     iv.stretch = false
   result = body.addChild(newSupercontrol(lkVertical))
   result.weight = 1
-  let lbl = result.addChild(newLabel(wrapText(message).join("\n")))
+  let lbl = result.addChild(newLabel(wrapText(message, 52).join("\n")))
   lbl.stretch = true
 
 proc messageSize(t: Theme, message: string, extra = 0.0): tuple[w, h: int] =

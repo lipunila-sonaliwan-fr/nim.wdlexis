@@ -1622,6 +1622,11 @@ proc openCompletion(ed: CodeEditor) =
       for k in SqlTypes: addItem(k.toUpperAscii, "type", 7)
       for f in SqlFunctions: addItem(f, "fonction", 3)
       for n in d.identsOf(): addItem(n, "fichier", 6)
+  elif d.isMarkdown:
+    # Markdown : noms fournis par le programme (ed:noms) : « libellé<TAB>détail ».
+    for n in ed.projectNames:
+      let k = n.find('\t')
+      if k > 0: addItem(n[0 ..< k], n[k + 1 .. ^1], 6) else: addItem(n, "", 6)
   elif sep == ':':
     for e in methodEntries(): addItem(e.name, e.signature, 2)
   elif sep == '.' and a >= 2:
@@ -1789,7 +1794,10 @@ proc editorCodeUid*(id: ControlId): int =
   readControl(id, CodeEditor, ed):
     let d = ed.doc
     if d != nil:
-      result = if d.kind == dkBlueprint: d.linkUid else: d.uid
+      result = case d.kind
+               of dkBlueprint, dkPreview: d.linkUid
+               of dkImage: -1
+               else: d.uid
 
 proc editorInfo*(id: ControlId, uid: int): tuple[path, title: string, dirty: bool, version: int] =
   readControl(id, CodeEditor, ed):

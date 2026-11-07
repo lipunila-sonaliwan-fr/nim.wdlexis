@@ -199,6 +199,8 @@ proc SDL_CreateTexture*(r: SDL_Renderer, format: uint32, access: cint, w, h: cin
 proc SDL_UpdateTexture*(t: SDL_Texture, rect: ptr SDL_Rect, pixels: pointer, pitch: cint): bool
 proc SDL_CreateTextureFromSurface*(r: SDL_Renderer, s: SDL_Surface): SDL_Texture
 proc SDL_DestroyTexture*(t: SDL_Texture)
+proc SDL_SetTextureBlendMode*(t: SDL_Texture, mode: uint32): bool
+proc SDL_SetTextureScaleMode*(t: SDL_Texture, mode: cint): bool   # 0 : pixels, 1 : linéaire
 proc SDL_GetTextureSize*(t: SDL_Texture, w, h: ptr cfloat): bool
 proc SDL_SetTextureColorMod*(t: SDL_Texture, cr, cg, cb: uint8): bool
 proc SDL_SetTextureAlphaMod*(t: SDL_Texture, a: uint8): bool
@@ -227,6 +229,7 @@ when defined(sdlttf):
   proc TTF_OpenFont*(file: cstring, ptsize: cfloat): TTF_Font
   proc TTF_CloseFont*(f: TTF_Font)
   proc TTF_GetFontHeight*(f: TTF_Font): cint
+  proc TTF_GetFontAscent*(f: TTF_Font): cint
   proc TTF_GetStringSize*(f: TTF_Font, text: cstring, length: csize_t, w, h: ptr cint): bool
   proc TTF_RenderText_Blended*(f: TTF_Font, text: cstring, length: csize_t, fg: SDL_Color): SDL_Surface
   proc TTF_SetFontStyle*(f: TTF_Font, style: uint32)   # TTF_STYLE_BOLD = 1, TTF_STYLE_ITALIC = 2.

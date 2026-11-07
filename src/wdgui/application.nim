@@ -472,6 +472,7 @@ proc handleEvent(e: var SDL_Event) =
     f.dirty = true
     let target: Control = if f.focusedControl != nil: f.focusedControl else: f
     if typ == SDL_EVENT_KEY_UP:
+      target.onKeyUp(KeyEvent(key: ke.key, mods: ke.modifiers))
       emit(target, evKeyUp, key = ke.key, mods = ke.modifiers)
       return
     let ek = KeyEvent(key: ke.key, mods: ke.modifiers, isRepeat: ke.repeat)

@@ -511,7 +511,7 @@ retourner
   `ascenseur`, `compteur`, `notation`, `image`, `codebarre`, `graphe`,
   `calendrier`, `kanban`, `mosaique`, `gantt`, `barremenu`, `onglets`,
   `separateur`, `conteneur`, `colonne`, `rangee`, `superconteneur`, `cadre`,
-  `panneau`, `pdf`, `markdown`, `editeur`. Un contrôle s'ajoute avec `conteneur:ajouter(controle)`.
+  `panneau`, `pdf`, `markdown`, `editeur`. Un contrôle s'ajoute avec `conteneur:ajouter(controle)` ; appliqué à un contrôle déjà placé, `ajouter` le déplace (avec son contenu), y compris vers une autre fenêtre.
 - Propriétés : `valeur`, `num`, `libelle` (ou `titre`), `texte`, `visible`, `etat`
   (`actif`, `grise`, `lecture`), `actif`, `infobulle`, `nom`, `x`, `y`, `largeur`,
   `hauteur`, `couleur`, `fond`, `bordure`, `accent`, `rayon`, `coche`, `min`, `max`,
@@ -1421,6 +1421,31 @@ changé ; *Réorganiser* refait la mise en page). Un fichier dont la structure
 des blocs est incorrecte (`finsi` manquant...) s'affiche avec le message
 d'erreur : on le corrige dans l'onglet du code.
 
+### 8.7 Atlas SQL, cartographie et analyse du patrimoine SQL Server
+
+`exemples/atlassql` inventorie un ou plusieurs serveurs SQL Server (extension
+DuckDB `mssql`, ODBC ou dossier de scripts `.sql`), analyse tout le code T-SQL
+et range le résultat dans une base DuckDB locale par projet
+(`<projet>/atlas.duckdb`).
+
+```
+wdlexisrt exemples/atlassql/principal.prg [dossier_du_projet]
+```
+
+Une campagne est découpée en travaux dépendants (extractions, normalisation,
+lots d'analyse, résolution, dictionnaire, duplications, performances,
+patrimoine). Ils sont exécutés en parallèle par **3 à 10 agents**, chacun avec
+sa `sessionsql()`, et une limite par serveur protège les bases interrogées.
+
+Quinze vues complètent la file : accueil, cartographie à cinq niveaux,
+dépendances et impact, dictionnaire intelligent (RGPD), types métier, éditeur
+T-SQL avec synoptique et débogueur symbolique, flux et Sankey, doublons, SQL
+dynamique, performances, patrimoine, refactoring avec aperçu, interception des
+appels, assistant et constats.
+
+*Sources ▸ Ajouter la démonstration* simule trois serveurs. Le détail est dans
+`exemples/atlassql/LISEZMOI.md` et `ARCHITECTURE.md`.
+
 ## 9. Le runtime
 
 ```
@@ -2039,7 +2064,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 
 | Appel | Rôle |
 | --- | --- |
-| `interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=, etat=}` | Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée) ; etat : `normale`, `agrandie`, `reduite` ou `pleinecran` à l'ouverture. |
+| `interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, densite=, x=, y=, etat=}` | Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; densite : `compacte` (marges, espacements et hauteurs de contrôle réduits) ; x, y : position à l'écran (sinon centrée) ; etat : `normale`, `agrandie`, `reduite` ou `pleinecran` à l'ouverture. `fen.marge` et `fen.espacement` règlent ceux de la fenêtre elle-même (0 : contenu collé aux bords). |
 | `interface.executer()` | Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime). |
 | `interface.quitter()` | Ferme toutes les fenêtres du programme. |
 | `interface.fenetres()` | Nombre de fenêtres ouvertes. |
@@ -2047,7 +2072,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.icone(chemin)` | Icône des fenêtres du programme (PNG ou JPEG, carrée, 256 px conseillé) : barre de titre, barre des tâches, Dock. Rend faux si l'image est illisible. Sans effet sur les fenêtres de l'atelier quand le programme y est exécuté. |
 | `interface.tracer([actif])` | Affiche dans la console chaque événement reçu (diagnostic). |
 | `interface.etiquette(texte, [alignement])` | Libellé (alignement : gauche, centre, droite). |
-| `interface.bouton(libelle, [{defaut=, annuler=}])` | Bouton. |
+| `interface.bouton(libelle, [{defaut=, annuler=, plat=}])` | Bouton. `plat = vrai` : bouton de barre d'outils (relief au survol, largeur ajustée au libellé). |
 | `interface.saisie(texte \| {texte=, indication=, multiligne=, motdepasse=})` | Champ de saisie ; `motdepasse = vrai` : caractères masqués, copie interdite. |
 | `interface.demandersecret(message, [{memoriser=, coche=, titre=}])` | Boîte de saisie masquée (mot de passe), avec une case à cocher facultative (`memoriser` : son libellé) ; nul si annulée, sinon `{valeur, memoriser}`. |
 | `interface.cases(option, ...)` | Cases à cocher ; valeur = masque de bits. |
@@ -2072,7 +2097,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.gantt()` | Diagramme de Gantt : `g:ajoutertache(libelle, debut, duree, [avancement], [couleur], [detail])` (renvoie le numéro de la tâche ; `couleur` `"#RRGGBB"`, `detail` écrit au bout de la barre), `g:fixeravancement(i, a)`, `g:vider()`, `g:horaire([b])` (unités en heures, axe gradué en HH:MM), `g:largeurlibelles(px)` ; `surselection` : `ev.index`. |
 | `interface.barremenu()` | Barre de menus. |
 | `interface.onglets()` | Onglets. |
-| `interface.separateur{vertical=, position=}` | Séparateur (deux enfants). |
+| `interface.separateur{vertical=, position=}` | Séparateur (deux enfants). Si l'un est masqué (`visible = faux`), l'autre prend toute la place et la position est conservée. |
 | `interface.conteneur([disposition], [colonnes])` | Conteneur. |
 | `interface.colonne()` | Conteneur vertical. |
 | `interface.rangee()` | Conteneur horizontal. |
@@ -2101,7 +2126,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `fen:restaurer()` | Rend à la fenêtre sa taille normale (après agrandir, réduire ou plein écran). |
 | `fen:pleinecran([actif])` | Plein écran ; `fen:pleinecran(faux)` : retour à la fenêtre normale. |
 | `fen.etatfenetre` | État de la fenêtre : `normale`, `agrandie`, `reduite` ou `pleinecran` (lecture et écriture). Un changement d'état déclenche `surredimension` (`ev.texte` : le nouvel état). |
-| `fen:fixertheme(nom, [sombre])` | Change le thème. |
+| `fen:fixertheme(nom, [sombre], [densite])` | Change le thème (densite : `compacte`). |
 | `onglets:ajouterpage(titre, [disposition])` | Ajoute une page ; renvoie son conteneur. |
 | `liste:ajouter(element, ...)` | Ajoute (listes et combos). |
 | `liste:inserer(i, element)` | Insère. |
@@ -2172,9 +2197,19 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `markdown:position()` | Défilement actuel en pixels depuis le haut. |
 | `c:detruire()` | Retire le contrôle (et son contenu) de sa fenêtre. |
 | `editeur:fixertexte(texte, [uid], [enregistre])` | Remplace le texte d'un document (annulable) ; `enregistre = vrai` le marque enregistré. |
-| `editeur:langage([langage], [uid])` | Langage d'un document : `"sql"` (coloration, complétion et commentaires `--` SQL) ou `"lexis"` ; `""` : d'après l'extension (`.sql` = SQL). Sans argument : langage du document actif. |
+| `editeur:langage([langage], [uid])` | Langage d'un document : `"sql"` (coloration, complétion et commentaires `--` SQL), `"lexis"` ou `"markdown"` (coloration Markdown ; la complétion propose les noms donnés par `editeur:noms`, « libellé<TAB>détail ») ; `""` : d'après l'extension (`.sql` = SQL). Sans argument : langage du document actif. |
 | `editeur:pastille(texte, [uid], [couleur])` | Pastille affichée après le titre de l'onglet (`""` : aucune) ; couleur `"#RRGGBB"`, par défaut celle du thème. |
 | `editeur:noms(liste)` | Noms proposés par la complétion ; en SQL, `"table"` et `"table.colonne"` (les colonnes sont proposées après `table.`). |
+| `interface.toile([{mode=, grille=, magnetisme=, taillegrille=}])` | Toile vectorielle : édition directe d'une scène SVG (rectangles, ellipses, lignes, flèches, chemins de Bézier, textes en boîte, images, SVG imbriqués). `mode` : `edition` (défaut), `galerie` (planche cliquable), `plateau` (cartes déplaçables), `lecture` (plein cadre, sans décor). Souris : clic, Maj+clic, rectangle de sélection, 8 poignées (Maj : proportions), magnétisme sur la grille, les guides et les formes voisines (guides intelligents). Clavier : Suppr, flèches (Maj : 10), Cmd+A/C/X/V/D/Z/Y/G (Maj+G : dégrouper), Cmd+0 ajuster, Cmd+1 100 %, Espace+glisser, Cmd+molette zoom. Double-clic sur un texte : saisie ; sur un chemin : nœuds. Événements : `surselection` (identifiants séparés par des virgules ; en galerie et plateau : le groupe `page-N`), `surchangement` (action : creation, deplace, redimension, noeud, texte, suppression…, détail par `t:action()`), `surdoubleclic`, `surclicdroit`. |
+| `toile:chargersvg(code[, dossier])` · `toile:chargerfichier(chemin)` · `toile:svg([{compact=, images=, selection=}])` | Charge ou produit du SVG standard (calques `data-calque`, groupes `data-groupe`, textes en boîte `data-boite`, liens `data-composant`). `images = vrai` incorpore les images (data:) ; `selection = vrai` : la sélection seule, recadrée. |
+| `toile:ajouter{genre=, ...}` · `toile:modifier(id \| {ids}, {props})` · `toile:forme(id)` · `toile:formes()` · `toile:supprimer([ids])` · `toile:vider()` | Formes et propriétés : genre (rectangle, ellipse, cercle, ligne, fleche, chemin, texte, image), nom, x, y, largeur, hauteur, rotation, opacite, remplissage (couleur ou `linear(angle,#c1,#c2)`), contour, epaisseur, pointilles, rayon, ombre, chemin (données SVG), flechedebut, flechefin, texte, police (Poppins, Lora, Mono), taille, gras, italique, alignement, interligne, image, calque, groupe, donnees, verrouille, masque. Les modifications successives d'une même propriété s'annulent en une fois. |
+| `toile:selection()` · `toile:selectionner(ids \| "groupe:g")` · `toile:boite([id])` · `toile:montrer(groupe)` | Sélection, boîte englobante, défilement jusqu'à un groupe. |
+| `toile:outil([nom, {href=, ratio=, donnees=, maintenir=}])` · `toile:style{remplissage=, contour=, epaisseur=, police=, taille=}` · `toile:ensaisie()` | Outil actif (selection, rectangle, ellipse, ligne, fleche, plume, texte, image, main, noeuds) et style des nouvelles formes ; vrai pendant la saisie d'un texte. |
+| `toile:aligner(gauche \| centre \| droite \| haut \| milieu \| bas \| repartirh \| repartirv)` · `toile:ordre(avant \| arriere \| premierplan \| arriereplan)` · `toile:grouper()` · `toile:degrouper()` · `toile:dupliquer()` · `toile:copier()` · `toile:coller()` · `toile:booleen(union \| difference \| intersection \| exclusion)` | Opérations sur la sélection (une forme seule s'aligne sur la planche). |
+| `toile:calques()` · `toile:calque(nom, {visible=, verrouille=, renommer=, supprimer=, monter=, descendre=})` | Calques (créé s'il n'existe pas). |
+| `toile:grille{taille=, visible=, magnetisme=, objets=}` · `toile:guide("v" \| "h", position)` · `toile:zoom([%])` · `toile:ajuster([largeur])` · `toile:dimensions([l, h])` · `toile:fond(couleur)` | Vue et planche. |
+| `toile:annuler()` · `toile:retablir()` · `toile:historique()` · `toile:memoriser()` · `toile:action()` · `toile:png(chemin[, largeur])` · `toile:versecran(x, y)` · `toile:versscene(x, y)` | Historique, dernière action, rendu PNG, conversions de repères. |
+| `toile:chargerpages({svg...}, {colonnes=, ecart=, legendes=, choisie=, garderposition=})` | Planche de pages ou de vignettes (aperçu de document, trieuse de diapositives, plateau de storyboard) : chaque page est le groupe `page-N`. |
 | `interface.diagramme([{modifiable=, direction=}])` | Canevas de diagramme (nœuds et liens) : glisser un nœud le déplace, glisser le fond déplace la vue, la molette zoome ; en mode `modifiable`, glisser depuis la pastille d'un bord (titre ou ligne) vers un autre nœud crée un lien (`surchangement`, `d:action()`), Suppr demande une suppression. `direction` : `droite` (défaut) ou `bas`. `surselection` : `ev.texte` = id du nœud, `"lien:<id>"` ou `""` ; `ev.index` = ligne. |
 | `diagramme:noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=}` | Ajoute ou met à jour un nœud. `lignes` : textes ou `{texte=, detail=, marque=}` (marque : PK, FK…) ; `forme` : `table` (défaut) ou `boite` ; `pastille` : texte en haut à droite ; `jauge` : 0 à 1 ; sans `x`/`y`, placé à droite de l'existant. |
 | `diagramme:lien{id=, de=, a=, deligne=, aligne=, libelle=, fleche=, pointille=, couleur=, epaisseur=}` | Ajoute ou met à jour un lien (`deligne`, `aligne` : lignes de départ et d'arrivée, 0 = le nœud) ; renvoie son id. |
@@ -2226,6 +2261,26 @@ Voir le chapitre 8.2.
 | `x:continuer()`, `x:pas()`, `x:passer()`, `x:sortir()` | En pause : reprend ; pas à pas (entre dans les procédures) ; pas principal ; termine la procédure en cours. |
 | `x:pause()`, `x:enpause()` | Interrompt à la prochaine instruction ; vrai si le programme est en pause. |
 | `x:pointsarret(source, lignes)` | Remplace les points d'arrêt d'un fichier pendant l'exécution. |
+
+### Paquet `publication`
+
+Mise en page, PDF, HTML, importation et vectorisation - disponible par son nom (`publication.…`) ou par `paquet("publication")`. Un seul moteur de mise en page sert l'aperçu (toile), le SVG et le PDF : ce que l'on voit est ce qui est publié.
+
+| Appel | Rôle |
+| --- | --- |
+| `publication.paginer(markdown[, gabarit])` | Met en page un Markdown enrichi : `{pages = {svg...}, titres = {{niveau, texte, id, page}}, nbpages, largeur, hauteur, duree}`. |
+| `publication.pdf(chemin, markdown[, gabarit])` | PDF vectoriel : texte réel, polices TrueType incorporées en sous-ensemble, signets, liens, sommaire, index, renvois, balisage d'accessibilité (StructTreeRoot). `qualite` : standard, hd, ecran, impression (repères de coupe) ; `accessible = faux` pour ne pas baliser. |
+| `publication.pdfsvg(chemin, pages[, {titre=, auteur=, signets = {{titre=, page=, niveau=}}, qualite=}])` | PDF d'une suite de SVG (codes ou chemins) : diapositives, planches. |
+| `publication.html(markdown[, prefixe])` | Fragment HTML (titres avec ancres, tableaux, encadrés, figures, cases). |
+| `publication.titres(markdown)` · `publication.textebrut(markdown)` · `publication.ancre(texte)` · `publication.mesurer(texte[, police, taille, gras])` | Plan, texte brut, ancre d'un titre, largeur d'un texte (points). |
+| `publication.png(svg, chemin[, largeur, dossier])` · `publication.tailleimage(chemin)` | Rendu PNG d'un SVG ; dimensions d'une image ou d'un SVG. |
+| `publication.importer(source, destination[, {page=, largeur=}])` · `publication.pagespdf(chemin)` | PNG, JPEG, GIF, BMP, WEBP (SDL3_image si présente) ou page de PDF (PDFium) convertis en PNG. |
+| `publication.vectoriser(image[, {mode=, couleurs=, lissage=, detail=, aireminimale=, fond=, page=}])` | Vectorisation : mode mono, gris, couleurs, logo, technique, illustration ; renvoie un SVG (un chemin par couleur, courbes de Bézier, angles conservés). |
+| `publication.optimisersvg(svg[, {simplifier=, nettoyer=, fusionner=, images=, lisible=}])` | Nettoie (petites taches), simplifie (tolérance), fusionne (même couleur), incorpore les images ; `{svg, avant, apres}`. |
+
+**Markdown enrichi** : titres (`{#ancre}`), listes imbriquées et cases, citations, encadrés (`> [!NOTE]`, TIP, WARNING, IMPORTANT, CAUTION), code, tableaux (alignements), figures `![légende](f.svg "titre"){largeur=60%}`, filets, `[[toc]]`, `[[index]]`, `[[saut]]`, `[[i:terme]]`, `[[ref:ancre]]`.
+
+**Gabarit** : format (a4, a5, a3, lettre, livre, carre, 16:9), paysage, marges, margehaut, margebas, margegauche, margedroite, policecorps, policetitres (Poppins, Lora, Mono), taille, interligne, accent, couleurtexte, couleurtitres, justifier, numeroter, chapitrenouvellepage, rectoverso, couverture, titre, soustitre, auteur, date, entete et pied (« gauche|centre|droite » avec {titre}, {chapitre}, {page}, {pages}), dossier (images relatives).
 
 ### Paquet `rapport`
 

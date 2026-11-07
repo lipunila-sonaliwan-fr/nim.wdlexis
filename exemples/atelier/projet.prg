@@ -7,7 +7,7 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [S]tudio 1.8.4 - " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [S]tudio 1.8.6 - " + fichier.nom(dossier)
   ARBRE_PROJET()
   vb:projet(dossier)        && procédures du projet : palette et liens d'appel entre fichiers
   locale s = LIRE_SESSION()
