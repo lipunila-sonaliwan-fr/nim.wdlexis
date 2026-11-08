@@ -1581,6 +1581,7 @@ proc parsePathData*(d: string): seq[VSub] =
 
 type StyleState = object
   fill, stroke: string
+  color: string                  # couleur courante (« currentColor »)
   strokeWidth, opacity, fontSize: float
   font, align, layer, group, dash: string
   bold, italic, hidden: bool
@@ -1632,6 +1633,13 @@ proc parseSvgScene*(code: string, base = ""): VScene =
         gradients[nd.attrs["id"]] = "linear(" & formatFloat(ang, ffDecimal, 1) & "," & stops[0] & "," & stops[^1] & ")"
     for k in nd.kids: collect(k)
   collect(doc)
+  # éléments nommés (cibles de <use href="#id">)
+  var ids: Table[string, XNode]
+  proc index(nd: XNode) =
+    if nd.attrs.hasKey("id") and not ids.hasKey(nd.attrs["id"]): ids[nd.attrs["id"]] = nd
+    for k in nd.kids: index(k)
+  index(doc)
+  var useDepth = 0
   proc paintOf(v, inherited: string): string =
     let t = v.strip
     if t.startsWith("url("):
@@ -1671,8 +1679,12 @@ proc parseSvgScene*(code: string, base = ""): VScene =
   var groupSeq = 0
   proc applyAttrs(st: var StyleState, at: Table[string, string]) =
     let m = styleMap(at)
-    if m.hasKey("fill"): st.fill = paintOf(m["fill"], st.fill)
-    if m.hasKey("stroke"): st.stroke = paintOf(m["stroke"], st.stroke)
+    if m.hasKey("color") and m["color"].toLowerAscii notin ["inherit", "currentcolor"]: st.color = m["color"]
+    let curCol = if st.color.len > 0: st.color else: "#000000"
+    proc cur(v: string): string =
+      if v.strip.toLowerAscii == "currentcolor": curCol else: v
+    if m.hasKey("fill"): st.fill = paintOf(cur(m["fill"]), st.fill)
+    if m.hasKey("stroke"): st.stroke = paintOf(cur(m["stroke"]), st.stroke)
     if m.hasKey("stroke-width"): st.strokeWidth = num(m, "stroke-width", 1)
     if m.hasKey("opacity"): st.opacity *= num(m, "opacity", 1)
     if m.hasKey("fill-opacity") and st.fill notin ["", "none"] and not st.fill.startsWith("linear"):
@@ -1886,6 +1898,33 @@ proc parseSvgScene*(code: string, base = ""): VScene =
       s.fill = (if st.fill.len == 0 or st.fill == "none": "#000000" else: st.fill)
       s.stroke = "none"
       s.fitTextHeight
+    of "use":
+      # occurrence d'un symbole ou d'un élément nommé : <use href="#id" x y width height>
+      var href = nd.attrs.getOrDefault("href", nd.attrs.getOrDefault("xlink:href"))
+      if not href.startsWith("#") or useDepth > 8: return
+      href = href[1 .. ^1]
+      if not ids.hasKey(href): return
+      let target = ids[href]
+      if target == nd: return
+      var st2 = st
+      st2.m = mul(st2.m, translateM(num(nd.attrs, "x"), num(nd.attrs, "y")))
+      inc groupSeq
+      st2.group = (if nd.attrs.hasKey("id"): nd.attrs["id"] else: "use" & $groupSeq)
+      inc useDepth
+      if target.tag == "symbol":
+        let vb = numbersIn(target.attrs.getOrDefault("viewbox"))
+        if vb.len == 4 and vb[2] > 0 and vb[3] > 0:
+          let w = num(nd.attrs, "width", num(target.attrs, "width", vb[2]))
+          let h = num(nd.attrs, "height", num(target.attrs, "height", vb[3]))
+          # preserveAspectRatio par défaut : xMidYMid meet
+          let k = min(w / vb[2], h / vb[3])
+          st2.m = mul(st2.m, mul(translateM((w - vb[2] * k) / 2, (h - vb[3] * k) / 2),
+                                 mul(scaleM(k, k), translateM(-vb[0], -vb[1]))))
+        st2.applyAttrs(target.attrs)
+        for k in target.kids: walk(k, st2, inDefs)
+      else:
+        walk(target, st2, inDefs)
+      dec useDepth
     of "image":
       let a = styleMap(nd.attrs)
       let href = if nd.attrs.hasKey("href"): nd.attrs["href"] else: nd.attrs.getOrDefault("xlink:href", nd.attrs.getOrDefault("href"))
@@ -1913,6 +1952,146 @@ proc parseSvgScene*(code: string, base = ""): VScene =
   if sc.shapes.len > 0 and sc.shapes[0].kind == vkRect and sc.shapes[0].id == "fond":
     sc.background = sc.shapes[0].fill
     sc.shapes.delete(0)
+
+#
+# planches de symboles
+#
+
+type SvgSymbol* = tuple[id, title, svg: string; w, h: float]
+
+proc extractSymbols*(code: string, color = "", size = 256.0): seq[SvgSymbol] =
+  ## Découpe une planche de symboles (<symbol id=… viewBox=…>) en SVG autonomes : le contenu
+  ## d'origine est recopié tel quel (casse, dégradés), les attributs de présentation de la racine
+  ## et du symbole sont reportés sur un groupe, les dégradés et symboles référencés sont joints ;
+  ## `color` (si non vide) devient la couleur courante du groupe (valeur de « currentColor »).
+  proc fmtNum(v: float): string =
+    let r = round(v * 1000) / 1000
+    if abs(r - round(r)) < 1e-9: return $int(round(r))
+    result = formatFloat(r, ffDecimal, 3).strip(leading = false, chars = {'0'})
+    if result.endsWith("."): result.setLen(result.len - 1)
+  let low = code.toLowerAscii
+  # attributs de présentation hérités de la racine <svg>
+  const pres = ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+                "fill-rule", "opacity", "color", "style"]
+  proc attrsOf(openTag: string): Table[string, string] =
+    let doc = parseXml(openTag & "</x>")
+    if doc.kids.len > 0: result = doc.kids[0].attrs
+  proc presOf(at: Table[string, string]): string =
+    for k in pres:
+      if not at.hasKey(k): continue
+      var v = at[k]
+      if k == "style":
+        # une planche se masque souvent elle-même (display:none) : ne pas le reporter
+        var keep: seq[string]
+        for d in v.split(';'):
+          let n = d.split(':')[0].strip.toLowerAscii
+          if d.strip.len > 0 and n notin ["display", "visibility", "position", "width", "height", "overflow"]: keep.add d.strip
+        v = keep.join(";")
+        if v.len == 0: continue
+      result.add " " & k & "=\"" & v.multiReplace(("&", "&amp;"), ("\"", "&quot;")) & "\""
+  var rootPres = ""
+  let rs = low.find("<svg")
+  if rs >= 0:
+    let re = code.find('>', rs)
+    if re > 0: rootPres = presOf(attrsOf(code[rs .. re]))
+  # symboles : position du contenu brut
+  var syms: seq[tuple[id: string, at: Table[string, string], inner: string, raw: string]]
+  var i = 0
+  while true:
+    let a = low.find("<symbol", i)
+    if a < 0: break
+    let e = code.find('>', a)
+    if e < 0: break
+    let selfClose = code[e - 1] == '/'
+    let at = attrsOf(code[a .. e])
+    var inner = ""
+    var stop = e + 1
+    if not selfClose:
+      let c = low.find("</symbol>", e)
+      if c < 0: break
+      inner = code[e + 1 ..< c]
+      stop = c + "</symbol>".len
+    syms.add (at.getOrDefault("id"), at, inner, code[a ..< stop])
+    i = stop
+  # définitions partagées (hors symboles) : contenu des <defs>
+  var shared = ""
+  i = 0
+  while true:
+    let a = low.find("<defs", i)
+    if a < 0: break
+    let e = code.find('>', a)
+    let c = low.find("</defs>", e)
+    if e < 0 or c < 0: break
+    var blk = code[e + 1 ..< c]
+    for sy in syms:
+      if sy.raw.len > 0: blk = blk.replace(sy.raw, "")
+    shared.add blk.strip
+    i = c + 7
+  var bySym: Table[string, int]
+  for k, sy in syms:
+    if sy.id.len > 0: bySym[sy.id] = k
+  for sy in syms:
+    if sy.id.len == 0 or sy.inner.strip.len == 0: continue
+    var vb = numbersIn(sy.at.getOrDefault("viewbox"))
+    if vb.len != 4 or vb[2] <= 0 or vb[3] <= 0:
+      # pas de viewBox : boîte des formes
+      let probe = parseSvgScene("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4096\" height=\"4096\">" & sy.inner & "</svg>")
+      var x0 = 1e18
+      var y0 = 1e18
+      var x1 = -1e18
+      var y1 = -1e18
+      for s in probe.shapes:
+        x0 = min(x0, s.x); y0 = min(y0, s.y); x1 = max(x1, s.x + s.w); y1 = max(y1, s.y + s.h)
+      if x1 <= x0 or y1 <= y0: continue
+      vb = @[x0, y0, x1 - x0, y1 - y0]
+    # titre : <title>, aria-label, data-nom, sinon l'identifiant
+    var title = ""
+    let tl = sy.inner.toLowerAscii
+    let ta = tl.find("<title")
+    if ta >= 0:
+      let tb = sy.inner.find('>', ta)
+      let tc = tl.find("</title>", tb)
+      if tb > 0 and tc > tb: title = xmlUnescape(sy.inner[tb + 1 ..< tc]).strip
+    if title.len == 0: title = sy.at.getOrDefault("aria-label", sy.at.getOrDefault("data-nom"))
+    if title.len == 0:
+      var t = sy.id
+      for pre in ["icon-", "icone-", "ico-", "sym-", "symbol-", "symbole-", "i-"]:
+        if t.toLowerAscii.startsWith(pre) and t.len > pre.len: t = t[pre.len .. ^1]
+      t = t.replace('-', ' ').replace('_', ' ').strip
+      if t.len > 0: t[0] = t[0].toUpperAscii
+      title = t
+    # défs nécessaires : dégradés partagés si une url(#…) est utilisée, symboles cités par <use>
+    var defs = ""
+    if shared.len > 0 and ("url(#" in sy.inner or "href=\"#" in sy.inner): defs.add shared
+    var j = 0
+    var seen: seq[string]
+    var pending = @[sy.inner]
+    while pending.len > 0:
+      let txt = pending.pop
+      j = 0
+      while true:
+        let h = txt.find("href=\"#", j)
+        if h < 0: break
+        let q = txt.find('"', h + 7)
+        if q < 0: break
+        let rid = txt[h + 7 ..< q]
+        j = q
+        if rid != sy.id and bySym.hasKey(rid) and rid notin seen:
+          seen.add rid
+          defs.add syms[bySym[rid]].raw
+          pending.add syms[bySym[rid]].inner
+    let k = if size > 0: size / max(vb[2], vb[3]) else: 1.0
+    let w = vb[2] * k
+    let h = vb[3] * k
+    var body = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" & fmtNum(w) &
+               "\" height=\"" & fmtNum(h) & "\" viewBox=\"" & fmtNum(vb[0]) & " " & fmtNum(vb[1]) & " " & fmtNum(vb[2]) & " " & fmtNum(vb[3]) & "\">"
+    if title.len > 0: body.add "<title>" & title.multiReplace(("&", "&amp;"), ("<", "&lt;")) & "</title>"
+    if defs.len > 0: body.add "<defs>" & defs & "</defs>"
+    var gp = rootPres & presOf(sy.at)
+    # couleur courante : héritée par « currentColor » (y compris dans les symboles cités)
+    if color.len > 0 and " color=" notin gp: gp = " color=\"" & color & "\"" & gp
+    body.add (if gp.len > 0: "<g" & gp & ">" else: "<g>") & sy.inner & "</g></svg>"
+    result.add (sy.id, title, body, w, h)
 
 #
 # écriture SVG

@@ -1520,6 +1520,14 @@ proc defineMethods() =
     # ed:markdown([uid]) : vrai si le document est du Markdown (.md).
     let id = L.edOf(a, "markdown")
     @[boolV(editorIsMarkdown(id, L.uidArg(a, 2, id, "markdown")))]
+  mfn "editeur", "accueil", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Texte affiché quand aucun onglet n'est ouvert : liste de lignes (vide ou nul : accueil par défaut).
+    let id = L.edOf(a, "accueil")
+    var lines: seq[string]
+    let v = arg(a, 2)
+    if v.kind == vkTable:
+      for i in 1 .. v.t.rawLen: lines.add L.tostr(v.t.rawGet(intV(i)))
+    editorSetWelcome(id, lines)
   mfn "editeur", "noms", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Noms proposés par la complétion (SQL : « table » et « table.colonne »).
     let id = L.edOf(a, "noms")
@@ -2530,6 +2538,7 @@ const uiDocs = [
   "editeur:taillepolice(taille)", "Taille de la police.", "editeur:minicarte([b])", "Affiche ou masque la minicarte.",
   "editeur:langage([langage], [uid])", "Langage d'un document : « sql » (coloration, complétion et commentaires SQL) ou « lexis » ; \"\" : d'après l'extension (.sql). Sans argument : langage du document actif.",
   "editeur:pastille(texte, [uid], [couleur])", "Pastille colorée après le titre de l'onglet d'un document (\"\" : aucune) ; couleur \"#RRGGBB\" (défaut : accent du thème).",
+  "editeur:accueil(lignes)", "Texte centré affiché quand aucun onglet n'est ouvert (1re ligne en couleur d'accent) ; liste vide : accueil par défaut.",
   "editeur:noms(liste)", "Noms proposés par la complétion ; en SQL, « table » et « table.colonne » (les colonnes sont proposées après « table. »).",
   "markdown:charger(chemin)", "Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut.",
   "markdown:ajouter(texte, ...)", "Ajoute du texte Markdown à la fin, chacun sur une nouvelle ligne ; le défilement est conservé.",

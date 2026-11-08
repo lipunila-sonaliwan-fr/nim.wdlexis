@@ -107,6 +107,7 @@ type
     projectNames*: seq[string]   # symboles du projet pour la complétion.
     clipText: string             # texte à copier (commande "setClipboard").
     kindDots*: bool              # pastille de couleur (nature du document) au début de chaque onglet.
+    welcome*: seq[string]        # écran affiché sans onglet ouvert (vide : accueil de l'atelier).
     hoverDot: int
 
 
@@ -849,6 +850,14 @@ proc drawMinimap(ed: CodeEditor, d: Drawing, doc: Document, colors: EditorColors
 proc drawWelcome(ed: CodeEditor, d: Drawing, t: Theme, colors: EditorColors) =
   let b = ed.bodyRect
   d.fillRect(b, colors.bg)
+  if ed.welcome.len > 0:
+    # accueil propre à l'application (1re ligne en couleur d'accent, 2e ligne discrète)
+    var y = b.y + b.h / 3
+    for i, s in ed.welcome:
+      let c = if i == 0: t.accent elif i == 1: colors.tabText else: colors.gutterMajor
+      d.textIn(rect(b.x, y, b.w, t.lineHeight), s, c, alCenter)
+      y += t.lineHeight
+    return
   let lines = ["wdlexis+ [S]tudio", "Développez naturellement vos applications métier",
                "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr - metalab (at) sonaliwan.fr", "",
                "Ctrl+N  nouveau fichier      Ctrl+O  ouvrir",
@@ -2004,6 +2013,11 @@ proc editorSetFontSize*(id: ControlId, size: float) =
     if size != ed.fontSize:
       ed.fontSize = size
       ed.fontReady = false
+
+proc editorSetWelcome*(id: ControlId, lines: seq[string]) =
+  ## Lignes affichées quand aucun onglet n'est ouvert (vide : accueil par défaut).
+  withControl(id, CodeEditor, ed):
+    ed.welcome = lines
 
 proc editorSetProjectNames*(id: ControlId, names: seq[string]) =
   withControl(id, CodeEditor, ed): ed.projectNames = names

@@ -250,6 +250,16 @@ proc openPublication(L: Interp): Value =
     if img.w <= 0: rtError("vectoriser : image illisible « " & src & " »")
     let sc = vectorize(img, traceOpts(o))
     @[strV(sc.toSvg(false, false))]
+  m.fn "symbolessvg", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # symbolessvg(svg[, {couleur = "#1E293B", taille = 256}]) : symboles d'une planche SVG,
+    # {{id, titre, svg, largeur, hauteur}} (un SVG autonome par <symbol>).
+    let code = L.checkStr(a, 1, "symbolessvg")
+    let o = optsOf(a, 2)
+    let res = newLTable()
+    for sy in extractSymbols(code, fieldStr(o, "couleur", ""), fieldNum(o, "taille", 256)):
+      res.arr.add record({"id": strV(sy.id), "titre": strV(sy.title), "svg": strV(sy.svg),
+                      "largeur": numV(sy.w), "hauteur": numV(sy.h)})
+    @[tableV(res)]
   m.fn "optimisersvg", proc (L: Interp, a: seq[Value]): seq[Value] =
     # optimisersvg(svg, {simplifier = tolérance, fusionner = vrai, nettoyer = aire}) : SVG propre.
     let code = L.checkStr(a, 1, "optimisersvg")
@@ -271,6 +281,7 @@ registerPackage PackageDef(name: "publication", open: openPublication,
     "publication.paginer(markdown[, gabarit])", "Met en page : {pages = {svg...}, titres = {{niveau, texte, id, page}}, nbpages, largeur, hauteur, duree (ms)}.",
     "publication.pdf(chemin, markdown[, gabarit])", "PDF vectoriel (texte réel, polices incorporées, signets, liens, sommaire, index, renvois, balisage d'accessibilité). qualite : standard, hd, ecran, impression (repères de coupe).",
     "publication.pdfsvg(chemin, pages[, options])", "PDF d'une suite de SVG (diapositives, planches) : pages = liste de codes SVG ou de chemins ; signets = {{titre=, page=}}.",
+    "publication.symbolessvg(svg[, options])", "Planche de symboles : un SVG autonome par <symbol> ({{id, titre, svg, largeur, hauteur}}) ; options couleur (remplace currentColor) et taille (plus grand côté, 256 par défaut).",
     "publication.html(markdown[, prefixe])", "Fragment HTML (ancres, tableaux, encadrés, figures ; prefixe ajouté aux chemins d'images).",
     "publication.titres(markdown)", "Plan du document : {{niveau, texte, id}}.",
     "publication.textebrut(markdown)", "Texte sans balisage.",
