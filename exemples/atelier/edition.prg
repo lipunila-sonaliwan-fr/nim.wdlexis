@@ -1,6 +1,6 @@
 && CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 && Atelier Lexis+ : analyse pendant la frappe, problèmes, structure, signaux de
-&& l'éditeur, pastilles des onglets et vue blueprint, recherche, aller à la
+&& l'éditeur, pastilles des onglets et fenêtre Blueprint, recherche, aller à la
 && ligne / à la définition, affichage.
 
 procedure MODIFIE(ev)
@@ -10,7 +10,7 @@ retourner
 procedure ANALYSER(force)
   globale problemes, symboles, analyse
   locale t0 = systeme.horloge()
-  && texte(), chemin()... sans uid : le document actif, ou le code de la vue blueprint active
+  && texte(), chemin()... sans uid : le document actif (le code d'une vue aperçu)
   locale src = ed:texte()
   locale nom = ed:chemin()
   locale uid = CODE_ACTIF()
@@ -45,6 +45,7 @@ procedure ANALYSER(force)
   && structure du fichier
   symboles = lexis.structure(src)
   ARBRE_STRUCTURE(nom, uid)
+  vb:suivre(uid)                 && la fenêtre Blueprint reprend le code modifié (après une pause)
   locale ms = arrondi((systeme.horloge() - t0) * 1000, 1)
   etat.libelle = chaine(#pbs) + " problème(s) - analyse " + ms + " ms"
 retourner
@@ -149,11 +150,10 @@ procedure SYMBOLE(ev)
   finsi
   locale s = cheminsstruct[ev.texte]
   si s <> nul
-    si ed:nature(ed:actif()) = "blueprint"
-      vb:afficherligne(s.ligne)       && vue blueprint : centre la vue sur le nœud
-    sinon
       ed:aller(s.ligne, s.colonne)
       ed:focus()
+    si vb:courant() = CODE_ACTIF()
+      vb:afficherligne(s.ligne)       && la fenêtre Blueprint suit : centre la vue sur le nœud
     finsi
   finsi
 retourner
@@ -257,15 +257,16 @@ procedure AIDE_MOT
 retourner
 
 &&
-&& Pastilles des onglets et vue blueprint
-&&   rouge : code Lexis+   orange : formulaire   jaune : état   bleu : blueprint
-&& Un clic sur la pastille rouge ouvre la vue blueprint du code (onglet à pastille
-&& bleue) : graphe éditable, palette de toutes les fonctions à glisser, liens à
-&& tirer entre broches ; chaque modification réécrit le code de l'onglet rouge.
+&& Pastilles des onglets et fenêtre Blueprint
+&&   rouge : code Lexis+   orange : formulaire   jaune : état   vert : aperçu
+&& Un clic sur la pastille rouge ouvre le code dans la fenêtre Blueprint (comme
+&& les fenêtres Concepteur) : graphe éditable, palette des entités à gauche
+&& (masquée, affichée ou détachée dans sa propre fenêtre), détails à droite ;
+&& chaque modification réécrit le code de l'onglet rouge.
 &&
 
 fonction CODE_ACTIF()
-  && document de code actif (celui que représente la vue blueprint affichée)
+  && document de code actif (celui que représente la vue aperçu affichée)
   locale uid = ed:actif()
   si uid >= 0 et (ed:nature(uid) = "blueprint" ou ed:nature(uid) = "apercu")
     retourner ed:lien(uid)
@@ -342,17 +343,12 @@ procedure OUVRIR_BLUEPRINT(uid)
     retourner
   finsi
   etat.libelle = "Vue blueprint de " + TITRE_DOCUMENT(uid) + ;
-                 " - glisser depuis la palette, relier les broches ; le code est réécrit à chaque modification"
+                 " (fenêtre Blueprint) - glisser depuis la palette, relier les broches ; le code est réécrit à chaque modification"
 retourner
 
 procedure BLUEPRINT_BASCULER
-  && menu Conception > Vue blueprint : du code à sa vue, de la vue au code
-  locale uid = ed:actif()
-  si uid >= 0 et ed:nature(uid) = "blueprint"
-    ed:activer(ed:lien(uid))
-  sinon
-    OUVRIR_BLUEPRINT(uid)
-  finsi
+  && menu Conception > Vue blueprint du fichier courant : la fenêtre Blueprint sur ce code
+  OUVRIR_BLUEPRINT(CODE_ACTIF())
 retourner
 
 procedure SIGNAL_BLUEPRINT(ev)
@@ -360,7 +356,11 @@ procedure SIGNAL_BLUEPRINT(ev)
   locale s = ev.texte
   faire cas
   cas commencepar(s, "code:")
-    ANALYSER(faux)              && le code a été réécrit depuis la vue
+    && le code a été réécrit depuis la vue : son onglet devient l'onglet actif
+    si ev.index <> CODE_ACTIF()
+      ed:activer(ev.index)
+    finsi
+    ANALYSER(faux)
   cas commencepar(s, "statut:")
     etat.libelle = souschaine(s, 8)
   cas commencepar(s, "entite:")
@@ -477,6 +477,8 @@ procedure BASCULER_THEME
   reglages.sombre = non reglages.sombre
   fen:fixertheme("natif", reglages.sombre, "compacte")
   ENSEMBLE_THEME(reglages.sombre)
+  vb:theme(reglages.sombre, "compacte")   && fenêtre Blueprint et sa palette détachée
+  THEME_FENETRE(vpfen)             && vue projet
   THEME_FENETRE(condlg)
   THEME_FENETRE(etdlg)
   THEME_FENETRE(gendlg)

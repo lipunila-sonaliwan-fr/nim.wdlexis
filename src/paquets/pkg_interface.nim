@@ -34,7 +34,8 @@ import std/[strutils, tables, os, locks, options, math, algorithm]
 import ../wdgui
 import ../lexis/api
 import ../ide/compat
-import ../ide/[codeeditor, langdocs]
+import ../ide/[codeeditor, langdocs, gentok]
+from std/sets import toHashSet, HashSet, incl
 from ../ide/designer import designImageBase, FormCanvas, PaletteView, newFormCanvas, newPaletteView, nodeByUid, pathOfNode,
   visibleProps, canvasSetProp, select, deleteSelected, moveSelected, moveOut, showNode
 from ../ide/reportdesigner import ReportCanvas, ReportPalette, SelKind, newReportCanvas, newReportPalette,
@@ -47,10 +48,14 @@ from ../ide/formmodel import FormModel, DNode, PropKind, newModel, parseModel, g
   addCustomEntry, allNodes, getProp, handlerFor, setHandler, eventsOf, isContainerKind, findEntry, isIdent
 from ../ide/lexislint import Diagnostic, Severity, ProjectIndex, Location, indexProject
 from ../ide/blueprint import DocHost, newDocHost, bpHostInUse, bpOpen, bpClose, bpRebuildDetails, bpHandleEvent,
-  bpSetProjectProcs, bpInsertApi, bpShowLine, bpCodeChanged, bpGotoLine, bpStatus, bpCommand, bpLocate, bpOpenEntity
+  bpSetProjectProcs, bpInsertApi, bpShowLine, bpCodeChanged, bpGotoLine, bpStatus, bpCommand, bpLocate, bpOpenEntity,
+  bpShow, bpCurrent, bpWindowOpen, bpWindowIds, bpCloseWindow, bpForget, bpFollowLater, bpIsLoaded
+
+from ../ide/cropviewpure import PureCropView, newPureCropView, loadCropImage, parseCrop,
+  pureCropSetImage, pureCropClear, pureCropHasImage     # ui.cadrage (Nim pur : aussi dans les applications générées)
 from ../ide/formmodel import isFormFile
 from ../ide/etats import isReportFile
-from ../ide/imagedecode import decodeImageFile
+from ../ide/imagedecode import decodeImageFile, RgbaImage
 from std/unicode import runeOffset
 
 type
@@ -713,6 +718,7 @@ proc uidArg(L: Interp, a: seq[Value], i: int, id: ControlId, fname: string): int
 
 var bpHost: Control                    # DocHost du programme (nil : aucun)
 var bpEd: Control                      # son éditeur
+var bpTheme: Theme                     # thème de la fenêtre Blueprint
 var bpLock: Lock
 var bpDefs: Table[string, tuple[path: string, line: int]]   # procédures du projet (majuscules)
 initLock(bpLock)
@@ -755,10 +761,10 @@ proc bpOpenView(srcUid: int): int =
     k = kindForPath(if info.path.len > 0: info.path else: info.title)
     editorSetKind(id, srcUid, k)
   if k notin {dkCode, dkForm, dkReport}: return
-  result = editorNewBlueprint(id, srcUid)
-  if result < 0: return
-  bpOpen(result, srcUid, editorText(id, srcUid), info.version)
-  bpRebuildDetails()
+  var th: Theme
+  {.cast(gcsafe).}:
+    guarded: th = bpTheme
+  if bpShow(srcUid, th): result = srcUid     # fenêtre Blueprint sur ce fichier
 
 proc onBpCode(srcUid: int) {.nimcall, gcsafe.} = bpSignal("code:" & $srcUid, srcUid)
 
@@ -793,7 +799,7 @@ proc onBpOpenEntity(name: string) {.nimcall, gcsafe.} =
       except IOError, OSError: return
       editorSetKind(id, uid, kindForPath(loc.path))
     let bp = bpOpenView(uid)
-    if bp >= 0:
+    if bp >= 0 and bpCurrent() == bp:
       bpShowLine(bp, loc.line)
       bpRebuildDetails()
     bpSignal("entite:" & name & ":" & $uid, uid)
@@ -802,6 +808,9 @@ proc bpNativeEvent(ev: var Event): bool =
   # Événements internes de la vue (canevas, palette, détails, barre d'outils) et
   # resynchronisation quand l'onglet d'une vue redevient actif. Vrai : traité.
   if bpHost.isNil or ev.current != ev.id: return false
+  if ev.kind == evWindowClose and ev.id == windowOf(bpHost.id):
+    bpCloseWindow()                    # la fenêtre Blueprint suit celle de l'éditeur
+    return false
   if ev.kind == evSelection and ev.id == bpEdId() and ev.text.startsWith("doc:"):
     let id = bpEdId()
     let uid = try: parseInt(ev.text[4 .. ^1]) except ValueError: -1
@@ -1466,7 +1475,8 @@ proc defineMethods() =
     let id = L.edOf(a, "langage")
     if arg(a, 2).kind == vkNil: return @[strV(editorLanguage(id, -1))]
     let lang = L.checkStr(a, 2, "langage").toLowerAscii
-    if lang notin ["sql", "lexis", "markdown", ""]: rtError("editeur:langage : « sql », « lexis », « markdown » ou \"\" attendu")
+    if lang notin ["sql", "lexis", "markdown", "texte", ""] and not hasLang(lang):
+      rtError("editeur:langage : langage « " & lang & " » inconnu (sql, lexis, markdown, texte, ou défini par interface.definirlangage)")
     let uid = if arg(a, 3).kind == vkNil: -1 else: int(L.checkInt(a, 3, "langage"))
     editorSetLanguage(id, uid, lang)
   mfn "editeur", "pastille", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1528,6 +1538,46 @@ proc defineMethods() =
     if v.kind == vkTable:
       for i in 1 .. v.t.rawLen: lines.add L.tostr(v.t.rawGet(intV(i)))
     editorSetWelcome(id, lines)
+  mfn "editeur", "lecture", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:lecture([uid]) : vrai si lecture seule ; ed:lecture(b, [uid], [bords]) : l'impose ;
+    # bords = vrai : « cmd:edge:next » / « cmd:edge:prev » aux bords (blocs d'un grand fichier).
+    let id = L.edOf(a, "lecture")
+    let v = arg(a, 2)
+    if v.kind != vkBool:
+      let uid = if v.kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, 2, "lecture"))
+      return @[boolV(editorReadOnly(id, uid))]
+    editorSetReadOnly(id, L.uidArg(a, 3, id, "lecture"), v.b, optBool(a, 4, false))
+  mfn "editeur", "premiereligne", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:premiereligne([n], [uid]) : numéro affiché pour la première ligne (1 par défaut).
+    let id = L.edOf(a, "premiereligne")
+    if arg(a, 2).kind == vkNil: return @[intV(editorLineBase(id, editorActiveUid(id)) + 1)]
+    editorSetLineBase(id, L.uidArg(a, 3, id, "premiereligne"), int(L.checkInt(a, 2, "premiereligne")) - 1)
+  mfn "editeur", "defilement", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:defilement([uid]) : {premiere, visibles, total} ; ed:defilement(ligne, [uid]) : première ligne visible.
+    let id = L.edOf(a, "defilement")
+    if arg(a, 2).kind == vkNil or arg(a, 3).kind == vkBool:
+      let r = editorScroll(id, editorActiveUid(id))
+      return @[record({"premiere": intV(r.first + 1), "visibles": intV(r.visible), "total": intV(r.total)})]
+    editorSetScroll(id, L.uidArg(a, 3, id, "defilement"), int(L.checkInt(a, 2, "defilement")) - 1)
+  mfn "editeur", "titre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let id = L.edOf(a, "titre")
+    let uid = L.uidArg(a, 3, id, "titre")
+    if arg(a, 2).kind == vkNil: return @[strV(editorInfo(id, uid).title)]
+    editorSetTitle(id, uid, L.checkStr(a, 2, "titre"))
+  mfn "editeur", "marquer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:marquer(modifie, [uid]) : marque le document modifié ou enregistré.
+    let id = L.edOf(a, "marquer")
+    editorSetModified(id, L.uidArg(a, 3, id, "marquer"), optBool(a, 2, true))
+  mfn "editeur", "analyser", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Ré-analyse les documents ouverts (après interface.definirlangage).
+    editorRefreshLanguages(L.edOf(a, "analyser"))
+  mfn "editeur", "blocs", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Blocs du diagramme de structure : liste de {genre, debut, fin, niveau} (lignes à partir de 1).
+    let id = L.edOf(a, "blocs")
+    let t = newLTable()
+    for b in editorBlocks(id, L.uidArg(a, 2, id, "blocs")):
+      t.arr.add record({"genre": strV(b.kind), "debut": intV(b.first + 1), "fin": intV(b.last + 1), "niveau": intV(b.level)})
+    @[tableV(t)]
   mfn "editeur", "noms", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Noms proposés par la complétion (SQL : « table » et « table.colonne »).
     let id = L.edOf(a, "noms")
@@ -1545,24 +1595,43 @@ proc defineMethods() =
     if int(id) <= 0: rtError("« " & fname & " » : ajoutez d'abord la vue blueprint à une fenêtre")
     id
   mfn "blueprint", "ouvrir", proc (L: Interp, a: seq[Value]): seq[Value] =
-    # vb:ouvrir([uid]) : ouvre (ou active) l'onglet blueprint du code uid (défaut : document actif).
+    # vb:ouvrir([uid]) : ouvre la fenêtre Blueprint sur le code uid (défaut : document actif).
     let id = L.hostOf(a, "ouvrir")
     let r = bpOpenView(L.uidArg(a, 2, id, "ouvrir"))
     @[if r < 0: nilV else: intV(r)]
   mfn "blueprint", "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
-    # vb:fermer([uid]) : ferme la vue blueprint uid, ou celle du code uid.
-    let id = L.hostOf(a, "fermer")
-    let uid = if arg(a, 2).kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, 2, "fermer"))
-    let bp = if editorKind(id, uid) == dkBlueprint: uid else: editorBlueprintFor(id, uid)
-    if bp >= 0:
-      editorClose(id, bp)
-      bpClose(bp)
-    @[boolV(bp >= 0)]
+    # vb:fermer([uid]) : retire la vue du code uid de la fenêtre ; sans uid, ferme la fenêtre.
+    discard L.hostOf(a, "fermer")
+    if arg(a, 2).kind == vkNil:
+      let open = bpWindowOpen()
+      bpCloseWindow()
+      return @[boolV(open)]
+    let uid = int(L.checkInt(a, 2, "fermer"))
+    let had = bpIsLoaded(uid)
+    bpForget(uid)
+    @[boolV(had)]
   mfn "blueprint", "actif", proc (L: Interp, a: seq[Value]): seq[Value] =
-    # vb:actif() : vrai si l'onglet affiché est une vue blueprint.
-    let id = L.hostOf(a, "actif")
-    let uid = editorActiveUid(id)
-    @[boolV(uid >= 0 and editorKind(id, uid) == dkBlueprint)]
+    # vb:actif() : vrai si la fenêtre Blueprint est ouverte.
+    discard L.hostOf(a, "actif")
+    @[boolV(bpWindowOpen())]
+  mfn "blueprint", "courant", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:courant() : uid du code affiché dans la fenêtre Blueprint (nul : fenêtre fermée).
+    discard L.hostOf(a, "courant")
+    let uid = bpCurrent()
+    @[if uid < 0: nilV else: intV(uid)]
+  mfn "blueprint", "suivre", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:suivre([uid]) : le code a changé dans l'éditeur ; la vue le reprend après une pause.
+    let id = L.hostOf(a, "suivre")
+    bpFollowLater(L.uidArg(a, 2, id, "suivre"))
+  mfn "blueprint", "theme", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # vb:theme(sombre, [densite]) : thème de la fenêtre Blueprint (et de sa palette détachée).
+    discard L.hostOf(a, "theme")
+    let th = themeOf("natif", optBool(a, 2, true), L.optStr(a, 3, "theme", ""))
+    {.cast(gcsafe).}:
+      guarded: bpTheme = th
+    let open = windowIds()
+    for w in bpWindowIds():
+      if w in open: w.theme = th
   mfn "blueprint", "projet", proc (L: Interp, a: seq[Value]): seq[Value] =
     # vb:projet(dossier) : procédures du projet (palette, liens d'appel vers d'autres fichiers).
     discard L.hostOf(a, "projet")
@@ -1579,10 +1648,9 @@ proc defineMethods() =
     @[intV(procs.len)]
   mfn "blueprint", "inserer", proc (L: Interp, a: seq[Value]): seq[Value] =
     # vb:inserer(signature) : nœud pour une entrée de lexis.documentation() dans la vue affichée.
-    let id = L.hostOf(a, "inserer")
+    discard L.hostOf(a, "inserer")
     let sig = L.checkStr(a, 2, "inserer")
-    let uid = editorActiveUid(id)
-    if uid < 0 or editorKind(id, uid) != dkBlueprint: return @[boolV(false)]
+    if bpCurrent() < 0: return @[boolV(false)]
     for e in apiEntries():
       if e.signature == sig:
         bpInsertApi(e)
@@ -1590,11 +1658,10 @@ proc defineMethods() =
     @[boolV(false)]
   mfn "blueprint", "afficherligne", proc (L: Interp, a: seq[Value]): seq[Value] =
     # vb:afficherligne(ligne, [uid]) : centre la vue sur le nœud de la ligne (1 = première).
-    let id = L.hostOf(a, "afficherligne")
+    discard L.hostOf(a, "afficherligne")
     let line = int(L.checkInt(a, 2, "afficherligne")) - 1
-    var uid = if arg(a, 3).kind == vkNil: editorActiveUid(id) else: int(L.checkInt(a, 3, "afficherligne"))
-    if editorKind(id, uid) != dkBlueprint: uid = editorBlueprintFor(id, uid)
-    if uid >= 0:
+    let uid = if arg(a, 3).kind == vkNil: bpCurrent() else: int(L.checkInt(a, 3, "afficherligne"))
+    if uid >= 0 and uid == bpCurrent():
       bpShowLine(uid, line)
       bpRebuildDetails()
 
@@ -1826,7 +1893,13 @@ proc defineMethods() =
     var r = 0.0
     let f = if arg(a, 2).kind == vkNil: 1.0 else: L.checkNum(a, 2, "zoom")
     L.withDiagram(a, "zoom", c):
-      c.zoom = clamp(c.zoom * f, 0.15, 3.0)
+      # autour du centre de la vue (ce qui y est affiché y reste)
+      let z = clamp(c.zoom * f, 0.15, 3.0)
+      let cx = c.rect.w / 2
+      let cy = c.rect.h / 2
+      c.panX = cx - (cx - c.panX) * z / c.zoom
+      c.panY = cy - (cy - c.panY) * z / c.zoom
+      c.zoom = z
       r = c.zoom * 100
     @[numV(round(r))]
   mfn "diagramme", "position", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -1838,6 +1911,31 @@ proc defineMethods() =
       if n != nil:
         n.x = x
         n.y = y
+  # cadrage d'image (ui.cadrage)
+  mfn "cadrage", "charger", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # cd:charger(chemin, ["gauche,haut,cote"]) : affiche l'image ; sans cadrage, le plus grand carré centré.
+    # Renvoie {largeur, hauteur} de l'image, ou nul si elle est illisible (PNG, JPEG, GIF).
+    let c0 = L.self(a, "charger")
+    if c0.family != "cadrage": rtError("« charger » : cadrage attendu")
+    let path = L.checkStr(a, 2, "charger")
+    let crop = if arg(a, 3).kind == vkStr: a[2].s else: ""
+    var img: RgbaImage
+    try: img = loadCropImage(path)
+    except CatchableError: return @[nilV]
+    if img.w <= 0 or img.h <= 0: return @[nilV]
+    pureCropSetImage(c0.id, img, parseCrop(crop, img.w, img.h))
+    wakeUI()
+    @[record({"largeur": intV(img.w), "hauteur": intV(img.h)})]
+  mfn "cadrage", "vider", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let c0 = L.self(a, "vider")
+    if c0.family != "cadrage": rtError("« vider » : cadrage attendu")
+    pureCropClear(c0.id)
+    wakeUI()
+  mfn "cadrage", "image", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # cd:image() : vrai si une image est affichée.
+    let c0 = L.self(a, "image")
+    if c0.family != "cadrage": rtError("« image » : cadrage attendu")
+    @[boolV(pureCropHasImage(c0.id))]
   mfn "diagramme", "modifiable", proc (L: Interp, a: seq[Value]): seq[Value] =
     let b = optBool(a, 2, true)
     L.withDiagram(a, "modifiable", c):
@@ -1975,6 +2073,74 @@ proc defineMethods() =
 proc optsArg(a: seq[Value], i: int): LTable =
   if arg(a, i).kind == vkTable: a[i - 1].t else: nil
 
+proc wordsField(L: Interp, t: LTable, name: string): seq[string] =
+  # Liste de mots : table {"a", "b"} ou texte « a b c » (espaces ou virgules).
+  if t.isNil: return
+  let v = t.field(name)
+  case v.kind
+  of vkTable:
+    for i in 1 .. v.t.rawLen:
+      let s = L.tostr(v.t.rawGet(intV(i)))
+      if s.len > 0: result.add s
+  of vkStr:
+    for w in v.s.replace(",", " ").splitWhitespace: result.add w
+  else: discard
+
+proc langFromTable(L: Interp, name: string, t: LTable): LangDef =
+  # ui.definirlangage(nom, {...}) : voir la référence du paquet interface.
+  let caseless = not optField(t, "casse", true)
+  proc hs(ws: seq[string]): HashSet[string] =
+    for w in ws: result.incl (if caseless: w.toLowerAscii else: w)
+  let g = LangDef(name: name.toLowerAscii, caseless: caseless)
+  g.title = optField(t, "titre", name)
+  for e in L.wordsField(t, "extensions"):
+    let x = e.toLowerAscii
+    g.exts.add (if x.startsWith(".") or x.startsWith("*."): x.strip(chars = {'*'}) else: x)
+  g.keywords = hs(L.wordsField(t, "motscles"))
+  g.types = hs(L.wordsField(t, "types"))
+  g.builtins = hs(L.wordsField(t, "fonctions"))
+  g.constants = hs(L.wordsField(t, "constantes"))
+  g.lineComments = L.wordsField(t, "commentaire")
+  let bc = L.wordsField(t, "commentairebloc")
+  if bc.len >= 2:
+    g.blockOpen = bc[0]
+    g.blockClose = bc[1]
+  g.docPrefixes = L.wordsField(t, "documentation")
+  g.quotes = optField(t, "chaines", "\"'")
+  g.multiQuotes = L.wordsField(t, "chaineslongues")
+  g.escape = optField(t, "echappement", true)
+  g.directive = optField(t, "directive", "")
+  let an = optField(t, "annotation", "")
+  if an.len > 0: g.annotation = an[0]
+  g.varPrefix = optField(t, "variable", "")
+  for c in optField(t, "identificateurs", ""): g.identExtra.incl c
+  g.procWords = hs(L.wordsField(t, "definitions"))
+  g.callsAsProcs = optField(t, "appels", true)
+  g.markup = optField(t, "balises", false)
+  for b in L.wordsField(t, "blocs"):
+    case b.toLowerAscii
+    of "accolades": g.blocks.incl bsBraces
+    of "indentation": g.blocks.incl bsIndent
+    of "motscles", "mots-cles", "mots": g.blocks.incl bsKeywords
+    of "balises": g.blocks.incl bsTags
+    else: rtError("interface.definirlangage : blocs « " & b & " » inconnu (accolades, indentation, motscles, balises)")
+  g.brackets = optField(t, "crochets", false)
+  let st = if t.isNil: nil elif t.field("structure").kind == vkTable: t.field("structure").t else: nil
+  g.routines = hs(L.wordsField(st, "routines"))
+  g.conds = hs(L.wordsField(st, "conditions"))
+  g.loops = hs(L.wordsField(st, "boucles"))
+  g.tries = hs(L.wordsField(st, "essais"))
+  g.sections = hs(L.wordsField(st, "sections"))
+  g.branches = hs(L.wordsField(st, "branches"))
+  g.openers = hs(L.wordsField(st, "ouvrants"))
+  g.closers = hs(L.wordsField(st, "fermants"))
+  g.modifiers = hs(L.wordsField(st, "modificateurs"))
+  g.comment = optField(t, "commenter", "")
+  g.indentAfter = L.wordsField(t, "indenterapres")
+  if g.blocks == {} and not g.markup:
+    if g.indentAfter.len == 0: g.indentAfter = @["{", "(", "["]
+  g
+
 #
 # Minuterie : appelle une procédure à intervalle régulier (fil dédié), comme
 # un gestionnaire d'événement.
@@ -2108,6 +2274,11 @@ proc openInterface(L: Interp): Value =
       w.placed = true                  # position initiale à l'écran (sinon : centrée)
       w.placeX = optField(o, "x", 0)
       w.placeY = optField(o, "y", 0)
+    let par = field(o, "parent")
+    if par.kind == vkUser and par.u of UiCtl and UiCtl(par.u).win != nil:
+      # fenêtre rattachée : centrée en haut de son parent, fermée avec lui (palettes, boîtes)
+      w.modalFor = UiCtl(par.u).win
+      w.isModal = optField(o, "modale", false)
     let etat0 = optField(o, "etat", "")
     if etat0.len > 0:
       w.stateRequest = windowStateOf(etat0)    # appliqué à l'ouverture
@@ -2222,7 +2393,32 @@ proc openInterface(L: Interp): Value =
     let ed = newLexisEditor()
     ed.showMinimap = optField(o, "minicarte", true)
     ed.fontSize = optField(o, "taille", 14.0)
+    ed.plainNumbers = optField(o, "numeros", "") == "simples"
+    ed.paletteKeys = optField(o, "raccourcis", "") == "palette"
     @[L.newCtl(ed, "editeur")]
+  m.fn "definirlangage", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ui.definirlangage(nom, {titre=, extensions=, motscles=, ...}) : coloration et structure
+    # d'un langage pour les éditeurs (ui.editeur) ; remplace une définition de même nom.
+    let name = L.checkStr(a, 1, "definirlangage").strip
+    if name.len == 0: rtError("interface.definirlangage : nom attendu")
+    if name.toLowerAscii in ["sql", "lexis", "markdown", "texte"]:
+      rtError("interface.definirlangage : « " & name & " » est un langage intégré")
+    registerLang(L.langFromTable(name, optsArg(a, 2)))
+    @[strV(name.toLowerAscii)]
+  m.fn "supprimerlangage", proc (L: Interp, a: seq[Value]): seq[Value] =
+    removeLang(L.checkStr(a, 1, "supprimerlangage").toLowerAscii)
+  m.fn "langages", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Langages définis : liste de {nom, titre, extensions}.
+    let t = newLTable()
+    for g in langList():
+      let ex = newLTable()
+      for e in g.exts: ex.arr.add strV(e)
+      t.arr.add record({"nom": strV(g.name), "titre": strV(g.title), "extensions": tableV(ex)})
+    @[tableV(t)]
+  m.fn "langagede", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Nom du langage défini pour un chemin (extension ou nom de fichier) ; nul si aucun.
+    let n = langNameFor(L.checkStr(a, 1, "langagede"))
+    @[(if n.len == 0: nilV else: strV(n))]
   m.fn "blueprint", proc (L: Interp, a: seq[Value]): seq[Value] =
     # ui.blueprint(ed, [{sombre=}]) : l'éditeur avec ses onglets à pastilles et la vue blueprint
     # (palette, canevas, détails) qui le recouvre quand l'onglet actif est un blueprint.
@@ -2239,7 +2435,8 @@ proc openInterface(L: Interp): Value =
     var host: DocHost
     {.cast(gcsafe).}:
       guarded:
-        host = newDocHost(CodeEditor(c.ctl), themeOf("natif", optField(o, "sombre", true)))
+        bpTheme = themeOf("natif", optField(o, "sombre", true), optField(o, "densite", ""))
+        host = newDocHost(CodeEditor(c.ctl), bpTheme)
         bpHost = host
         bpEd = c.ctl
         bpCodeChanged = onBpCode
@@ -2306,6 +2503,11 @@ proc openInterface(L: Interp): Value =
     c.snapGrid = optField(o, "magnetisme", false)
     c.gridSize = optField(o, "taillegrille", 10.0)
     @[L.newCtl(c, "toile")]
+  m.fn "cadrage", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Cadrage carré d'une image (icône) : glisser le cadre, molette ou coin pour sa taille.
+    let o = optsArg(a, 1)
+    let txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "Aucune image")
+    @[L.newCtl(newPureCropView(txt), "cadrage")]
   m.fn "diagramme", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Canevas de diagramme : nœuds et liens, déplacement, zoom, liaisons à la souris.
     let o = optsArg(a, 1)
@@ -2428,7 +2630,7 @@ proc openInterface(L: Interp): Value =
   tableV(m)
 
 const uiDocs = [
-  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=, etat=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée) ; etat : normale, agrandie, reduite ou pleinecran à l'ouverture.",
+  "interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, x=, y=, etat=, parent=, modale=}", "Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; x, y : position à l'écran (sinon centrée) ; etat : normale, agrandie, reduite ou pleinecran à l'ouverture ; parent = fenêtre : rattachée à celle-ci (centrée dans son tiers supérieur, fermée avec elle ; modale = vrai : bloque les autres fenêtres).",
   "fenetre:agrandir()", "Agrandit (maximise) la fenêtre ; aussi fen:maximiser(). fen.etatfenetre vaut alors « agrandie ».",
   "fenetre:reduire()", "Réduit (minimise) la fenêtre dans le Dock ou la barre des tâches ; aussi fen:minimiser().",
   "fenetre:restaurer()", "Rend à la fenêtre sa taille normale (après agrandir, réduire ou plein écran).",
@@ -2461,8 +2663,12 @@ const uiDocs = [
   "interface.superconteneur([disposition])", "Conteneur sans marge.", "interface.cadre(titre, [disposition])", "Cadre de groupe.",
   "interface.panneau{disposition=, defilement=, colonnes=}", "Conteneur défilant (defilement : toujours, automatique, masque).",
   "interface.pdf()", "Visionneuse PDF (PDFium).",
-  "interface.editeur([{minicarte=, taille=}])", "Éditeur de code Lexis+ à onglets (coloration, complétion, structure, minicarte, points d'arrêt). valeur : texte du document actif. surchangement : texte modifié ; surselection : signal dans ev.texte (\"pos:L:C\", \"doc:UID\", \"cmd:save\", \"cmd:run\"...).",
-  "interface.blueprint(editeur, [{sombre=}])", "Vue blueprint de l'éditeur (une par programme) : l'éditeur reçoit des pastilles de couleur par nature de document (rouge code, orange formulaire, jaune état, bleu blueprint) et la vue (palette, graphe éditable, détails) recouvre l'éditeur quand l'onglet actif est un blueprint ; chaque modification du graphe réécrit le code. On ajoute la vue, pas l'éditeur, au conteneur. surselection (ev.texte) : « code:UID » code réécrit, « ligne:UID:N », « statut:message », « entite:NOM:UID » procédure d'un autre fichier ouverte en blueprint, « cmd:... » raccourcis tapés dans la vue.",
+  "interface.editeur([{minicarte=, taille=, numeros=, raccourcis=}])", "Éditeur de code à onglets (numeros = \"simples\" : numéros de ligne sans les repères de l'atelier ; raccourcis = \"palette\" : F1 et Ctrl+Maj+P -> cmd:palette, Ctrl+P -> cmd:quickopen, Ctrl+W -> cmd:closetab, Ctrl+Maj+O -> cmd:symbols, et Ctrl+N / Ctrl+O sans document) (coloration, complétion, structure, minicarte, points d'arrêt). valeur : texte du document actif. surchangement : texte modifié ; surselection : signal dans ev.texte (\"pos:L:C\", \"doc:UID\", \"cmd:save\", \"cmd:run\"...).",
+  "interface.definirlangage(nom, {titre=, extensions=, motscles=, types=, fonctions=, constantes=, casse=, commentaire=, commentairebloc=, documentation=, chaines=, chaineslongues=, echappement=, directive=, annotation=, variable=, identificateurs=, definitions=, appels=, balises=, blocs=, crochets=, structure=, commenter=, indenterapres=})", "Définit (ou remplace) un langage pour les éditeurs : coloration et diagramme de structure. Listes : table de mots ou texte « a b c ». blocs : accolades, indentation, motscles, balises (ou plusieurs). structure = {routines=, conditions=, boucles=, essais=, sections=, branches=, ouvrants=, fermants=, modificateurs=} : nature des blocs d'après le premier mot de leur ligne d'en-tête. Un document prend ce langage d'après son extension (extensions = {\".py\", \"makefile\"}) ou par ed:langage(nom).",
+  "interface.langages()", "Langages définis : liste de {nom, titre, extensions}.",
+  "interface.langagede(chemin)", "Nom du langage défini pour un chemin (extension ou nom de fichier) ; nul si aucun.",
+  "interface.supprimerlangage(nom)", "Retire une définition de langage.",
+  "interface.blueprint(editeur, [{sombre=, densite=}])", "Éditeur à vue blueprint (une par programme) : l'éditeur reçoit des pastilles de couleur par nature de document (rouge code, orange formulaire, jaune état) et vb:ouvrir(uid) affiche le code dans la fenêtre Blueprint, comme les fenêtres Concepteur : barre d'outils, fichiers ouverts, palette des entités à gauche (masquée, affichée ou détachée dans sa propre fenêtre), graphe éditable, détails ; chaque modification du graphe réécrit le code. On ajoute la vue, pas l'éditeur, au conteneur. surselection (ev.texte) : « code:UID » code réécrit, « ligne:UID:N », « statut:message », « entite:NOM:UID » procédure d'un autre fichier ouverte en blueprint, « cmd:... » raccourcis tapés dans la vue.",
   "interface.markdown(texte | {texte=, fichier=})", "Visionneuse Markdown en lecture seule (titres, listes, citations, code, gras, italique, liens), avec retour à la ligne automatique et ascenseur vertical. valeur : le texte Markdown ; surselection : URL du lien cliqué dans ev.texte ; fichier : relatif au dossier du programme.",
   "interface.alerte(message, [icone], [titre])", "Message (icone : information, question, attention, stop, aucune).",
   "interface.confirmer(message, [icone])", "OK / Annuler ; renvoie un logique.",
@@ -2513,9 +2719,12 @@ const uiDocs = [
   "editeur:nature([uid]) | editeur:nature(genre, [uid])", "Nature d'un document : code, formulaire, etat, blueprint ou texte ; avec genre, l'impose (couleur de la pastille de l'onglet).",
   "editeur:pastilles([vrai])", "Affiche (ou masque) les pastilles de nature sur les onglets ; un clic sur une pastille envoie « cmd:dot:UID » (surselection).",
   "editeur:lien([uid])", "Vue blueprint : uid du code représenté ; code : uid de sa vue blueprint (nul : aucune).",
-  "blueprint:ouvrir([uid])", "Ouvre (ou active) l'onglet blueprint du code uid (défaut : document actif) ; renvoie l'uid de la vue, nul si le document n'est pas du code Lexis+.",
-  "blueprint:fermer([uid])", "Ferme la vue blueprint uid, ou celle du code uid ; vrai si une vue a été fermée.",
-  "blueprint:actif()", "Vrai si l'onglet affiché est une vue blueprint.",
+  "blueprint:ouvrir([uid])", "Ouvre la fenêtre Blueprint (ou la ramène au premier plan) sur le code uid (défaut : document actif) ; renvoie uid, nul si le document n'est pas du code Lexis+.",
+  "blueprint:fermer([uid])", "Retire de la fenêtre Blueprint la vue du code uid (la fenêtre se ferme s'il n'en reste aucune) ; sans uid, ferme la fenêtre. Vrai si quelque chose a été fermé.",
+  "blueprint:actif()", "Vrai si la fenêtre Blueprint est ouverte.",
+  "blueprint:courant()", "Uid du code affiché dans la fenêtre Blueprint (nul : fenêtre fermée).",
+  "blueprint:suivre([uid])", "Le code uid a changé dans l'éditeur : la vue le reprend après une courte pause de la frappe (positions conservées).",
+  "blueprint:theme(sombre, [densite])", "Thème clair ou sombre (densité : compacte ou normale) de la fenêtre Blueprint et de sa palette détachée.",
   "blueprint:projet(dossier)", "Indexe les procédures et fonctions des .prg du dossier : palette, et icône fichier des appels vers un autre fichier (double-clic : l'ouvre en blueprint). Renvoie leur nombre.",
   "blueprint:inserer(signature)", "Ajoute à la vue affichée un nœud pour une entrée de lexis.documentation() ; vrai si ajouté.",
   "blueprint:afficherligne(ligne, [uid])", "Centre la vue blueprint sur le nœud de la ligne (1 = première) et le sélectionne.",
@@ -2538,6 +2747,12 @@ const uiDocs = [
   "editeur:taillepolice(taille)", "Taille de la police.", "editeur:minicarte([b])", "Affiche ou masque la minicarte.",
   "editeur:langage([langage], [uid])", "Langage d'un document : « sql » (coloration, complétion et commentaires SQL) ou « lexis » ; \"\" : d'après l'extension (.sql). Sans argument : langage du document actif.",
   "editeur:pastille(texte, [uid], [couleur])", "Pastille colorée après le titre de l'onglet d'un document (\"\" : aucune) ; couleur \"#RRGGBB\" (défaut : accent du thème).",
+  "editeur:lecture([uid]) | editeur:lecture(b, [uid], [bords])", "Lecture seule d'un document ; bords = vrai : « cmd:edge:next » / « cmd:edge:prev » (surselection) quand on cherche à dépasser la fin ou le début (consultation par blocs).",
+  "editeur:premiereligne([n], [uid])", "Numéro affiché pour la première ligne (marge) : bloc d'un grand fichier.",
+  "editeur:defilement([ligne], [uid])", "Sans argument : {premiere, visibles, total} ; avec une ligne : la place en haut de la vue.",
+  "editeur:titre([texte], [uid])", "Titre de l'onglet d'un document.", "editeur:marquer(modifie, [uid])", "Marque le document modifié (vrai) ou enregistré (faux).",
+  "editeur:analyser()", "Ré-analyse les documents ouverts (après interface.definirlangage).",
+  "editeur:blocs([uid])", "Blocs du diagramme de structure : liste de {genre (routine, condition, choix, boucle, essai, section, bloc), debut, fin, niveau}.",
   "editeur:accueil(lignes)", "Texte centré affiché quand aucun onglet n'est ouvert (1re ligne en couleur d'accent) ; liste vide : accueil par défaut.",
   "editeur:noms(liste)", "Noms proposés par la complétion ; en SQL, « table » et « table.colonne » (les colonnes sont proposées après « table. »).",
   "markdown:charger(chemin)", "Remplace le contenu par celui d'un fichier .md (relatif au dossier du programme) et revient en haut.",
@@ -2561,6 +2776,9 @@ const uiDocs = [
   "concepteur:supprimer()", "Supprime l'élément sélectionné.", "concepteur:monter()", "Plus tôt dans l'ordre d'affichage.",
   "concepteur:descendre()", "Plus tard dans l'ordre d'affichage.", "concepteur:sortir()", "Sort l'élément de son conteneur.",
   "interface.etat{projet=, fichier= | nom=}", "Canevas de l'éditeur d'états : zones à l'échelle, glisser-déposer, poignées, repères, hauteur des zones. fichier : etat_<nom>.prg à rouvrir ; nom : état neuf. surselection : sélection ; surchangement : état modifié à la souris ou au clavier.",
+  "interface.cadrage([texte])", "Cadrage carré d'une image (choix de l'icône d'une application ; images PNG, JPEG, GIF) : l'image entière avec un cadre ; glisser dans le cadre le déplace, la molette ou le coin bas droit change sa taille, un clic hors du cadre le centre là. valeur (ou ev.texte de surchangement) : « gauche,haut,cote » en fractions de l'image. texte : affiché sans image.",
+  "cadrage:charger(chemin, [cadrage])", "Affiche l'image (png, jpg, bmp, gif…) avec le cadrage « gauche,haut,cote » (défaut : le plus grand carré centré) ; renvoie {largeur, hauteur}, nul si l'image est illisible (formats : PNG, JPEG non progressif, GIF).",
+  "cadrage:vider()", "Retire l'image.", "cadrage:image()", "Vrai si une image est affichée.",
   "interface.diagramme([{modifiable=, direction=}])", "Canevas de diagramme (nœuds et liens) : glisser un nœud le déplace, glisser le fond déplace la vue, la molette zoome ; en mode modifiable, glisser depuis la pastille d'un bord (titre ou ligne) vers un autre nœud crée un lien (surchangement, d:action()). direction : droite (défaut) ou bas. surselection : ev.texte = id du nœud, « lien:<id> » ou \"\" ; ev.index = ligne.",
   "diagramme:noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=}", "Ajoute ou met à jour un nœud. lignes : liste de textes ou de {texte=, detail=, marque=} (marque : PK, FK…) ; forme : table (défaut) ou boite ; pastille : texte en haut à droite ; jauge : 0 à 1 ; sans x/y, placé à droite de l'existant.",
   "diagramme:lien{id=, de=, a=, deligne=, aligne=, libelle=, fleche=, pointille=, couleur=, epaisseur=}", "Ajoute ou met à jour un lien (deligne, aligne : ligne de départ et d'arrivée, 0 = le nœud) ; renvoie son id.",
@@ -2569,7 +2787,7 @@ const uiDocs = [
   "diagramme:selection()", "{genre = noeud | lien | \"\", id, ligne}.", "diagramme:selectionner([id], [ligne])", "Sélectionne un nœud et l'amène dans la vue.",
   "diagramme:action()", "Dernière action de l'utilisateur (surchangement) : {action = deplace | lien | supprimer, id, de, a, deligne, aligne}.",
   "diagramme:disposer([direction])", "Disposition automatique en couches (droite ou bas), nœuds isolés en grille.",
-  "diagramme:ajuster([zoom_min])", "Cadre tout le diagramme dans la vue ; zoom_min (en %) : un grand diagramme reste lisible, cadré sur son début.", "diagramme:zoom([facteur])", "Multiplie le zoom ; renvoie le zoom en %.",
+  "diagramme:ajuster([zoom_min])", "Cadre tout le diagramme dans la vue ; zoom_min (en %) : un grand diagramme reste lisible, cadré sur son début.", "diagramme:zoom([facteur])", "Multiplie le zoom autour du centre de la vue ; renvoie le zoom en %.",
   "diagramme:position(id, x, y)", "Place un nœud.", "diagramme:modifiable([b])", "Autorise ou non le déplacement et la création de liens.",
   "interface.paletteetat(etat)", "Palette de l'éditeur d'états : zones et éléments à glisser sur l'état, ou à cliquer.",
   "etat:nom()", "Nom de l'état.", "etat:code()", "Texte de etat_<nom>.prg (fonction ETAT_<NOM>).",

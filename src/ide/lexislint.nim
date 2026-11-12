@@ -9,7 +9,7 @@
 #   - option : affectation, dans une procédure, d'une variable non déclarée
 #     (elle devient une variable globale : piège classique, voir « locale »).
 
-import std/[strutils, sets, tables, os, algorithm]
+import std/[strutils, sets, tables, os, algorithm, sequtils]
 import lexislang, langdocs
 from ../lexis/parser import parseChunk
 from ../lexis/lexer import SyntaxError
@@ -40,7 +40,7 @@ type
     line, col: int
 
 proc significant(lines: openArray[string], toks: openArray[seq[Token]]): seq[seq[Sig]] =
-  ## Jetons significatifs, ligne par ligne.
+  # Jetons significatifs, ligne par ligne.
   result = newSeq[seq[Sig]](min(lines.len, toks.len))
   for li in 0 ..< result.len:
     for t in toks[li]:
@@ -52,7 +52,7 @@ proc isKw(s: Sig, w: string): bool {.inline.} = s.kind == tkKeyword and s.text =
 
 proc collectSymbols*(lines: openArray[string], toks: openArray[seq[Token]]):
     (seq[Symbol], HashSet[string]) =
-  ## Définitions affichables et ensemble de tous les noms définis (majuscules).
+  # Définitions affichables et ensemble de tous les noms définis (majuscules).
   let rows = significant(lines, toks)
   var syms: seq[Symbol]
   var names = initHashSet[string]()
@@ -136,7 +136,7 @@ proc collectSymbols*(lines: openArray[string], toks: openArray[seq[Token]]):
   (syms, names)
 
 proc syntaxCheck*(text, source: string): (bool, int, string) =
-  ## (ok, ligne 0-based, message) avec le vrai analyseur.
+  # (ok, ligne 0-based, message) avec le vrai analyseur.
   try:
     discard parseChunk(text, source)
     result = (true, 0, "")
@@ -240,3 +240,98 @@ proc indexProject*(root: string): ProjectIndex =
 proc knownNamesFor*(idx: ProjectIndex, local: HashSet[string]): HashSet[string] =
   result = local
   for n in idx.names: result.incl n
+
+#
+# Graphe du projet (vue projet de l'atelier et lexis.graphe)
+#
+
+type
+  PgEntity* = object
+    name*: string                # majuscules
+    display*: string             # nom(paramètres)
+    kind*: SymKind               # symProc ou symFunc
+    line*, lastLine*: int        # 0-based
+    calls*: seq[string]          # procédures du projet appelées ou référencées (@NOM), majuscules
+
+  PgFile* = object
+    path*, rel*: string
+    lines*: int
+    entities*: seq[PgEntity]
+    calls*: seq[string]          # appels du code de premier niveau (hors procédures)
+
+  ProjectGraph* = object
+    root*: string
+    files*: seq[PgFile]
+
+proc addOnce(s: var seq[string], v: string) =
+  if v notin s: s.add v
+
+proc graphFile*(path, rel, text: string): PgFile =
+  # Procédures et fonctions d'un fichier, avec les noms appelés par chacune
+  # (non filtrés : projectGraph ne garde que ceux définis dans le projet).
+  let lines = text.splitLines()
+  let (toks, _) = lexAll(lines)
+  let rows = significant(lines, toks)
+  result = PgFile(path: path, rel: rel, lines: lines.len)
+  var cur = -1
+  for row in rows:
+    if row.len == 0: continue
+    let s = row[0]
+    if s.isKw("procedure") or s.isKw("fonction"):
+      if row.len > 1 and row[1].isName:
+        var params: seq[string]
+        var i = 2
+        if i < row.len and row[i].text == "(":
+          inc i
+          while i < row.len and row[i].text != ")":
+            if row[i].isName: params.add row[i].text
+            inc i
+        result.entities.add PgEntity(name: upper(row[1].text),
+                                     display: row[1].text & "(" & params.join(", ") & ")",
+                                     kind: (if s.text == "procedure": symProc else: symFunc),
+                                     line: s.line, lastLine: s.line)
+        cur = result.entities.high
+      continue
+    if s.isKw("finprocedure") or s.isKw("finfonction"):
+      if cur >= 0: result.entities[cur].lastLine = s.line
+      cur = -1
+      continue
+    if cur >= 0: result.entities[cur].lastLine = s.line
+    for i, x in row:
+      if not x.isName: continue
+      var nm = ""
+      if i > 0 and row[i - 1].text == "@": nm = upper(x.text)                     # @NOM (rappel)
+      elif i + 1 < row.len and row[i + 1].text == "(" and
+           (i == 0 or row[i - 1].text notin [".", ":"]): nm = upper(x.text)       # NOM(...)
+      if nm.len == 0: continue
+      if cur >= 0:
+        if nm != result.entities[cur].name: result.entities[cur].calls.addOnce nm
+      else: result.calls.addOnce nm
+
+proc projectGraph*(root: string): ProjectGraph =
+  # Fichiers .prg du projet (dossiers cachés exclus), triés par chemin relatif ;
+  # les appels ne retiennent que les procédures définies dans le projet.
+  result.root = root
+  if root.len == 0 or not dirExists(root): return
+  var paths: seq[string]
+  for f in walkDirRec(root, relative = true):
+    if not f.toLowerAscii.endsWith(".prg"): continue
+    var hidden = false
+    for part in f.split({'/', '\\'}):
+      if part.startsWith("."): hidden = true
+    if not hidden: paths.add f
+  paths.sort(proc (a, b: string): int =
+    let da = a.count({'/', '\\'})
+    let db = b.count({'/', '\\'})
+    if da != db: cmp(da, db) else: cmp(a.toLowerAscii, b.toLowerAscii))
+  var defined = initHashSet[string]()
+  for rel in paths:
+    let full = root / rel
+    var f: PgFile
+    try: f = graphFile(full, rel.replace('\\', '/'), readFile(full))
+    except IOError, OSError: continue
+    for e in f.entities: defined.incl e.name
+    result.files.add f
+  for f in result.files.mitems:
+    f.calls.keepItIf(it in defined)
+    for e in f.entities.mitems: e.calls.keepItIf(it in defined)

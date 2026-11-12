@@ -1,5 +1,5 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-version       = "1.8.6"
+version       = "1.9.2"
 author        = "Jean-Marc QUÉRÉ, sonaliwan.fr"
 description   = "wdlexis+ : atelier et runtime du langage Lexis+"
 license       = "Propriétaire - tous droits réservés"
@@ -38,6 +38,9 @@ task testrecursion, "Récursion trop profonde : erreur Lexis+ interceptable, san
 
 task testwebview, "Test du paquet webview (bibliothèque webview simulée, sans affichage)":
   exec "nim c -r -d:release tests/t_webview.nim"
+
+task lucenepp, "Construit la bibliothèque du paquet lucene (Lucene++ et Boost statiques) dans linOS / macOS / winOS":
+  exec "sh outils/lucenepp.sh"
 
 task rtc, "Runtime C des applications générées (dossier rtc/, toutes les cibles)":
   exec "nim r --hints:off outils/rtc.nim"

@@ -26,6 +26,7 @@ const
   KTab*       = 0x00000009
   KSpace*     = 0x00000020
   KDelete*    = 0x0000007F
+  KF1*        = 0x4000003A
   KF2*        = 0x4000003B
   KF3*        = 0x4000003C
   KF5*        = 0x4000003E

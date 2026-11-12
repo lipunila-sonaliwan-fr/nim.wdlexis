@@ -57,10 +57,11 @@ Bonjour Ada
    montre `i` et `nom`, *F11* avance d'une instruction (en entrant dans `CARRE`),
    *F10* passe par-dessus les appels, *Maj+F11* termine la procédure en cours,
    *F5* continue.
-6. Cliquez la **pastille rouge** de l'onglet `principal.prg` : un onglet à
-   pastille bleue montre le programme en **blueprint** (chapitre 8.6). Glissez
+6. Cliquez la **pastille rouge** de l'onglet `principal.prg` : la fenêtre
+   **Blueprint** montre le programme en graphe (chapitre 8.6). Glissez
    *Afficher ?* depuis la palette, reliez-le, saisissez sa valeur : la ligne
-   correspondante apparaît dans le code.
+   correspondante apparaît dans le code. *Conception > Vue projet…* montre tout
+   le projet en graphe, une colonne par fichier (chapitre 8.6).
 
 Le même programme s'exécute sans l'atelier : `./wdlexisrt projet_lexis/principal.prg`.
 
@@ -479,6 +480,42 @@ automatiquement ; `db:debut()` ... `db:valider()` / `db:annuler()` ou
 en texte (`"2024-03-12"`), les BLOB texte se lisent et s'écrivent comme des
 chaînes. Exemple complet : `exemples/firebird`.
 
+### 4.4 Recherche plein texte : Lucene
+
+Le paquet `lucene` crée et interroge des index de recherche plein texte avec
+**Lucene++** (<https://github.com/luceneplusplus/LucenePlusPlus>), le portage C++
+d'Apache Lucene 3.0 (double licence LGPL 3 / Apache 2.0). Il s'appuie sur une
+seule bibliothèque, `wdlexis_lucene` (`libwdlexis_lucene.so`, `.dylib` ou
+`wdlexis_lucene.dll`), qui contient Lucene++ et Boost liés statiquement : comme le
+client Firebird, elle est chargée à l'exécution, depuis le dossier `linOS`
+(`macOS`, `winOS`) à côté de l'exécutable ou du programme, ou depuis le chemin
+donné par la variable `WDLEXIS_LUCENE`. `sh outils/lucenepp.sh` (ou `nimble
+lucenepp`) la construit. Une application générée l'emporte avec ses autres
+bibliothèques.
+
+```lexis
+idx = lucene.ouvrir("index_livres", {analyseur = "francais",
+                    schema = {id = "cle", genre = "cle", annee = "entier"}})
+idx:remplacer({id = "verne-1870", titre = "Vingt mille lieues sous les mers",
+               auteur = "Jules Verne", annee = 1870, genre = "aventure"})
+r = idx:chercher("verne annee:[1860 TO 1880]", {max = 20, tri = "annee"})
+? r.total, "livre(s)"
+pour chaque x dans r.resultats
+  ? x.score, x.document.titre, x.document.annee
+suivant
+? idx:analyser("mers")                    && titre:mer auteur:mer ... (racines françaises)
+idx:fermer()
+```
+
+Les types du schéma : `texte` (analysé et stocké), `cle` (valeur exacte :
+identifiant, filtre, tri), `entier` et `reel` (intervalles `annee:[1800 TO 1900]`,
+tri), `stocke` (rendu mais non indexé), `index` (analysé, non rendu). Un champ
+absent du schéma prend son type à sa première valeur ; schéma et analyseur sont
+enregistrés dans l'index. Les recherches voient aussitôt les ajouts ;
+`idx:valider()` les écrit sur disque (fait aussi par `idx:fermer()` et à la fin du
+programme). Les index sont au format Lucene 3.0. Exemple complet, avec recherche
+pendant la frappe, tri et termes indexés : `exemples/lucene`.
+
 ---
 
 ## 5. Interface graphique
@@ -800,7 +837,7 @@ L'atelier ouvre **deux fenêtres** :
     double-clic sur un `form_*.prg` ou un `etat_*.prg` : son concepteur) ;
   - **Structure** : les entités du fichier édité, en arbre — procédures et
     fonctions (avec leurs variables locales), variables globales ; clic : aller
-    à la ligne (ou au nœud dans une vue blueprint) ;
+    à la ligne (et au nœud dans la fenêtre Blueprint quand elle montre ce fichier) ;
   - **Référence** : un champ de **recherche** (tous les mots saisis, dans le nom,
     le paquet ou la description, sans tenir compte des accents ; résultats
     dépliés), l'arbre des paquets et de leurs fonctions **par ordre alphabétique**
@@ -815,10 +852,9 @@ L'atelier ouvre **deux fenêtres** :
 
   | Pastille | Document | Clic sur la pastille |
   | --- | --- | --- |
-  | rouge | code Lexis+ (`.prg`) | ouvre la **vue blueprint** du code (chapitre 8.6) |
+  | rouge | code Lexis+ (`.prg`) | ouvre le code dans la **fenêtre Blueprint** (chapitre 8.6) |
   | orange | formulaire (`form_*.prg`) | ouvre le concepteur de formulaires |
   | jaune | état (`etat_*.prg`) | ouvre l'éditeur d'états |
-  | bleue | vue blueprint d'un fichier | revient à l'onglet du code |
   | grise | autre texte (`.md`, `.json`, `.sql`...) | — |
 
 | Touche | Action |
@@ -842,7 +878,8 @@ L'atelier ouvre **deux fenêtres** :
   les procédures. Onglet **Problèmes** ; double-clic pour aller à la ligne.
 - **Structure** : les procédures, fonctions et variables du fichier.
 - **Référence** : toutes les fonctions intégrées et les paquets ; double-clic pour
-  insérer l'appel (dans une vue blueprint : ajouter le nœud correspondant).
+  insérer l'appel (dans la fenêtre Blueprint, la palette des entités propose
+  les mêmes fonctions, à glisser sur le graphe).
 - **Diagramme de structure** dans la marge : procédures, `si`, boucles,
   `faire cas`, `essayer`.
 - **Console** : sortie du programme ; la ligne de saisie répond à `saisir()` et
@@ -955,7 +992,7 @@ reprend les paramètres enregistrés par [Sauver].
 disposition en deux fenêtres : à gauche la fenêtre d'outils (**Projet**,
 **Structure** en arbre, **Référence** avec recherche, arbre des paquets par ordre
 alphabétique et fiche sous un séparateur horizontal), à droite la fenêtre des
-documents (onglets à pastille de couleur, vue blueprint) avec **Problèmes**,
+documents (onglets à pastille de couleur, fenêtre Blueprint, vue projet) avec **Problèmes**,
 **Console**, **Variables** et **Pile d'appels** en bas. Mêmes menus et barre
 d'outils ; débogueur (points d'arrêt, pas à pas, pas principal, sortie de
 procédure, pause), recherche et remplacement, aller à la ligne et à la
@@ -969,41 +1006,51 @@ wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
 | --- | --- |
 | `principal.prg` | les deux fenêtres (outils, documents), réglages, démarrage |
 | `projet.prg` | projet, fichiers, session (`.wdlexis/atelier.json` du projet) |
-| `edition.prg` | analyse pendant la frappe, problèmes, structure (arbre), pastilles et vue blueprint, recherche, définition |
+| `edition.prg` | analyse pendant la frappe, problèmes, structure (arbre), pastilles et fenêtre Blueprint, recherche, définition |
+| `vueprojet.prg` | vue projet : graphe de tout le projet, une colonne par fichier (`lexis.graphe`, `ui.diagramme`) |
 | `execution.prg` | exécution, débogage, console, variables, pile d'appels |
 | `reference.prg` | référence des fonctions et paquets : recherche, tri alphabétique, fiches Markdown |
-| `generation.prg` | boîte « Générer l'application » (outil `wdlexisgen`) |
+| `generation.prg` | boîte « Générer l'application » (outil `wdlexisgen`) ; icône avec aperçu et cadrage (`ui.cadrage`) |
 | `concepteur.prg` | concepteur de formulaires (menu *Conception*, chapitre 8.3) |
 | `etats.prg` | éditeur d'états PDF (menu *Conception*, chapitre 8.4) |
 | `menus.prg` | menus, raccourcis, à propos |
 
 Il s'appuie sur des briques natives : le contrôle `ui.editeur` (chapitre 5), sa
-vue blueprint `ui.blueprint` et le paquet `lexis`, qui met le langage à la portée
-des programmes.
+fenêtre Blueprint `ui.blueprint`, le cadrage d'image `ui.cadrage`, le diagramme
+`ui.diagramme` et le paquet `lexis`, qui met le langage à la portée des programmes.
 
-La vue blueprint (chapitre 8.6) enveloppe l'éditeur : on ajoute la vue, et non
-l'éditeur, à son conteneur. Elle donne aux onglets leur pastille de couleur ; le
-programme décide de la nature de chaque document et de ce que fait un clic sur sa
-pastille (signal `cmd:dot:UID` de l'éditeur) :
+`ui.blueprint` enveloppe l'éditeur : on ajoute la vue, et non l'éditeur, à son
+conteneur. Elle donne aux onglets leur pastille de couleur et ouvre le code dans
+la fenêtre Blueprint (chapitre 8.6) ; le programme décide de la nature de chaque
+document et de ce que fait un clic sur sa pastille (signal `cmd:dot:UID` de
+l'éditeur) :
 
 ```lexis
 ed = ui.editeur{minicarte = vrai}
 ed.surselection = @SIGNAL                   && « doc:UID », « cmd:dot:UID »...
-vb = cote:ajouter(ui.blueprint(ed))         && éditeur + vue blueprint
+vb = cote:ajouter(ui.blueprint(ed, {sombre = vrai, densite = "compacte"}))   && éditeur (+ fenêtre Blueprint)
 vb.surselection = @SIGNAL_BLUEPRINT         && « code:UID », « statut:... », « entite:NOM:UID »
 vb:projet(dossier)                          && procédures du projet : palette, liens entre fichiers
 
 ed:nature("formulaire", uid)                && pastille orange (code, formulaire, etat, texte)
-bp = vb:ouvrir(uid)                         && onglet bleu : le code uid en graphe
-ed:lien(bp)                                 && -> uid du code représenté
-vb:inserer("fichier.lire(chemin)")          && nœud pour une entrée de lexis.documentation()
+vb:ouvrir(uid)                              && fenêtre Blueprint sur le code uid
+vb:courant()                                && -> uid du code affiché (nul : fenêtre fermée)
+vb:suivre(uid)                              && code modifié dans l'éditeur : la vue le reprend
 vb:afficherligne(32)                        && centre la vue sur le nœud de la ligne 32
+vb:fermer(uid)                              && retire la vue de ce code ; vb:fermer() ferme la fenêtre
 ```
 
 Sans uid, `ed:texte()`, `ed:chemin()`, `ed:enregistrer()`… s'appliquent au
-document actif ou, quand c'est une vue blueprint, au code qu'elle représente. Une
-seule vue blueprint par programme (elle est réservée à l'atelier natif dans les
-programmes qu'il exécute).
+document actif. Une seule `ui.blueprint` par programme (elle est réservée à
+l'atelier natif dans les programmes qu'il exécute).
+
+`lexis.graphe(dossier)` donne la vue projet : les fichiers `.prg` triés, leurs
+procédures et fonctions (ligne, paramètres) et, pour chacune, les procédures du
+projet qu'elle appelle. `ui.cadrage()` affiche une image avec un cadre carré à
+déplacer et redimensionner (`cd:charger(chemin, "gauche,haut,cote")`,
+`cd.valeur`) : c'est le choix de l'icône de la boîte « Générer l'application ».
+`ui.cadrage` est écrit en Nim pur (images PNG, JPEG, GIF) : il fonctionne aussi
+dans les applications générées.
 
 Le paquet `lexis` met le langage lui-même à la portée des programmes :
 
@@ -1345,14 +1392,25 @@ Les mots de passe ne sont jamais écrits dans le projet. Sur demande (case
 sont redemandés à la connexion suivante. Voir `LISEZMOI.md` dans le dossier de
 l'exemple.
 
-### 8.6 Vue blueprint
+### 8.6 Vue blueprint et vue projet
 
 Un clic sur la **pastille rouge** d'un onglet de code (ou *Conception > Vue
-blueprint du fichier courant*) ouvre, juste à côté, un onglet à **pastille
-bleue** : le même code présenté en graphe, à la manière des blueprints
-d'Unreal, et modifiable.
+blueprint du fichier courant*) ouvre la fenêtre **Blueprint** : le même code
+présenté en graphe, à la manière des blueprints d'Unreal, et modifiable.
 
-La vue se compose d'une **palette** (à gauche), du **graphe** et du panneau des **détails** (à droite) :
+La fenêtre suit l'ergonomie des fenêtres Concepteur : une **barre d'outils** à
+symboles (libellés en infobulle : voir le code, annuler, rétablir, supprimer,
+réorganiser, tout voir, zoom, recharger, tout plier / déplier, appels), la
+**liste des fichiers** ouverts en blueprint (Ctrl+Tab : fichier suivant), la
+**palette des entités** à gauche, le **graphe** au centre, les **détails** à
+droite et une barre d'état. Comme la palette du concepteur de formulaires, la
+palette des entités se **masque** ou s'**affiche** (bouton `<<` / `>>` à droite
+de la barre) et s'ouvre dans une **fenêtre dédiée** (bouton voisin ; fermer
+cette fenêtre, ou le même bouton, la rattache). Fermer la fenêtre Blueprint
+conserve les vues (positions, zoom, annulation) pour sa prochaine ouverture ;
+fermer l'onglet d'un fichier retire sa vue.
+
+La vue se compose de la **palette** (à gauche), du **graphe** et du panneau des **détails** (à droite) :
 
 - **Entrées** (rouge) : le *Programme principal* et un nœud par `procedure` ou
   `fonction`, ses paramètres en sorties de données.
@@ -1415,11 +1473,26 @@ de l'onglet rouge (annulable dans le graphe par Ctrl+Z, ou dans l'éditeur) ; se
 l'instruction touchée est régénérée : les autres lignes, les commentaires, les
 lignes vides et l'indentation sont conservés à l'identique. Une instruction qui
 n'est reliée à aucune entrée est signalée en bas du graphe et ignorée dans le
-code. Inversement, le code modifié dans son onglet est relu quand on revient à
-la vue blueprint (positions des nœuds conservées quand la structure n'a pas
-changé ; *Réorganiser* refait la mise en page). Un fichier dont la structure
+code. Inversement, le code modifié dans son onglet est repris par la fenêtre Blueprint
+après une courte pause de la frappe, et quand elle redevient active (positions
+des nœuds conservées quand la structure n'a pas changé ; *Réorganiser* refait la
+mise en page). Un fichier dont la structure
 des blocs est incorrecte (`finsi` manquant...) s'affiche avec le message
 d'erreur : on le corrige dans l'onglet du code.
+
+**Vue projet.** *Conception > Vue projet…* (premier élément du menu) ouvre une
+fenêtre qui montre **tout le projet** en graphe : une **colonne par fichier**
+`.prg` (dans l'ordre des chemins, dossiers cachés exclus), le fichier en tête
+(son code de premier niveau), puis ses procédures (bleu) et fonctions (violet)
+dans l'ordre du source, avec leur ligne. Des liens pointillés relient chaque
+appelant aux procédures du projet qu'il appelle (ou référence par `@NOM`), en
+bleu clair quand l'appel change de fichier. Un **clic** met en évidence les
+procédures appelées (orange) et les appelants (vert), les autres liens
+s'estompent, et la barre d'état donne la définition et ses appelants ; un
+**double-clic** (ou *Ouvrir le code*) ouvre le fichier à la définition ;
+*Ouvrir en blueprint* l'affiche dans la fenêtre Blueprint, centrée sur la
+procédure. Barre d'outils : *Actualiser*, *Tout voir*, zoom, *Appels* (afficher
+ou masquer les liens). La vue se met à jour à chaque enregistrement.
 
 ### 8.7 Atlas SQL, cartographie et analyse du patrimoine SQL Server
 
@@ -1445,6 +1518,44 @@ appels, assistant et constats.
 
 *Sources ▸ Ajouter la démonstration* simule trois serveurs. Le détail est dans
 `exemples/atlassql/LISEZMOI.md` et `ARCHITECTURE.md`.
+
+### 8.8 Ardoise, éditeur multi-usage piloté par une palette de commandes
+
+`exemples/ardoise` est un éditeur de texte et de code écrit en Lexis+, sans menu :
+tout passe par la **palette de commandes** (F1 ou Ctrl+Maj+P), que les extensions
+enrichissent. Il reprend le contrôle `ui.editeur` de l'atelier (onglets, coloration,
+diagramme de structure dans la marge, minicarte) et l'ouvre à d'autres langages.
+
+```
+wdlexisrt exemples/ardoise/principal.prg [fichier ...]
+```
+
+- **Palette** : `>` commandes (les plus récentes d'abord), sans préfixe les fichiers
+  récents et du dossier de travail (Ctrl+P), `@` les symboles du document
+  (Ctrl+Maj+O), `:` aller à une ligne (`:120`, `:50%`, `:#1048576` pour un octet).
+  La recherche ignore la casse et les accents.
+- **Langages** : Python, C/C++, Java/Kotlin/C#, JavaScript/TypeScript, Go, Rust, Nim,
+  PHP, Ruby, Lua, shell, PowerShell, Pascal, Visual Basic, HTML/XML/SVG, CSS, JSON,
+  YAML, TOML/INI, Makefile/CMake/Dockerfile, R, journaux, CSV, diff ; Lexis+, SQL et
+  Markdown sont intégrés à l'éditeur. Chaque langage est décrit par
+  `ui.definirlangage` : coloration et blocs de la marge (accolades, indentation,
+  mots-clés de début et de fin, balises).
+- **Structure** : à gauche, un **graphe** (classes avec leurs membres, routines,
+  appels entre routines) et un **plan** en arbre, filtrables ; un clic amène le
+  curseur sur le symbole, et le graphe suit le curseur.
+- **Grand fichier** : au-delà de 64 Mo (ou pour un fichier binaire), le fichier est
+  consulté par blocs de 4 Mo en lecture seule (`fichier.lirebloc`) ; descendre
+  au-delà du bloc enchaîne sur la suite sans couture. Une barre donne la position,
+  un curseur pour s'y rendre, *Aller…* (ligne, %, octet), *Chercher…* dans tout le
+  fichier en arrière-plan et *Suivre* la fin d'un journal qui grandit. Les lignes
+  sont indexées en arrière-plan : la marge affiche alors les vrais numéros.
+- **Extensions** : un `.prg` de `plugins/` (ou de `~/.ardoise/plugins`) définit
+  `EXTENSION_<NOM>()`, qui appelle `ARDOISE_ENREGISTRER{genre = "commande" |
+  "langage" | "structure" | "formateur" | "surouverture" | …}`.
+- Fins de ligne CRLF et tabulations d'indentation conservées à l'enregistrement ;
+  session (onglets, positions) et réglages dans `~/.ardoise/reglages.json`.
+
+Le détail est dans `exemples/ardoise/LISEZMOI.md`.
 
 ## 9. Le runtime
 
@@ -1650,6 +1761,10 @@ Fichiers et dossiers (texte et binaire) - disponible par son nom (`fichier.…`)
 | `fichier.dossiertemp()` | Dossier temporaire. |
 | `fichier.dossierperso()` | Dossier personnel. |
 | `fichier.proteger(chemin)` | Réserve le fichier à son propriétaire (droits 0600 sous Linux et macOS). |
+| `fichier.lirebloc(chemin, position, taille, [{lignes=, texte=, coupe=}])` | Lit au plus `taille` octets à partir de `position` (octets, à partir de 0) sans charger le fichier : `{texte, debut, fin, lignes, taille, coupees, nuls}`. `lignes = vrai` (défaut) : le bloc commence et finit sur des débuts de ligne ; `texte = vrai` (défaut) : UTF-8 assaini (octets invalides → U+FFFD, NUL → « · ») ; `coupe = n` : lignes de plus de n octets coupées ; `nuls` : nombre d'octets nuls (fichier binaire). |
+| `fichier.compterlignes(chemin, [debut], [longueur])` | Nombre de fins de ligne dans une zone du fichier (lecture par blocs de 4 Mo). |
+| `fichier.positionligne(chemin, ligne, [octet], [ligne_de_depart])` | Position (octet) du début d'une ligne, en partant d'un point connu (défaut : début du fichier, ligne 1) ; nul au-delà de la fin. |
+| `fichier.rechercher(chemin, motif, [debut], [{casse=, arriere=, limite=}])` | Cherche un texte dans un fichier de toute taille : `{position, suite}` ; `position` nul si le motif est absent de la zone parcourue, `suite` : où reprendre (nul à la fin) ; `limite` : octets parcourus au plus par appel (recherche progressive). |
 
 ### Paquet `binaire`
 
@@ -1805,6 +1920,31 @@ Bases Firebird (client natif fbclient) - disponible par son nom (`firebird.…`)
 | `db:colonnes(table)` | Colonnes d'une table : {nom=, type=, longueur=, echelle=, obligatoire=}. |
 | `db:serveur()` | Version du serveur. |
 | `db:fermer()` | Ferme la connexion (une transaction explicite non validée est annulée). |
+
+### Paquet `lucene`
+
+Index de recherche plein texte (Lucene++) - disponible par son nom (`lucene.…`) ou par `paquet("lucene")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `lucene.ouvrir([dossier], [{analyseur=, schema=, creer=vrai}])` | Ouvre (ou crée) l'index Lucene du dossier (relatif : au dossier du programme) ; sans dossier, index en mémoire. analyseur : "standard" (défaut), "francais", "anglais", "allemand", "espagnol", "italien", "portugais", "neerlandais", "russe", "bresilien", "simple", "espaces". schema : {champ = type} avec les types "texte" (analysé, stocké), "cle" (valeur exacte, identifiant, tri), "entier", "reel" (intervalles, tri), "stocke" (non indexé), "index" (analysé, non stocké). Un champ absent du schéma prend son type à la première valeur (texte, entier, reel). Schéma et analyseur sont enregistrés dans l'index. |
+| `lucene.configurer({bibliotheque=})` | Avant le premier usage : chemin (ou dossier) de la bibliothèque wdlexis_lucene. Faux si elle est déjà chargée. |
+| `lucene.disponible()` | Vrai si la bibliothèque Lucene++ (wdlexis_lucene) est trouvée. |
+| `lucene.erreur()` | Pourquoi Lucene n'est pas disponible (nul sinon). |
+| `lucene.version()` | Version de Lucene++ (ex. "Lucene++ 3.0.9"). |
+| `idx:ajouter(document)` | Ajoute un document : table champ = valeur (texte, nombre, booléen, ou liste pour un champ à plusieurs valeurs). |
+| `idx:remplacer(document, [champ])` | Remplace le document de même clé (premier champ « cle » du schéma, ou champ) ou l'ajoute. |
+| `idx:supprimer(requete) \| idx:supprimer(champ, valeur)` | Supprime les documents trouvés par la requête, ou ceux dont le champ vaut exactement valeur. |
+| `idx:chercher([requete], [{max=10, debut=0, tri=, inverse=faux, champs=}])` | Recherche (syntaxe Lucene : mots, "phrase exacte", champ:mot, ET/OU via AND OR NOT + -, joker* et ?, flou~, intervalles annee:[1800 TO 1900], annee:{1800 TO *}). Tous les mots sont requis par défaut ; sans champ, les champs « texte » sont interrogés (ou ceux de champs). Renvoie {total, resultats} ; chaque résultat : {score, numero, document}. tri : champ cle, entier ou reel (défaut : pertinence). |
+| `idx:compter([requete])` | Nombre de documents trouvés. |
+| `idx:analyser(requete)` | Requête Lucene produite (après analyse), pour comprendre un résultat. |
+| `idx:termes(champ, [prefixe], [max=20])` | Termes indexés d'un champ (après analyse) avec leur nombre de documents : {terme, documents} ; utile pour l'autocomplétion. |
+| `idx:nombre()` | Nombre de documents de l'index. |
+| `idx:schema()` | Types des champs : {champ = type}. |
+| `idx:valider()` | Enregistre les modifications sur disque (commit) ; les recherches les voient déjà. |
+| `idx:vider()` | Supprime tous les documents. |
+| `idx:optimiser()` | Fusionne les segments (index plus compact, recherches plus rapides). |
+| `idx:fermer()` | Valide puis ferme l'index (automatique à la fin du programme). |
 
 ### Paquet `tache`
 
@@ -2064,7 +2204,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 
 | Appel | Rôle |
 | --- | --- |
-| `interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, densite=, x=, y=, etat=}` | Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; densite : `compacte` (marges, espacements et hauteurs de contrôle réduits) ; x, y : position à l'écran (sinon centrée) ; etat : `normale`, `agrandie`, `reduite` ou `pleinecran` à l'ouverture. `fen.marge` et `fen.espacement` règlent ceux de la fenêtre elle-même (0 : contenu collé aux bords). |
+| `interface.fenetre{titre=, largeur=, hauteur=, disposition=, theme=, sombre=, densite=, x=, y=, etat=, parent=, modale=}` | Crée une fenêtre. disposition : vertical, horizontal, grille, flux, bordure, pile, absolue ; theme : windows, macos, linux, natif ; densite : `compacte` (marges, espacements et hauteurs de contrôle réduits) ; x, y : position à l'écran (sinon centrée) ; etat : `normale`, `agrandie`, `reduite` ou `pleinecran` à l'ouverture ; `parent = fen` : fenêtre rattachée (centrée dans le tiers supérieur de son parent, fermée avec lui, le clavier lui revient à la fermeture), `modale = vrai` : bloque les autres fenêtres. `fen.marge` et `fen.espacement` règlent ceux de la fenêtre elle-même (0 : contenu collé aux bords). |
 | `interface.executer()` | Attend la fermeture des fenêtres (atelier) ou lance la boucle de wdgui (runtime). |
 | `interface.quitter()` | Ferme toutes les fenêtres du programme. |
 | `interface.fenetres()` | Nombre de fenêtres ouvertes. |
@@ -2105,7 +2245,7 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.cadre(titre, [disposition])` | Cadre de groupe. |
 | `interface.panneau{disposition=, defilement=, colonnes=}` | Conteneur défilant (defilement : toujours, automatique, masque). |
 | `interface.pdf()` | Visionneuse PDF (PDFium). |
-| `interface.editeur([{minicarte=, taille=}])` | Éditeur de code Lexis+ à onglets (coloration, complétion, structure, minicarte, points d'arrêt). `valeur` : texte du document actif ; `surchangement` : texte modifié ; `surselection` : signal dans `ev.texte` (`"pos:L:C"`, `"doc:UID"`, `"cmd:save"`, `"cmd:run"`...). |
+| `interface.editeur([{minicarte=, taille=, numeros=, raccourcis=}])` | Éditeur de code à onglets (coloration, complétion, structure, minicarte, points d'arrêt) : Lexis+, SQL, Markdown et tout langage défini par `interface.definirlangage` ; `numeros = "simples"` : numéros de ligne sans les repères de l'atelier ; `raccourcis = "palette"` : F1 et Ctrl+Maj+P envoient `"cmd:palette"`, Ctrl+P `"cmd:quickopen"`, Ctrl+W `"cmd:closetab"`, Ctrl+Maj+O `"cmd:symbols"` (et Ctrl+N / Ctrl+O même sans document). `valeur` : texte du document actif ; `surchangement` : texte modifié ; `surselection` : signal dans `ev.texte` (`"pos:L:C"`, `"doc:UID"`, `"cmd:save"`, `"cmd:run"`...). |
 | `interface.markdown(texte \| {texte=, fichier=})` | Visionneuse Markdown en lecture seule, retour à la ligne automatique et ascenseur vertical ; `surselection` reçoit l'URL d'un lien cliqué (`ev.texte`) ; `fichier` relatif au dossier du programme. |
 | `interface.alerte(message, [icone], [titre])` | Message (icone : information, question, attention, stop, aucune). |
 | `interface.confirmer(message, [icone])` | OK / Annuler ; renvoie un logique. |
@@ -2197,10 +2337,18 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `markdown:position()` | Défilement actuel en pixels depuis le haut. |
 | `c:detruire()` | Retire le contrôle (et son contenu) de sa fenêtre. |
 | `editeur:fixertexte(texte, [uid], [enregistre])` | Remplace le texte d'un document (annulable) ; `enregistre = vrai` le marque enregistré. |
-| `editeur:langage([langage], [uid])` | Langage d'un document : `"sql"` (coloration, complétion et commentaires `--` SQL), `"lexis"` ou `"markdown"` (coloration Markdown ; la complétion propose les noms donnés par `editeur:noms`, « libellé<TAB>détail ») ; `""` : d'après l'extension (`.sql` = SQL). Sans argument : langage du document actif. |
+| `editeur:langage([langage], [uid])` | Langage d'un document : `"sql"` (coloration, complétion et commentaires `--` SQL), `"lexis"`, `"texte"` (sans coloration), un langage défini par `interface.definirlangage`, ou `"markdown"` (coloration Markdown ; la complétion propose les noms donnés par `editeur:noms`, « libellé<TAB>détail ») ; `""` : d'après l'extension (`.sql` = SQL). Sans argument : langage du document actif. |
 | `editeur:pastille(texte, [uid], [couleur])` | Pastille affichée après le titre de l'onglet (`""` : aucune) ; couleur `"#RRGGBB"`, par défaut celle du thème. |
 | `editeur:accueil(lignes)` | Texte centré affiché quand aucun onglet n'est ouvert (première ligne en couleur d'accent, deuxième ligne discrète) ; liste vide : accueil par défaut de l'atelier. |
 | `editeur:noms(liste)` | Noms proposés par la complétion ; en SQL, `"table"` et `"table.colonne"` (les colonnes sont proposées après `table.`). |
+| `editeur:lecture([uid])`, `editeur:lecture(b, [uid], [bords])` | Lecture seule d'un document ; `bords = vrai` : l'éditeur envoie `"cmd:edge:next"` / `"cmd:edge:prev"` (`surselection`) quand on cherche à dépasser la fin ou le début (flèches, Page suivante, molette) : consultation par blocs. |
+| `editeur:premiereligne([n], [uid])` | Numéro affiché pour la première ligne dans la marge (bloc d'un grand fichier). |
+| `editeur:defilement([ligne], [uid])` | Sans argument : `{premiere, visibles, total}` ; avec une ligne : la place en haut de la vue. |
+| `editeur:titre([texte], [uid])`, `editeur:marquer(modifie, [uid])` | Titre de l'onglet ; marque le document modifié (vrai) ou enregistré (faux). |
+| `editeur:blocs([uid])` | Blocs du diagramme de structure : liste de `{genre, debut, fin, niveau}` (genre : routine, condition, choix, boucle, essai, section, bloc). |
+| `editeur:analyser()` | Ré-analyse les documents ouverts (après `interface.definirlangage`). |
+| `interface.definirlangage(nom, {...})` | Définit (ou remplace) un langage pour les éditeurs. Coloration : `titre`, `extensions` (`{".py"}` ou un nom de fichier, `"makefile"`), `motscles`, `types`, `fonctions`, `constantes` (tables de mots ou texte « a b c »), `casse` (faux : insensible), `commentaire` (`{"//", "#"}`), `commentairebloc` (`{"/*", "*/"}`), `documentation` (préfixes de commentaires de documentation), `chaines` (`"\"'"`), `chaineslongues` (`{"\"\"\""}`), `echappement`, `directive` (`"#"` : ligne de préprocesseur), `annotation` (`"@"`), `variable` (`"$"`), `identificateurs` (caractères en plus), `definitions` (mots suivis d'un nom de routine), `appels` (`nom(` coloré), `balises` (HTML/XML). Structure : `blocs` (`accolades`, `indentation`, `motscles`, `balises`, ou plusieurs), `crochets` (`[ ]` ouvrent des blocs), `structure = {routines=, conditions=, boucles=, essais=, sections=, branches=, ouvrants=, fermants=, modificateurs=}` (nature des blocs d'après le premier mot de leur ligne d'en-tête). Édition : `commenter` (marque de Ctrl+B), `indenterapres` (fins de ligne qui indentent la suivante). Un document prend ce langage d'après son extension, ou par `ed:langage(nom)`. |
+| `interface.langages()`, `interface.langagede(chemin)`, `interface.supprimerlangage(nom)` | Langages définis `{nom, titre, extensions}` ; langage d'un chemin (nul si aucun) ; retrait d'une définition. |
 | `interface.toile([{mode=, grille=, magnetisme=, taillegrille=}])` | Toile vectorielle : édition directe d'une scène SVG (rectangles, ellipses, lignes, flèches, chemins de Bézier, textes en boîte, images, SVG imbriqués). `mode` : `edition` (défaut), `galerie` (planche cliquable), `plateau` (cartes déplaçables), `lecture` (plein cadre, sans décor). Souris : clic, Maj+clic, rectangle de sélection, 8 poignées (Maj : proportions), magnétisme sur la grille, les guides et les formes voisines (guides intelligents). Clavier : Suppr, flèches (Maj : 10), Cmd+A/C/X/V/D/Z/Y/G (Maj+G : dégrouper), Cmd+0 ajuster, Cmd+1 100 %, Espace+glisser, Cmd+molette zoom. Double-clic sur un texte : saisie ; sur un chemin : nœuds. Événements : `surselection` (identifiants séparés par des virgules ; en galerie et plateau : le groupe `page-N`), `surchangement` (action : creation, deplace, redimension, noeud, texte, suppression…, détail par `t:action()`), `surdoubleclic`, `surclicdroit`. |
 | `toile:chargersvg(code[, dossier])` · `toile:chargerfichier(chemin)` · `toile:svg([{compact=, images=, selection=}])` | Charge ou produit du SVG standard (calques `data-calque`, groupes `data-groupe`, textes en boîte `data-boite`, liens `data-composant`). `images = vrai` incorpore les images (data:) ; `selection = vrai` : la sélection seule, recadrée. |
 | `toile:ajouter{genre=, ...}` · `toile:modifier(id \| {ids}, {props})` · `toile:forme(id)` · `toile:formes()` · `toile:supprimer([ids])` · `toile:vider()` | Formes et propriétés : genre (rectangle, ellipse, cercle, ligne, fleche, chemin, texte, image), nom, x, y, largeur, hauteur, rotation, opacite, remplissage (couleur ou `linear(angle,#c1,#c2)`), contour, epaisseur, pointilles, rayon, ombre, chemin (données SVG), flechedebut, flechefin, texte, police (Poppins, Lora, Mono), taille, gras, italique, alignement, interligne, image, calque, groupe, donnees, verrouille, masque. Les modifications successives d'une même propriété s'annulent en une fois. |
@@ -2211,6 +2359,10 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `toile:grille{taille=, visible=, magnetisme=, objets=}` · `toile:guide("v" \| "h", position)` · `toile:zoom([%])` · `toile:ajuster([largeur])` · `toile:dimensions([l, h])` · `toile:fond(couleur)` | Vue et planche. |
 | `toile:annuler()` · `toile:retablir()` · `toile:historique()` · `toile:memoriser()` · `toile:action()` · `toile:png(chemin[, largeur])` · `toile:versecran(x, y)` · `toile:versscene(x, y)` | Historique, dernière action, rendu PNG, conversions de repères. |
 | `toile:chargerpages({svg...}, {colonnes=, ecart=, legendes=, choisie=, garderposition=})` | Planche de pages ou de vignettes (aperçu de document, trieuse de diapositives, plateau de storyboard) : chaque page est le groupe `page-N`. |
+| `interface.cadrage([texte])` | Cadrage carré d'une image (choix de l'icône d'une application ; images PNG, JPEG, GIF) : l'image entière avec un cadre ; glisser dans le cadre le déplace, la molette ou le coin bas droit change sa taille, un clic hors du cadre le centre là. `valeur` (ou `ev.texte` de `surchangement`) : « gauche,haut,cote » en fractions de l'image. |
+| `cadrage:charger(chemin, [cadrage])` | Affiche l'image avec le cadrage « gauche,haut,cote » (défaut : le plus grand carré centré) ; renvoie {largeur, hauteur}, nul si l'image est illisible. |
+| `cadrage:vider()` | Retire l'image. |
+| `cadrage:image()` | Vrai si une image est affichée. |
 | `interface.diagramme([{modifiable=, direction=}])` | Canevas de diagramme (nœuds et liens) : glisser un nœud le déplace, glisser le fond déplace la vue, la molette zoome ; en mode `modifiable`, glisser depuis la pastille d'un bord (titre ou ligne) vers un autre nœud crée un lien (`surchangement`, `d:action()`), Suppr demande une suppression. `direction` : `droite` (défaut) ou `bas`. `surselection` : `ev.texte` = id du nœud, `"lien:<id>"` ou `""` ; `ev.index` = ligne. |
 | `diagramme:noeud{id=, titre=, soustitre=, lignes=, x=, y=, couleur=, forme=, pastille=, jauge=}` | Ajoute ou met à jour un nœud. `lignes` : textes ou `{texte=, detail=, marque=}` (marque : PK, FK…) ; `forme` : `table` (défaut) ou `boite` ; `pastille` : texte en haut à droite ; `jauge` : 0 à 1 ; sans `x`/`y`, placé à droite de l'existant. |
 | `diagramme:lien{id=, de=, a=, deligne=, aligne=, libelle=, fleche=, pointille=, couleur=, epaisseur=}` | Ajoute ou met à jour un lien (`deligne`, `aligne` : lignes de départ et d'arrivée, 0 = le nœud) ; renvoie son id. |
@@ -2248,6 +2400,7 @@ Voir le chapitre 8.2.
 | `lexis.charger(chemin)` | Charge les procédures et fonctions d'un fichier `.prg` dans le programme en cours (extensions, greffons) ; renvoie la liste de leurs noms. Le fichier ne doit contenir que des procédures ; recharger le même fichier remplace ses procédures, un nom déjà défini ailleurs est refusé. |
 | `lexis.procedure(nom)` | Référence d'une procédure ou d'une fonction par son nom (nul si elle n'existe pas), à passer à `appeler(ref, ...)`. |
 | `lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])` | Analyse un texte comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste `{ligne, colonne, longueur, genre, message}` ; `genre` : erreur, avertissement, info ; `projet` : dossier dont les procédures sont connues. |
+| `lexis.graphe(dossier)` | Graphe du projet (vue projet de l'atelier) : {dossier, fichiers}, fichiers .prg triés par chemin (dossiers cachés exclus), chacun {chemin, relatif, lignes, appels, entites} ; entites : {nom, affichage, genre (procedure ou fonction), ligne, derniere, appels}. |
 | `lexis.structure(source)` | Procédures, fonctions et globales définies : liste de `{nom, genre, ligne, colonne}`. |
 | `lexis.documentation([paquet])` | Liste de `{paquet, signature, nom, proprietaire, methode, description}`. |
 | `lexis.paquets()` | Paquets disponibles : liste de `{nom, description, global}`. |
@@ -2276,6 +2429,7 @@ Mise en page, PDF, HTML, importation et vectorisation - disponible par son nom (
 | `publication.titres(markdown)` · `publication.textebrut(markdown)` · `publication.ancre(texte)` · `publication.mesurer(texte[, police, taille, gras])` | Plan, texte brut, ancre d'un titre, largeur d'un texte (points). |
 | `publication.png(svg, chemin[, largeur, dossier])` · `publication.tailleimage(chemin)` | Rendu PNG d'un SVG ; dimensions d'une image ou d'un SVG. |
 | `publication.importer(source, destination[, {page=, largeur=}])` · `publication.pagespdf(chemin)` | PNG, JPEG, GIF, BMP, WEBP (SDL3_image si présente) ou page de PDF (PDFium) convertis en PNG. |
+| `publication.boitesvg(svg)` | Boîte englobante des formes dessinées d'un SVG (transformations et `<use>` compris, épaisseur des traits non comprise) : `{x, y, largeur, hauteur}`, ou `nul` si rien n'est dessiné. |
 | `publication.symbolessvg(svg[, {couleur=, taille=}])` | Planche de symboles : un SVG autonome par `<symbol>` → liste de `{id, titre, svg, largeur, hauteur}`. Le titre vient de `<title>`, `aria-label` ou de l'identifiant ; les attributs de présentation de la racine et du symbole sont reportés, les dégradés et symboles cités par `<use>` sont joints ; `couleur` fixe la valeur de `currentColor` ; `taille` : plus grand côté (256 par défaut). |
 | `publication.vectoriser(image[, {mode=, couleurs=, lissage=, detail=, aireminimale=, fond=, page=}])` | Vectorisation : mode mono, gris, couleurs, logo, technique, illustration ; renvoie un SVG (un chemin par couleur, courbes de Bézier, angles conservés). |
 | `publication.optimisersvg(svg[, {simplifier=, nettoyer=, fusionner=, images=, lisible=}])` | Nettoie (petites taches), simplifie (tolérance), fusionne (même couleur), incorpore les images ; `{svg, avant, apres}`. |

@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.8.6,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.9.2,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -21,10 +21,12 @@
       séparateur horizontal) ;
     * la fenêtre principale : un onglet par document ouvert, avec une pastille
       de couleur selon sa nature (rouge : code Lexis+, orange : formulaire,
-      jaune : état, bleu : vue blueprint). Cliquer la pastille rouge ouvre la
-      vue blueprint du code (graphe éditable, palette de toutes les fonctions) ;
-      la pastille orange ouvre le concepteur de formulaires, la jaune l'éditeur
-      d'états, la bleue ramène au code.
+      jaune : état). Cliquer la pastille rouge ouvre le code dans la fenêtre
+      Blueprint (graphe éditable, palette des entités à afficher, masquer ou
+      détacher dans sa propre fenêtre, comme les fenêtres Concepteur) ; la
+      pastille orange ouvre le concepteur de formulaires, la jaune l'éditeur
+      d'états. Conception > Vue projet : graphe de tout le projet, une colonne
+      par fichier.
 
   Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr
   SIRET 13033319800013 - metalab (at) sonaliwan.fr
@@ -41,6 +43,7 @@ from ide/formmodel import isFormFile
 import ide/reportdesigner
 import ide/appicon
 import ide/blueprint
+import ide/projectview
 import ide/dockpane
 from ide/etats import isReportFile
 import lexis/api
@@ -83,7 +86,17 @@ Exécution et débogage
 Ctrl+R exécuter (sans débogueur)         F5 déboguer / continuer
 F9 ou clic dans la marge : point d'arrêt F10 pas principal
 F11 pas à pas                            Maj+F11 sortir de la procédure
-Maj+F5 arrêter"""
+Maj+F5 arrêter
+
+Fenêtre Blueprint (clic sur la pastille rouge d'un onglet)
+Glisser depuis la palette, relier les broches   Suppr supprimer la sélection
+Ctrl+Z/Y annuler, rétablir                      F ou Origine tout voir
+Double-clic sur l'icône fichier d'un appel : la procédure s'ouvre en blueprint
+Ctrl+Tab fichier suivant ; << / >> palette des entités, fenêtre dédiée
+
+Vue projet (Conception > Vue projet…)
+Une colonne par fichier ; clic : appels (orange) et appelants (vert)
+Double-clic : ouvrir le code à la définition"""
 
 type
   ProblemRow = object
@@ -156,11 +169,11 @@ proc opts(): Settings =
   withState: result = st.settings
 
 proc codeOf(uid: int): int =
-  ## Document de code d'un onglet (une vue blueprint renvoie le code qu'elle représente).
+  # Document de code d'un onglet (une vue blueprint renvoie le code qu'elle représente).
   if uid >= 0 and editorKind(edId, uid) == dkBlueprint: editorLinkUid(edId, uid) else: uid
 
 proc activeUid(): int =
-  ## Document de code actif (celui de la vue blueprint active le cas échéant).
+  # Document de code actif (celui de la vue blueprint active le cas échéant).
   editorCodeUid(edId)
 
 proc docKindFor(path, title: string): DocKind =
@@ -196,7 +209,6 @@ proc updateTitle() =
   let r = root()
   if r.len > 0: t.add "  [" & extractFilename(r) & "]"
   if running.load(): t.add "  (en cours)"
-  if editorKind(edId, editorActiveUid(edId)) == dkBlueprint: t.add "  - vue blueprint"
   if haveWin.load(): gWin.caption = t
 
 proc consoleAppend(s: string) =
@@ -256,10 +268,11 @@ proc reindex() =
   for k in idx.defs.keys: procs.add k
   procs.sort()
   bpSetProjectProcs(procs)
+  refreshProjectView(root())                     # la vue projet ouverte suit
 
 proc fileIcon(path: string): (string, Color) =
-  ## Symbole et couleur du type de fichier (pastilles des onglets : rouge code, orange
-  ## formulaire, jaune état) ; ("", …) si le type est inconnu.
+  # Symbole et couleur du type de fichier (pastilles des onglets : rouge code, orange
+  # formulaire, jaune état) ; ("", …) si le type est inconnu.
   let e = path.splitFile.ext.toLowerAscii
   case e
   of ".prg":
@@ -283,7 +296,7 @@ proc designerFiles(): seq[string] =
   if e.len > 0: result.add e
 
 proc refreshLocks() =
-  ## Cadenas fermé devant les fichiers ouverts dans l'éditeur ou l'un des concepteurs.
+  # Cadenas fermé devant les fichiers ouverts dans l'éditeur ou l'un des concepteurs.
   let r = root()
   if r.len == 0: return
   var open: HashSet[string]
@@ -454,6 +467,7 @@ proc scheduleLint() =
   if lintGen.load() == g:
     lintDoc(activeUid())
     updateTitle()
+    bpFollow(activeUid())                        # la fenêtre Blueprint suit le code
 
 proc lintAllOpen() =
   for d in editorDocs(edId): lintDoc(d.uid)
@@ -525,6 +539,7 @@ proc closeDoc(uid: int) =
   if bp >= 0:
     editorClose(edId, bp)
     bpClose(bp)
+  bpForget(uid)                                  # sa vue dans la fenêtre Blueprint
   editorClose(edId, uid)
   withState: st.diagByUid.del(uid)
   refreshLocks()
@@ -691,7 +706,7 @@ proc showPause(info: PauseInfo, frameIdx: int) =
 proc editableKind(kind: string): bool = kind in ["chaine", "entier", "décimal", "logique"]
 
 proc selectVariable(i: int) =
-  ## Ligne i (0-based) de la page Variables : la valeur passe dans le champ de modification.
+  # Ligne i (0-based) de la page Variables : la valeur passe dans le champ de modification.
   var row: tuple[name, value, kind, scope: string]
   var paused = false
   withState:
@@ -714,7 +729,7 @@ proc selectVariable(i: int) =
   edVar.value = v
 
 proc applyVariable() =
-  ## Nouvelle valeur de la variable choisie, appliquée au programme arrêté.
+  # Nouvelle valeur de la variable choisie, appliquée au programme arrêté.
   var row: tuple[name, value, kind, scope: string]
   var frame = 0
   var i = -1
@@ -922,7 +937,7 @@ proc programArguments() =
 #
 
 proc sortKey(s: string): string =
-  ## Clé de tri et de recherche : minuscules, sans accents.
+  # Clé de tri et de recherche : minuscules, sans accents.
   result = unicode.toLower(s)
   for (a, b) in [("é", "e"), ("è", "e"), ("ê", "e"), ("ë", "e"), ("à", "a"), ("â", "a"), ("ä", "a"),
                  ("ù", "u"), ("û", "u"), ("ü", "u"), ("ô", "o"), ("ö", "o"), ("î", "i"), ("ï", "i"),
@@ -930,8 +945,8 @@ proc sortKey(s: string): string =
     result = result.replace(a, b)
 
 proc fillApiTree() =
-  ## Arbre de la Référence : paquets et contenu par ordre alphabétique, filtrés par la
-  ## recherche (tous les mots, dans le nom, la signature, le paquet ou la description).
+  # Arbre de la Référence : paquets et contenu par ordre alphabétique, filtrés par la
+  # recherche (tous les mots, dans le nom, la signature, le paquet ou la description).
   var rows = apiEntries()
   rows.sort(proc (a, b: ApiDoc): int =
     result = cmp(sortKey(a.section), sortKey(b.section))
@@ -981,7 +996,7 @@ proc mdCode(s: string): string =
 proc isIdentByte(c: char): bool = c in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '_'}
 
 proc matchingClose(s: string, i: int): int =
-  ## Position de la parenthèse / accolade / crochet fermant celui ouvert en s[i], -1 sinon.
+  # Position de la parenthèse / accolade / crochet fermant celui ouvert en s[i], -1 sinon.
   var depth = 0
   var inStr = false
   for k in i ..< s.len:
@@ -996,8 +1011,8 @@ proc matchingClose(s: string, i: int): int =
   -1
 
 proc mdInline(s: string): string =
-  ## Texte de description -> Markdown : chaînes "…", appels f(…), noms pkg.f / obj:f,
-  ## @procédures, URL et extensions .prg en code ; vrai/faux/nul en code.
+  # Texte de description -> Markdown : chaînes "…", appels f(…), noms pkg.f / obj:f,
+  # @procédures, URL et extensions .prg en code ; vrai/faux/nul en code.
   var i = 0
   while i < s.len:
     let c = s[i]
@@ -1061,7 +1076,7 @@ proc mdInline(s: string): string =
     inc i
 
 proc splitTop(s: string, sep: char): seq[string] =
-  ## Découpe sur `sep` hors parenthèses, accolades, crochets, chaînes et « … ».
+  # Découpe sur `sep` hors parenthèses, accolades, crochets, chaînes et « … ».
   var depth = 0
   var inStr = false
   var guil = 0
@@ -1086,7 +1101,7 @@ proc splitTop(s: string, sep: char): seq[string] =
   if cur.strip().len > 0: result.add cur.strip()
 
 proc mdParams(sig: string): seq[string] =
-  ## Lignes de liste Markdown décrivant les paramètres d'une signature.
+  # Lignes de liste Markdown décrivant les paramètres d'une signature.
   let p = sig.find({'(', '{'})
   if p < 0: return
   let q = matchingClose(sig, p)
@@ -1122,8 +1137,8 @@ proc mdParams(sig: string): seq[string] =
       result.add "- " & mdCode(a) & (if optional: " - *facultatif*" else: "")
 
 proc mdDescription(doc: string): tuple[body: string, returns: string] =
-  ## Sépare « renvoie … » du reste ; trois propositions ou plus (séparées par « ; »)
-  ## deviennent une liste, « clé : texte » mettant la clé en code.
+  # Sépare « renvoie … » du reste ; trois propositions ou plus (séparées par « ; »)
+  # deviennent une liste, « clé : texte » mettant la clé en code.
   const NewSentence = '\1'   # proposition qui commence une nouvelle phrase.
   var clauses: seq[string]
   for c in splitTop(doc, ';'):
@@ -1306,6 +1321,8 @@ proc applyView() =
   for p in [paneL, paneB]:
     if p != nil and p.isDetached: ids.add p.winId
   ids.add designerWindowIds()
+  ids.add bpWindowIds()
+  ids.add projectViewWindowIds()
   ids.add reportWindowIds()
   ids.add pdfWins
   let open = windowIds()
@@ -1399,7 +1416,7 @@ proc openReport(reportFile: string) =
 #
 
 proc openBlueprint(uid0: int) =
-  ## Ouvre (ou active) la vue blueprint du document de code uid0.
+  # Ouvre (ou active) la vue blueprint du document de code uid0.
   let uid = codeOf(uid0)
   if uid < 0:
     status("Ouvrez d'abord un fichier .prg.")
@@ -1408,16 +1425,14 @@ proc openBlueprint(uid0: int) =
   if kind notin {dkCode, dkForm, dkReport}:
     status("La vue blueprint s'applique au code Lexis+ (.prg).")
     return
-  let bp = editorNewBlueprint(edId, uid)
-  if bp < 0: return
-  bpOpen(bp, uid, editorText(edId, uid), editorInfo(edId, uid).version)
-  bpRebuildDetails()
+  let o = opts()
+  if not bpShow(uid, themeFor(o.dark, o.fontDelta)): return
   status("Vue blueprint de " & editorInfo(edId, uid).title &
-         " - glisser depuis la palette, relier les broches ; le code est réécrit à chaque modification")
+         " (fenêtre Blueprint) - glisser depuis la palette, relier les broches ; le code est réécrit à chaque modification")
   updateTitle()
 
 proc onDot(uid: int) =
-  ## Clic sur la pastille d'un onglet.
+  # Clic sur la pastille d'un onglet.
   let info = editorInfo(edId, uid)
   case editorKind(edId, uid)
   of dkCode: openBlueprint(uid)
@@ -1442,7 +1457,7 @@ proc onDot(uid: int) =
 proc handler(ev: var Event) {.nimcall, gcsafe.}
 
 proc showLeftPage(page: string) =
-  ## Affiche l'ensemble Projet / Structure / Référence (s'il est masqué) sur la page voulue.
+  # Affiche l'ensemble Projet / Structure / Référence (s'il est masqué) sur la page voulue.
   if paneL.isHidden and not paneL.isDetached: paneL.setHidden(false)
   tabLeft.value = page
 
@@ -1451,15 +1466,15 @@ proc showLeftPage(page: string) =
 #
 
 proc selectedProjectPath(): string =
-  ## Chemin complet du fichier ou dossier choisi dans la page Projet ("" : aucun).
+  # Chemin complet du fichier ou dossier choisi dans la page Projet ("" : aucun).
   let r = root()
   let parts = trProj.value.split(TreeSep)
   if r.len == 0 or parts.len < 2: return ""
   r / parts[1 .. ^1].join($DirSep)
 
 proc openPdfWindow(path: string) =
-  ## Consultation d'un PDF dans une fenêtre dédiée (pages, vignettes et signets, zoom,
-  ## recherche, sélection de texte, rotation, annotations, impression par l'enregistrement).
+  # Consultation d'un PDF dans une fenêtre dédiée (pages, vignettes et signets, zoom,
+  # recherche, sélection de texte, rotation, annotations, impression par l'enregistrement).
   if not pdfAvailable():
     alert(iconInformation, "La consultation des PDF nécessite la bibliothèque PDFium :\n" & pdfError(),
           title = "PDF")
@@ -1476,8 +1491,8 @@ proc openPdfWindow(path: string) =
   else: status("PDF : " & relPath(path))
 
 proc openProjectFile(p: string) =
-  ## Clic sur un fichier de la page Projet : image -> onglet d'aperçu ; PDF -> fenêtre
-  ## dédiée ; sinon l'éditeur (texte brut, Markdown, SQL, Lexis+).
+  # Clic sur un fichier de la page Projet : image -> onglet d'aperçu ; PDF -> fenêtre
+  # dédiée ; sinon l'éditeur (texte brut, Markdown, SQL, Lexis+).
   if isImageFile(p):
     discard editorOpenImage(edId, p)
     status("Aperçu de l'image " & relPath(p))
@@ -1489,8 +1504,8 @@ proc openProjectFile(p: string) =
   updateTitle()
 
 proc closeTabsOf(path: string): bool =
-  ## Ferme les onglets du fichier (et ses vues) avant de le renommer ou de le supprimer ;
-  ## faux si l'utilisateur garde un document modifié.
+  # Ferme les onglets du fichier (et ses vues) avant de le renommer ou de le supprimer ;
+  # faux si l'utilisateur garde un document modifié.
   let full = normalizedPath(absolutePath(path))
   for d in editorDocs(edId, withBlueprints = true):
     if d.path.len > 0 and (normalizedPath(d.path) == full or normalizedPath(d.path).startsWith(full & $DirSep)):
@@ -1584,6 +1599,8 @@ proc deleteSelected() =
   reindex()
   status("Supprimé : " & relPath(p))
 
+proc openProjectGraph()
+
 proc onMenu(path: string) =
   let item = path.split(TreeSep)[^1]
   case item
@@ -1605,6 +1622,7 @@ proc onMenu(path: string) =
   of "Fermer l'onglet":
     let uid = editorActiveUid(edId)
     if uid >= 0: closeDoc(uid)
+  of "Vue projet…": openProjectGraph()
   of "Vue blueprint du fichier courant": openBlueprint(activeUid())
   of "Projet / Structure / Référence : afficher ou masquer": paneL.toggle()
   of "Projet / Structure / Référence : fenêtre dédiée": paneL.detach()
@@ -1715,7 +1733,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.8.6\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.9.2\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" &
@@ -1739,7 +1757,7 @@ proc buildMenu(m: ControlId) =
                    "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)",
                    "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts",
                    "Arguments et fichier principal…", "Générer l'application…"]),
-    ("Conception", @["Vue blueprint du fichier courant", "-",
+    ("Conception", @["Vue projet…", "Vue blueprint du fichier courant", "-",
                      "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…",
                      "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"]),
     ("Affichage", @["Projet / Structure / Référence : afficher ou masquer",
@@ -1807,7 +1825,9 @@ proc onEditorSignal(text: string) =
     else: discard
 
 proc onBlueprintCode(srcUid: int) {.nimcall, gcsafe.} =
+  # Code réécrit depuis la fenêtre Blueprint : son onglet devient l'onglet actif.
   {.cast(gcsafe).}:
+    if activeUid() != srcUid: editorActivate(edId, srcUid)
     lintDoc(srcUid)
     updateTitle()
 
@@ -1823,14 +1843,14 @@ proc onBlueprintCommand(cmd: string) {.nimcall, gcsafe.} =
   {.cast(gcsafe).}: onEditorSignal(cmd)
 
 proc onBlueprintLocate(name: string): tuple[path: string, line: int] {.nimcall, gcsafe.} =
-  ## Définition d'une procédure dans les fichiers du projet (index de l'atelier).
+  # Définition d'une procédure dans les fichiers du projet (index de l'atelier).
   {.cast(gcsafe).}:
     var locs: seq[Location]
     withState: locs = st.index.defs.getOrDefault(upper(name))
     if locs.len > 0: result = (locs[0].file, locs[0].line)
 
 proc onBlueprintOpenEntity(name: string) {.nimcall, gcsafe.} =
-  ## Icône fichier (double-clic) : ouvre le fichier de la procédure et l'affiche en blueprint.
+  # Icône fichier (double-clic) : ouvre le fichier de la procédure et l'affiche en blueprint.
   {.cast(gcsafe).}:
     let loc = onBlueprintLocate(name)
     if loc.path.len == 0 or not fileExists(loc.path):
@@ -1841,11 +1861,45 @@ proc onBlueprintOpenEntity(name: string) {.nimcall, gcsafe.} =
     if uid < 0: return
     ensureKind(uid)
     openBlueprint(uid)
-    let bp = editorBlueprintFor(edId, uid)
-    if bp >= 0:
-      bpShowLine(bp, loc.line)
+    if bpCurrent() == uid:
+      bpShowLine(uid, loc.line)
       bpRebuildDetails()
     status(name & " : " & relPath(loc.path) & " ligne " & $(loc.line + 1) & " (vue blueprint)")
+
+proc openProjectGraph() =
+  # Conception > Vue projet : graphe de tout le projet, une colonne par fichier.
+  let r = root()
+  if r.len == 0:
+    status("Ouvrez d'abord un projet (Fichier > Ouvrir un projet…).")
+    return
+  let o = opts()
+  if openProjectView(r, extractFilename(r), themeFor(o.dark, o.fontDelta)):
+    status("Vue projet de " & extractFilename(r) & " (fenêtre Vue projet)")
+
+proc onProjectViewCode(path: string, line: int) {.nimcall, gcsafe.} =
+  # Vue projet : ouvre le fichier dans l'atelier, à la définition.
+  {.cast(gcsafe).}:
+    let uid = uidForSource(path)
+    if uid < 0: return
+    ensureKind(uid)
+    editorActivate(edId, uid)
+    editorGoto(edId, uid, line, 0)
+    editorFlush(edId)
+    if haveWin.load(): setWindowState(gWin, wsNormal)
+    lintDoc(uid)
+    refreshLocks()
+    updateTitle()
+
+proc onProjectViewBlueprint(path: string, line: int) {.nimcall, gcsafe.} =
+  # Vue projet : ouvre le fichier dans la fenêtre Blueprint, sur la procédure.
+  {.cast(gcsafe).}:
+    let uid = uidForSource(path)
+    if uid < 0: return
+    ensureKind(uid)
+    openBlueprint(uid)
+    if bpCurrent() == uid and line > 0:
+      bpShowLine(uid, line)
+      bpRebuildDetails()
 
 #
 # Gestionnaire
@@ -1880,6 +1934,9 @@ proc handleEvent(ev: var Event) =
           else:
             editorGoto(edId, activeUid(), line, 0)
             editorFlush(edId)
+            if bpCurrent() == activeUid():          # la fenêtre Blueprint suit
+              bpShowLine(activeUid(), line)
+              bpRebuildDetails()
       elif ev.id == tblVars:
         selectVariable(ev.index - 1)
       elif ev.id == lstStack:
@@ -1976,6 +2033,8 @@ proc handleEvent(ev: var Event) =
       doStop()
       closeDesigner()
       closeReportDesigner()
+      bpCloseWindow()
+      closeProjectView()
       saveSettings(opts())
       quitApplication()
     else: discard
@@ -2183,6 +2242,8 @@ proc buildUi() =
   bpCommand = onBlueprintCommand
   bpLocate = onBlueprintLocate
   bpOpenEntity = onBlueprintOpenEntity
+  pvOpenCode = onProjectViewCode
+  pvOpenBlueprint = onProjectViewBlueprint
   editorSetOptions(edId, s.minimap, s.dark)
   editorSetFontSize(edId, EditorBaseFont + float(s.fontDelta))
   fillApiTree()

@@ -7,9 +7,10 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [S]tudio 1.8.6 - " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [S]tudio 1.9.2 - " + fichier.nom(dossier)
   ARBRE_PROJET()
   vb:projet(dossier)        && procédures du projet : palette et liens d'appel entre fichiers
+  VP_SUIVRE()               && la vue projet ouverte suit
   locale s = LIRE_SESSION()
   locale ouverts = 0
   pour chaque p dans s.fichiers
@@ -407,6 +408,7 @@ procedure NOUVEAU_FICHIER
   ARBRE_PROJET()
   ed:ouvrir(p)
   vb:projet(dossier)
+  VP_SUIVRE()
 retourner
 
 procedure ENREGISTRER
@@ -421,6 +423,7 @@ procedure ENREGISTRER
     locale p = ed:enregistrer()
     etat.libelle = "Enregistré : " + fichier.nom(p)
     vb:projet(dossier)      && les procédures ont pu changer
+    VP_SUIVRE()             && la vue projet ouverte suit
   capturer e
     ui.alerte("Enregistrement impossible : " + e, "stop")
   finessayer

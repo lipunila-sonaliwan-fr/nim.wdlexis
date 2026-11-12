@@ -20,7 +20,7 @@
 import std/[strutils, unicode, tables, os, math, sequtils, streams, sets, algorithm]
 import ../sdl3
 import ../wdgui
-import lexistok, sqltok, mdtok, langdocs, lexislint
+import lexistok, sqltok, mdtok, langdocs, lexislint, gentok
 import compat except KHome, KEnd
 from lexislang import Keywords
 from lsptypes import CompletionItem, kindBadge
@@ -72,6 +72,11 @@ type
     lang*: string                # "" : d'après l'extension ; "sql" ou "lexis" : imposé (ed:langage).
     kind*: DocKind               # nature (pastille de couleur de l'onglet).
     linkUid*: int                # vue blueprint : uid du document de code qu'elle représente.
+    readOnly*: bool              # lecture seule (consultation, mode grand fichier).
+    lineBase*: int               # numéro de la ligne précédant la première (bloc d'un grand fichier).
+    edgeNav*: bool               # signale « cmd:edge:next / prev » aux bords du document.
+    edgePending: bool            # signal de bord émis, en attente du nouveau texte.
+    genLang*: string             # langage défini par un programme (gentok) servant à l'analyse.
 
   EditorColors = object
     bg, gutter, gutterText, gutterMajor, currentLine, selection, caret, tabBar, tabActive,
@@ -108,6 +113,8 @@ type
     clipText: string             # texte à copier (commande "setClipboard").
     kindDots*: bool              # pastille de couleur (nature du document) au début de chaque onglet.
     welcome*: seq[string]        # écran affiché sans onglet ouvert (vide : accueil de l'atelier).
+    plainNumbers*: bool          # numéros de ligne simples (sinon : repères de l'atelier toutes les 10 lignes).
+    paletteKeys*: bool           # F1, Ctrl+P, Ctrl+Maj+P, Ctrl+W, Ctrl+Maj+O signalés (éditeur à palette de commandes).
     hoverDot: int
 
 
@@ -243,10 +250,200 @@ proc isMarkdown*(doc: Document): bool =
   let p = doc.path.toLowerAscii
   p.endsWith(".md") or p.endsWith(".markdown")
 
-proc isPlainText*(doc: Document): bool =
-  # Texte brut (.txt, .csv, .json…) : ni coloration Lexis+ ni analyse.
+proc genKey*(doc: Document): string =
+  ## Clé de recherche d'un langage défini par un programme : nom imposé, sinon le chemin
+  ## (extension ou nom de fichier) ; "" pour Lexis+, SQL et Markdown (lexers intégrés).
+  if doc.lang.len > 0:
+    return (if doc.lang in ["sql", "lexis", "markdown", "texte"]: "" else: doc.lang)
   let p = (if doc.path.len > 0: doc.path else: doc.title).toLowerAscii
-  not p.endsWith(".prg") and not doc.isSql and not doc.isMarkdown and p.len > 0 and '.' in p
+  if p.endsWith(".prg") or doc.isSql or doc.isMarkdown: "" else: p
+
+proc isGeneric*(doc: Document): bool =
+  let k = doc.genKey
+  k.len > 0 and hasLang(k)
+
+proc isPlainText*(doc: Document): bool =
+  ## Texte brut (.txt, .csv…, ou langage imposé « texte ») : ni coloration ni analyse.
+  if doc.lang == "texte": return true
+  if doc.lang == "lexis": return false
+  let p = (if doc.path.len > 0: doc.path else: doc.title).toLowerAscii
+  not p.endsWith(".prg") and not doc.isSql and not doc.isMarkdown and p.len > 0 and
+    ('.' in p or doc.lang.len > 0) and not doc.isGeneric
+
+proc classify(g: LangDef, w: string): CsdKind =
+  let k = g.keyOf(w)
+  if k in g.routines: cbRoutine
+  elif k in g.conds: cbIf
+  elif k in g.loops: cbLoop
+  elif k in g.tries: cbTry
+  elif k in g.sections: cbSection
+  else: cbBlock
+
+proc genericCsd(g: LangDef, lines: seq[string], toks: seq[seq[Token]], maxLevel: var int): seq[CsdBlock] =
+  ## Diagramme de structure d'un langage défini par un programme : blocs par accolades,
+  ## indentation, mots-clés de début et de fin, ou balises ; la nature de chaque bloc
+  ## vient du premier mot significatif de sa ligne d'en-tête.
+  maxLevel = 0
+  var stack: seq[int]
+  var lastClosed = -1            # dernier bloc fermé (pour « } else { », « else: »…)
+  var lastClosedLine = -1
+  proc words(l: int): seq[string] =
+    for t in toks[l]:
+      if t.kind in {tkComment, tkDocComment}: continue
+      if t.kind in {tkKeyword, tkText, tkType, tkBuiltin, tkProcName}:
+        result.add lines[l][t.start ..< t.start + t.len]
+        if result.len >= 6: break
+  proc headKind(l: int, depth: int): CsdKind =
+    # premier mot-clé qui qualifie le bloc ; sinon, une définition « nom(...) » (ni appel
+    # de méthode « x.nom( », ni affectation « x = nom( ») est une routine.
+    var sawProc = false
+    var assign = false
+    var prev = ""
+    for t in toks[l]:
+      if t.kind in {tkComment, tkDocComment}: continue
+      let w = lines[l][t.start ..< t.start + t.len]
+      if t.kind == tkKeyword or (t.kind == tkText and g.keyOf(w) in g.routines):
+        let k = g.classify(w)
+        if k != cbBlock: return k
+      elif t.kind == tkProcName:
+        if not assign and prev != "." and not sawProc: sawProc = true
+      elif t.kind == tkOperator and (w == "=" or w == ":=" or w == "+=" or w == "<-"): assign = true
+      prev = w
+    if sawProc and not assign: cbRoutine else: cbBlock
+  proc hasBranch(l: int): bool =
+    for w in words(l):
+      if g.keyOf(w) in g.branches: return true
+  template push(k: CsdKind, fl: int) =
+    result.add CsdBlock(kind: k, first: fl, last: fl, level: stack.len)
+    maxLevel = max(maxLevel, stack.len)
+    stack.add result.high
+  template pop(atLine: int) =
+    if stack.len > 0:
+      let top = stack.pop()
+      result[top].last = atLine
+      lastClosed = top
+      lastClosedLine = atLine
+  proc prevCode(l: int): int =
+    var k = l - 1
+    while k >= 0:
+      for t in toks[k]:
+        if t.kind notin {tkComment, tkDocComment}: return k
+      dec k
+    -1
+  proc nextCode(l: int): int =
+    var k = l + 1
+    while k < lines.len:
+      for t in toks[k]:
+        if t.kind notin {tkComment, tkDocComment}: return k
+      inc k
+    -1
+  proc indentOf(l: int): int =
+    while result < lines[l].len and lines[l][result] in {' ', '\t'}: inc result
+
+  if bsIndent in g.blocks:
+    var istack: seq[tuple[ind, blk: int]]
+    var lastCode = -1
+    for l in 0 ..< lines.len:
+      var code = false
+      for t in toks[l]:
+        if t.kind notin {tkComment, tkDocComment}:
+          code = true
+          break
+      if not code: continue
+      let ind = indentOf(l)
+      var popped = -1
+      while istack.len > 0 and istack[^1].ind >= ind:
+        let top = istack.pop()
+        result[top.blk].last = max(result[top.blk].first, lastCode)
+        if top.ind == ind: popped = top.blk
+      let ws = words(l)
+      let first = if ws.len > 0: g.keyOf(ws[0]) else: ""
+      let nx = nextCode(l)
+      let opens = nx >= 0 and indentOf(nx) > ind
+      if popped >= 0 and first in g.branches and result[popped].kind in {cbIf, cbTry, cbCase, cbLoop}:
+        result[popped].branches.add l
+        if opens: istack.add (ind, popped)
+        else: result[popped].last = l
+      elif opens:
+        result.add CsdBlock(kind: headKind(l, istack.len), first: l, last: l, level: istack.len)
+        maxLevel = max(maxLevel, istack.len)
+        istack.add (ind, result.high)
+      lastCode = l
+    while istack.len > 0:
+      let top = istack.pop()
+      result[top.blk].last = max(result[top.blk].first, lastCode)
+    return
+
+  for l in 0 ..< lines.len:
+    let ws = words(l)
+    var firstW = ""
+    for w in ws:
+      let k = g.keyOf(w)
+      if k in g.modifiers: continue
+      firstW = k
+      break
+    # mots-clés de début et de fin (Lua, Ruby, shell, Pascal, BASIC...)
+    if bsKeywords in g.blocks and firstW.len > 0:
+      let lastW = if ws.len > 0: g.keyOf(ws[^1]) else: ""
+      if firstW in g.closers:
+        pop(l)
+      elif firstW in g.branches:
+        if stack.len > 0: result[stack[^1]].branches.add l
+      elif firstW in g.openers and not (ws.len > 1 and lastW in g.closers):
+        push(g.classify(firstW), l)
+    # balises (HTML, XML)
+    if bsTags in g.blocks:
+      var i = 0
+      let tk = toks[l]
+      var openedHere: seq[int]
+      while i < tk.len:
+        let t = tk[i]
+        let txt = lines[l][t.start ..< t.start + t.len]
+        if t.kind == tkPunct and (txt == "<" or txt == "</") and i + 1 < tk.len and tk[i + 1].kind == tkKeyword:
+          let name = lines[l][tk[i + 1].start ..< tk[i + 1].start + tk[i + 1].len].toLowerAscii
+          if txt == "</":
+            if stack.len > 0: pop(l)
+          elif name notin ["br", "img", "input", "meta", "link", "hr", "area", "base", "col", "embed",
+                           "source", "track", "wbr", "param"] or not g.caseless:
+            push((if name in g.sections: cbSection else: cbBlock), l)
+            openedHere.add result.high
+          i += 2
+          continue
+        if t.kind == tkPunct and txt == "/>" and openedHere.len > 0:
+          discard openedHere.pop()
+          if stack.len > 0: discard stack.pop()
+          result.setLen(result.len - 1)
+        inc i
+    # accolades (C, Java, JS, Rust, Go, CSS, JSON...)
+    if bsBraces in g.blocks:
+      for t in toks[l]:
+        if t.kind notin {tkPunct, tkOperator}: continue
+        for ci in t.start ..< t.start + t.len:
+          let c = lines[l][ci]
+          if c == '{' or (g.brackets and c == '['):
+            let before = lines[l][0 ..< ci].strip
+            let head = if before.len == 0 or before == "}" or before.endsWith("}"):
+                         (if before.len == 0: max(0, prevCode(l)) else: l)
+                       else: l
+            if lastClosed >= 0 and (lastClosedLine == l or lastClosedLine == prevCode(l)) and
+               result[lastClosed].kind in {cbIf, cbTry} and hasBranch(l):
+              result[lastClosed].branches.add l
+              stack.add lastClosed
+              lastClosed = -1
+            else:
+              let k = if c == '[': cbBlock else: headKind(head, stack.len)
+              push(k, head)
+          elif c == '}' or (g.brackets and c == ']'):
+            pop(l)
+  while stack.len > 0:
+    let top = stack.pop()
+    result[top].last = max(result[top].first, lines.high)
+  var kept: seq[CsdBlock]
+  for b in result:
+    if b.last > b.first: kept.add b
+  result = kept
+  maxLevel = 0
+  for b in result: maxLevel = max(maxLevel, b.level)
 
 proc analyze(doc: Document) =
   if doc.analyzed: return
@@ -259,6 +456,13 @@ proc analyze(doc: Document) =
   elif doc.isMarkdown:
     for i, l in doc.lines: doc.tokens[i] = lexMdLine(l, state, depth)
     doc.csd = @[]
+  elif doc.isGeneric:
+    var carry = 0
+    withLang(doc.genKey, g):
+      if g != nil:
+        doc.genLang = g.name
+        for i, l in doc.lines: doc.tokens[i] = lexGenLine(g, l, state, carry)
+        doc.csd = genericCsd(g, doc.lines, doc.tokens, doc.maxLevel)
   elif doc.isPlainText:
     for i, l in doc.lines: doc.tokens[i] = (if l.len > 0: @[Token(kind: tkText, start: 0, len: l.len)] else: @[])
     doc.csd = @[]
@@ -475,7 +679,13 @@ proc indentLines(doc: Document, dedent: bool) =
 
 proc toggleComment(doc: Document) =
   doc.pushUndo()
-  let mark = if doc.isSql: "--" else: "&&"
+  var mark = if doc.isSql: "--" else: "&&"
+  if doc.isGeneric:
+    withLang(doc.genKey, g):
+      if g != nil:
+        mark = if g.comment.len > 0: g.comment elif g.lineComments.len > 0: g.lineComments[0] else: ""
+    if mark.len == 0: return
+  elif doc.isPlainText or doc.isMarkdown: return
   let (a, b) = doc.selectedLines
   var allCommented = true
   var minInd = high(int)
@@ -491,7 +701,7 @@ proc toggleComment(doc: Document) =
     let ind = leadingSpaces(s)
     if ind >= s.len: continue
     if allCommented:
-      let n = if ind + 2 < s.len and s[ind + 2] == ' ': 3 else: 2
+      let n = if ind + mark.len < s.len and s[ind + mark.len] == ' ': mark.len + 1 else: mark.len
       doc.lines[l] = s[0 ..< ind] & s[ind + n .. ^1]
     else:
       doc.lines[l] = s[0 ..< minInd] & mark & " " & s[minInd .. ^1]
@@ -521,6 +731,17 @@ proc newline(doc: Document) =
                         "parcourir", "essayer", "capturer", "procedure", "fonction"] or
               bs.endsWith("{") or bs.endsWith("(")
   if first == "faire" and not (bs.contains(" tantque") or bs.contains(" cas")): opens = false
+  if doc.isGeneric:
+    opens = false
+    withLang(doc.genKey, g):
+      if g != nil:
+        for e in g.indentAfter:
+          if bs.endsWith(e): opens = true
+        if bsKeywords in g.blocks and g.keyOf(first) in g.openers: opens = true
+        for lc in g.lineComments:
+          if bs.startsWith(lc): opens = false
+  elif doc.isPlainText or doc.isMarkdown:
+    opens = bs.endsWith("{") or bs.endsWith("(") or bs.endsWith("[")
   if bs.startsWith("&&") or bs.startsWith("//"): opens = false
   if opens: ind += 2
   doc.insertText("\n" & spaces(ind))
@@ -631,7 +852,10 @@ proc doc*(ed: CodeEditor): Document =
 proc bodyRect(ed: CodeEditor): Rect =
   rect(ed.rect.x, ed.rect.y + tabBarH, ed.rect.w, max(0.0, ed.rect.h - tabBarH))
 
-proc numbersW(ed: CodeEditor): float = 5 * ed.charW + 30
+proc numbersW(ed: CodeEditor): float =
+  let d = ed.doc
+  let digits = if d == nil: 5 else: max(5, len($(d.lineBase + d.lines.len)))
+  float(digits) * ed.charW + 30
 
 proc csdW(ed: CodeEditor): float =
   let d = ed.doc
@@ -668,6 +892,8 @@ method scrollTrackTo*(ed: CodeEditor, vertical: bool, pos: float) =
 proc ensureCursorVisible(ed: CodeEditor) =
   let d = ed.doc
   if d == nil: return
+  # contrôle pas encore disposé (fenêtre en cours d'ouverture) : rien à ajuster.
+  if ed.codeRect.h < 2 * ed.lineH or ed.codeRect.w < 60: return
   let n = float(ed.visibleLines)
   if float(d.line) < d.scroll: d.scroll = float(d.line)
   if float(d.line) > d.scroll + n - 2: d.scroll = float(d.line) - n + 2
@@ -1031,7 +1257,7 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
   d.pushClip(rect(gx, b.y, ed.numbersW + ed.csdW, b.h))
   for l in first .. last:
     let y = ed.lineY(l)
-    let n = l + 1
+    let n = l + 1 + doc.lineBase
     let major = n mod 10 == 0
     let col = if l == doc.line: colors.tabTextActive elif major: colors.gutterMajor else: colors.gutterText
     if l == doc.execLine:
@@ -1040,7 +1266,9 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
       d.fillCircle(gx + 9, y + lh / 2, 5, hex"#E5484D")
     if l == doc.execLine:
       d.fillPolygon([(gx + 3, y + lh / 2 - 5), (gx + 13, y + lh / 2), (gx + 3, y + lh / 2 + 5)], hex"#FFC200")
-    ed.monoText(d, gx + 20, y, lineNumberText(n), col)
+    let numTxt = if not ed.plainNumbers and doc.lineBase == 0 and doc.lines.len < 100_000: lineNumberText(n)
+                 else: strutils.align($n, int((ed.numbersW - 30) / ed.charW + 0.5))
+    ed.monoText(d, gx + 20, y, numTxt, col)
   # gutter: control structure diagram.
   if ed.showCsd:
     let x0 = gx + ed.numbersW
@@ -1125,6 +1353,7 @@ proc runCommand(ed: CodeEditor, cmd: string) =
     return
   let d = ed.doc
   if d == nil: return
+  if d.readOnly and cmd notin ["copy", "selectAll"]: return
   case cmd
   of "undo": d.undo()
   of "redo": d.redo()
@@ -1347,14 +1576,26 @@ method onWheel*(ed: CodeEditor, dx, dy: float): bool =
   if h == 0 and (SDL_GetModState() and KMOD_SHIFT) != 0:
     h = v
     v = 0
+  let before = doc.scroll
   doc.scroll -= v * 3
   doc.scrollX -= h * ed.charW * 4
   ed.clampScroll()
+  if doc.edgeNav and not doc.edgePending and v != 0:
+    let bottom = float(max(0, doc.lines.len - ed.visibleLines + 1))
+    if v < 0 and before >= bottom:
+      doc.edgePending = true
+      ed.signal("cmd:edge:next")
+    elif v > 0 and before <= 0:
+      doc.edgePending = true
+      ed.signal("cmd:edge:prev")
   true
 
 method onText*(ed: CodeEditor, s: string) =
   let doc = ed.doc
   if doc == nil or s.len == 0 or doc.kind in {dkBlueprint, dkPreview, dkImage}: return
+  if doc.readOnly:
+    ed.suppressSpace = false
+    return
   if ed.suppressSpace and s == " ":          # Ctrl+Space already handled as "complete".
     ed.suppressSpace = false
     return
@@ -1377,6 +1618,21 @@ method onText*(ed: CodeEditor, s: string) =
 
 method onKey*(ed: CodeEditor, e: KeyEvent): bool =
   let doc = ed.doc
+  # raccourcis valables même sans document : palette de commandes, ouverture rapide...
+  if ed.paletteKeys:
+    let k0 = int(e.key)
+    let ctl0 = (e.mods and (KMOD_CTRL or KMOD_CMD)) != 0
+    let sh0 = (e.mods and KMOD_SHIFT) != 0
+    var g = ""
+    if k0 == KF1: g = "cmd:palette"
+    elif ctl0 and k0 == ord('p'): g = (if sh0: "cmd:palette" else: "cmd:quickopen")
+    elif ctl0 and k0 == ord('w'): g = "cmd:closetab"
+    elif ctl0 and sh0 and k0 == ord('o'): g = "cmd:symbols"
+    elif doc == nil and ctl0 and k0 == ord('n'): g = "cmd:new"
+    elif doc == nil and ctl0 and k0 == ord('o'): g = "cmd:open"
+    if g.len > 0:
+      ed.signal(g)
+      return true
   if doc == nil: return false
   if doc.kind in {dkBlueprint, dkPreview, dkImage}:
     # vue blueprint : seul Ctrl+Tab (document suivant) est traité ici.
@@ -1434,6 +1690,19 @@ method onKey*(ed: CodeEditor, e: KeyEvent): bool =
       else: discard
   if shortcut.len > 0:
     ed.signal(shortcut)
+    return true
+  if doc.readOnly:
+    # lecture seule : pas de modification ; aux bords, demande le bloc voisin (grand fichier).
+    if e.key in [SDLK_BACKSPACE, SDLK_DELETE, SDLK_RETURN, SDLK_KP_ENTER, SDLK_TAB]: return true
+    if cmd and e.key in [SDLK_X, SDLK_V, SDLK_Z, SDLK_Y, SDLK_D, SDLK_SLASH]: return true
+    if doc.edgeNav and not doc.edgePending and not cmd:
+      if (e.key == SDLK_DOWN or e.key == SDLK_PAGEDOWN) and doc.line >= doc.lines.high:
+        doc.edgePending = true
+        ed.signal("cmd:edge:next")
+        return true
+      if (e.key == SDLK_UP or e.key == SDLK_PAGEUP) and doc.line <= 0:
+        doc.edgePending = true
+        ed.signal("cmd:edge:prev")
     return true
   if ed.comp.active:
     case e.key
@@ -1631,6 +1900,20 @@ proc openCompletion(ed: CodeEditor) =
       for k in SqlTypes: addItem(k.toUpperAscii, "type", 7)
       for f in SqlFunctions: addItem(f, "fonction", 3)
       for n in d.identsOf(): addItem(n, "fichier", 6)
+  elif d.isGeneric or d.isPlainText:
+    # langage défini par un programme : mots-clés, types, fonctions, noms donnés par
+    # ed:noms (« libellé<TAB>détail ») et identificateurs du document.
+    if d.isGeneric:
+      withLang(d.genKey, g):
+        if g != nil:
+          for k in g.keywords: addItem(k, "mot-clé", 14)
+          for k in g.types: addItem(k, "type", 7)
+          for k in g.builtins: addItem(k, "fonction", 3)
+          for k in g.constants: addItem(k, "constante", 21)
+    for n in ed.projectNames:
+      let k = n.find('\t')
+      if k > 0: addItem(n[0 ..< k], n[k + 1 .. ^1], 6) else: addItem(n, "", 6)
+    for n in d.identsOf(): addItem(n, "document", 6)
   elif d.isMarkdown:
     # Markdown : noms fournis par le programme (ed:noms) : « libellé<TAB>détail ».
     for n in ed.projectNames:
@@ -1831,10 +2114,14 @@ proc editorSetText*(id: ControlId, uid: int, text: string, modified = true): boo
       var ls = text.replace("\r\n", "\n").replace("\t", "  ").split('\n')
       if ls.len == 0: ls = @[""]
       ls
+    d.edgePending = false
     if newLines == d.lines:
       if not modified: d.modified = false
       return true
-    d.pushUndo()
+    if d.readOnly:
+      d.undoStack.setLen(0)
+      d.redoStack.setLen(0)
+    else: d.pushUndo()
     d.lines = newLines
     d.line = min(d.line, d.lines.high)
     d.col = min(d.col, d.lines[d.line].len)
@@ -1898,7 +2185,7 @@ proc editorCursor*(id: ControlId): tuple[line, col: int] =
 proc editorInsert*(id: ControlId, text: string) =
   withControl(id, CodeEditor, ed):
     let d = ed.doc
-    if d != nil:
+    if d != nil and not d.readOnly:
       d.pushUndo()
       d.insertText(text)
       ed.ensureCursorVisible()
@@ -2044,7 +2331,11 @@ proc editorLanguage*(id: ControlId, uid: int): string =
   readControl(id, CodeEditor, ed):
     for d in ed.docs:
       if d.uid == uid or (uid < 0 and ed.current >= 0 and ed.current < ed.docs.len and d == ed.docs[ed.current]):
-        return (if d.isSql: "sql" else: "lexis")
+        if d.isSql: return "sql"
+        if d.isMarkdown: return "markdown"
+        if d.isGeneric: return langNameFor(d.genKey)
+        if d.isPlainText: return "texte"
+        return "lexis"
 
 proc editorFlush*(id: ControlId) =
   # Compatibilité : les signaux sont émis directement.
@@ -2116,3 +2407,89 @@ method dispose*(ed: CodeEditor) =
     if ed.font != nil: TTF_CloseFont(ed.font)
     ed.font = nil
   ed.fontReady = false
+
+
+proc editorSetReadOnly*(id: ControlId, uid: int, ro: bool, edge = false) =
+  ## Lecture seule ; `edge` : signale « cmd:edge:next » / « cmd:edge:prev » quand on
+  ## cherche à dépasser la fin ou le début du document (bloc d'un grand fichier).
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      ed.docs[i].readOnly = ro
+      ed.docs[i].edgeNav = ro and edge
+      ed.docs[i].edgePending = false
+      if ro:
+        ed.docs[i].undoStack.setLen(0)
+        ed.docs[i].redoStack.setLen(0)
+      markDirty(ed)
+
+proc editorReadOnly*(id: ControlId, uid: int): bool =
+  readControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0: result = ed.docs[i].readOnly
+
+proc editorSetLineBase*(id: ControlId, uid: int, base: int) =
+  ## Numéro de la ligne qui précède la première affichée (numérotation de la marge).
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      ed.docs[i].lineBase = max(0, base)
+      markDirty(ed)
+
+proc editorLineBase*(id: ControlId, uid: int): int =
+  readControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0: result = ed.docs[i].lineBase
+
+proc editorScroll*(id: ControlId, uid: int): tuple[first, visible, total: int] =
+  ## Première ligne visible (0-based), nombre de lignes visibles, nombre de lignes.
+  readControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      result = (int(ed.docs[i].scroll), ed.visibleLines, ed.docs[i].lines.len)
+
+proc editorSetScroll*(id: ControlId, uid: int, first: int) =
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      let d = ed.docs[i]
+      d.scroll = clamp(float(first), 0.0, max(0.0, float(d.lines.len - 1)))
+      markDirty(ed)
+
+proc editorSetTitle*(id: ControlId, uid: int, title: string) =
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      ed.docs[i].title = title
+      markDirty(ed)
+
+proc editorSetModified*(id: ControlId, uid: int, modified: bool) =
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      ed.docs[i].modified = modified
+      markDirty(ed)
+
+proc editorRefreshLanguages*(id: ControlId) =
+  ## Ré-analyse tous les documents (après l'ajout d'une définition de langage).
+  withControl(id, CodeEditor, ed):
+    for d in ed.docs: d.analyzed = false
+    markDirty(ed)
+
+proc editorBlocks*(id: ControlId, uid: int): seq[tuple[kind: string, first, last, level: int]] =
+  ## Blocs du diagramme de structure (CSD) : nature, première et dernière ligne (0-based), niveau.
+  withControl(id, CodeEditor, ed):
+    let i = ed.docIndex(uid)
+    if i >= 0:
+      let d = ed.docs[i]
+      d.analyze()
+      for b in d.csd:
+        let k = case b.kind
+                of cbRoutine: "routine"
+                of cbIf, cbWhen: "condition"
+                of cbCase: "choix"
+                of cbLoop: "boucle"
+                of cbTry: "essai"
+                of cbSection: "section"
+                of cbBlock: "bloc"
+        result.add (k, b.first, b.last, b.level)

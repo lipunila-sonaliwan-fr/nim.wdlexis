@@ -583,6 +583,25 @@ proc openLexis(L: Interp): Value =
     @[listV(verify(src, optField(o, "nom", "fichier"), optField(o, "projet", ""), lintOpts(o)))]
   m.fn "structure", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[listV(structureOf(L.checkStr(a, 1, "structure")))]
+  m.fn "graphe", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # Graphe du projet (vue projet) : fichiers .prg du dossier, triés, avec leurs
+    # procédures et fonctions et les procédures du projet que chacune appelle.
+    let root = L.checkStr(a, 1, "graphe")
+    let g = projectGraph(root)
+    proc names(xs: seq[string]): Value =
+      var v: seq[Value]
+      for x in xs: v.add strV(x)
+      listV(v)
+    var files: seq[Value]
+    for f in g.files:
+      var ents: seq[Value]
+      for e in f.entities:
+        ents.add record({"nom": strV(e.name), "affichage": strV(e.display),
+                         "genre": strV(if e.kind == symFunc: "fonction" else: "procedure"),
+                         "ligne": intV(e.line + 1), "derniere": intV(e.lastLine + 1), "appels": names(e.calls)})
+      files.add record({"chemin": strV(f.path), "relatif": strV(f.rel), "lignes": intV(f.lines),
+                        "appels": names(f.calls), "entites": listV(ents)})
+    @[record({"dossier": strV(root), "fichiers": listV(files)})]
   m.fn "documentation", proc (L: Interp, a: seq[Value]): seq[Value] =
     let only = L.optStr(a, 1, "documentation", "")
     var items: seq[Value]
@@ -618,6 +637,7 @@ const lexisDocs = [
   "lexis.charger(chemin)", "Charge les procédures et fonctions d'un fichier .prg dans le programme en cours (extensions, greffons) ; renvoie la liste de leurs noms. Le fichier ne doit contenir que des procédures ; recharger le même fichier remplace ses procédures.",
   "lexis.procedure(nom)", "Référence d'une procédure ou d'une fonction par son nom (nul si elle n'existe pas) : appeler(ref, ...).",
   "lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])", "Analyse un texte Lexis+ comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste des problèmes {ligne, colonne, longueur, genre, message}. genre : erreur, avertissement, info ; projet : dossier dont les procédures sont connues.",
+  "lexis.graphe(dossier)", "Graphe du projet (vue projet de l'atelier) : {dossier, fichiers}, fichiers .prg triés par chemin (dossiers cachés exclus), chacun {chemin, relatif, lignes, appels, entites} ; entites : {nom (majuscules), affichage (nom(paramètres)), genre (procedure ou fonction), ligne, derniere, appels} ; appels : procédures du projet appelées (ou référencées par @NOM), celles du code de premier niveau pour le fichier.",
   "lexis.structure(source)", "Procédures, fonctions et variables globales définies dans un texte : liste de {nom, genre, ligne, colonne}.",
   "lexis.documentation([paquet])", "Documentation des fonctions intégrées et des paquets : liste de {paquet, signature, nom, proprietaire, methode, description}.",
   "lexis.paquets()", "Paquets disponibles : liste de {nom, description, global}.",

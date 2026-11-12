@@ -25,15 +25,16 @@ propre dossier).
 
 | Atelier natif | Ici |
 | --- | --- |
-| Menus Fichier, Édition, Recherche, Exécuter, Affichage, Aide | mêmes menus, mêmes libellés (`menus.prg`) |
+| Menus Fichier, Édition, Recherche, Exécuter, Conception, Affichage, Aide | mêmes menus, mêmes libellés (`menus.prg`) |
 | Barre d'outils, barre d'état, position du curseur | oui |
 | Deux fenêtres : outils à gauche (refermable, *Affichage > Fenêtre Projet / Structure / Référence*), documents à droite | oui (`ui.fenetre{x=, y=}`) |
 | Page Projet (arbre des fichiers) | oui |
-| Page Structure en arbre : procédures, fonctions (et leurs locales), globales | oui (`lexis.structure`) ; en vue blueprint, un clic centre la vue sur le nœud |
-| Page Référence : recherche, paquets par ordre alphabétique, fiche Markdown sous un séparateur horizontal, double-clic pour insérer | oui ; les fiches sont générées en Lexis+ (`reference.prg`) ; en vue blueprint, le double-clic ajoute un nœud |
+| Page Structure en arbre : procédures, fonctions (et leurs locales), globales | oui (`lexis.structure`) ; un clic centre aussi la fenêtre Blueprint sur le nœud quand elle montre ce fichier |
+| Page Référence : recherche, paquets par ordre alphabétique, fiche Markdown sous un séparateur horizontal, double-clic pour insérer | oui ; les fiches sont générées en Lexis+ (`reference.prg`) ; dans la fenêtre Blueprint, la palette des entités propose les mêmes fonctions |
 | Éditeur à onglets, coloration, complétion, minicarte | contrôle natif `ui.editeur` |
-| Pastille de couleur par onglet (rouge code, orange formulaire, jaune état, bleu blueprint) et son clic | oui : la nature et l'action du clic sont décidées en Lexis+ (`edition.prg`) |
-| Vue blueprint : palette, graphe éditable, détails, plier / déplier, liens d'appel, icône fichier (double-clic : l'autre fichier en blueprint) | contrôle natif `ui.blueprint` ; ouverture, fermeture, synchronisation et signaux en Lexis+ |
+| Pastille de couleur par onglet (rouge code, orange formulaire, jaune état) et son clic | oui : la nature et l'action du clic sont décidées en Lexis+ (`edition.prg`) |
+| Fenêtre Blueprint (comme les fenêtres Concepteur) : barre d'outils, fichiers ouverts, palette des entités à masquer, afficher ou détacher dans sa propre fenêtre, graphe éditable, détails, plier / déplier, liens d'appel, icône fichier (double-clic : l'autre fichier en blueprint) | fenêtre native `ui.blueprint` ; ouverture, fermeture, synchronisation (`vb:suivre`) et signaux en Lexis+ |
+| Vue projet (Conception, premier élément) : une colonne par fichier, procédures et fonctions dans l'ordre du source, liens d'appel ; clic : appelées / appelants ; double-clic : le code | oui (`vueprojet.prg`) : analyse `lexis.graphe`, dessin `ui.diagramme`, mêmes dispositions et couleurs |
 | Problèmes pendant la frappe, soulignés, clic pour aller à la ligne | oui (`lexis.verifier`) |
 | Vérifier les fichiers ouverts | oui |
 | Exécuter, console avec saisie, erreur → ligne fautive | oui (`lexis.executer`) |
@@ -42,7 +43,7 @@ propre dossier).
 | Rechercher, Remplacer, F3 / Ctrl+H, Aller à la ligne, F12 définition | oui (`ui.rechercher`, `ed:chercher`…) |
 | Police, minicarte, thème sombre / clair, options d'analyse | oui, conservés dans `~/.wdlexis-atelier.json` |
 | Session (fichiers ouverts), arguments, fichier principal | oui, dans `.wdlexis/atelier.json` du projet |
-| Générer l'application | boîte en Lexis+, compilation par l'outil `wdlexisgen` ; mêmes réglages (`.wdlexis/application.ini`) |
+| Générer l'application, icône avec aperçu et cadrage (glisser le cadre, molette ou coin : taille) | boîte en Lexis+ (`ui.cadrage`), compilation par l'outil `wdlexisgen` (`--icone=`, `--cadrage=`) ; mêmes réglages (`.wdlexis/application.ini`) |
 | Concepteur de formulaires (menu Conception, double-clic sur un `form_<nom>.prg`) | oui (`concepteur.prg`) ; mêmes fichiers `form_<nom>.prg` que l'atelier natif |
 | Éditeur d'états PDF (menu Conception, double-clic sur un `etat_<nom>.prg`) | oui (`etats.prg`) ; mêmes fichiers `etat_<nom>.prg` que l'atelier natif |
 
@@ -50,10 +51,13 @@ propre dossier).
 
 | Partie | Où |
 | --- | --- |
-| Toute l'interface, les menus, la logique d'atelier | les 9 fichiers `.prg` (environ 3 400 lignes) |
+| Toute l'interface, les menus, la logique d'atelier | les 11 fichiers `.prg` (environ 4 400 lignes) |
 | Éditeur de code | natif : `ui.editeur` (`ide/codeeditor.nim`) |
-| Vue blueprint : modèle code ↔ graphe, canevas, palette, détails | natif : `ui.blueprint` (`ide/bpmodel.nim`, `ide/blueprint.nim`) |
-| Pastilles : nature des documents, clic, ouverture et fermeture des vues, Structure et Référence en vue blueprint | `edition.prg`, `projet.prg`, `reference.prg` |
+| Fenêtre Blueprint : modèle code ↔ graphe, canevas, palette des entités (DockPane), détails | natif : `ui.blueprint` (`ide/bpmodel.nim`, `ide/blueprint.nim`, `ide/dockpane.nim`) |
+| Pastilles : nature des documents, clic, ouverture et fermeture des vues, Structure et fenêtre Blueprint | `edition.prg`, `projet.prg` |
+| Vue projet : analyse du projet | natif : `lexis.graphe` (`ide/lexislint.nim`) |
+| Vue projet : fenêtre, colonnes, liens, mise en évidence, ouverture du code | `vueprojet.prg` |
+| Cadrage de l'icône (aperçu, cadre) | natif : `ui.cadrage` (`ide/cropview.nim`) ; la boîte est dans `generation.prg` |
 | Analyse du langage | natif : `lexis.verifier`, `lexis.structure` (`ide/lexislint.nim`) |
 | Exécution et débogage dans un interpréteur séparé | natif : `lexis.executer` (`paquets/pkg_lexis.nim`) |
 | Compilation de l'application | outil `wdlexisgen` (chaîne Zig) |

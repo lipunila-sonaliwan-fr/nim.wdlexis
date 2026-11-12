@@ -16,7 +16,7 @@ retourner { ;
                 "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)", ;
                 "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts", ;
                 "Arguments et fichier principal…", "Générer l'application…"}}, ;
-  {"Conception", {"Vue blueprint du fichier courant", "-", "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
+  {"Conception", {"Vue projet…", "Vue blueprint du fichier courant", "-", "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
                   "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"}}, ;
   {"Affichage", {"Projet / Structure / Référence : afficher ou masquer", ;
                  "Projet / Structure / Référence : fenêtre dédiée", ;
@@ -120,6 +120,8 @@ procedure MENU(ev)
   cas choix = "Générer l'application…"
     GENERER_DIALOGUE()
   && Conception
+  cas choix = "Vue projet…"
+    VUE_PROJET()
   cas choix = "Vue blueprint du fichier courant"
     BLUEPRINT_BASCULER()
   cas choix = "Nouveau formulaire pour le fichier courant…"
@@ -171,7 +173,7 @@ procedure MENU(ev)
   cas choix = "Référence des fonctions et paquets"
     AFFICHER_OUTILS(3)
   cas choix = "À propos"
-    ui.alerte("wdlexis+ [S]tudio 1.8.6\nAtelier du langage Lexis+\n" +
+    ui.alerte("wdlexis+ [S]tudio 1.9.2\nAtelier du langage Lexis+\n" +
               "Développez naturellement vos applications métier\n\n" +
               "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
               "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" +
@@ -195,8 +197,13 @@ fonction RACCOURCIS()
     "F11 pas à pas                            Maj+F11 sortir de la procédure", ;
     "Maj+F5 arrêter", ;
     "", ;
-    "Vue blueprint (clic sur la pastille rouge d'un onglet)", ;
+    "Fenêtre Blueprint (clic sur la pastille rouge d'un onglet)", ;
     "Glisser depuis la palette, relier les broches   Suppr supprimer la sélection", ;
     "Ctrl+Z/Y annuler, rétablir                      F ou Origine tout voir", ;
-    "Double-clic sur l'icône fichier d'un appel : la procédure s'ouvre en blueprint"}
+    "Double-clic sur l'icône fichier d'un appel : la procédure s'ouvre en blueprint", ;
+    "Ctrl+Tab fichier suivant ; << / >> palette des entités, fenêtre dédiée", ;
+    "", ;
+    "Vue projet (Conception > Vue projet…)", ;
+    "Une colonne par fichier ; clic : appels (orange) et appelants (vert)", ;
+    "Double-clic : ouvrir le code à la définition"}
 retourner joindre(l, car(10))

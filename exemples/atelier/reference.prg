@@ -88,7 +88,7 @@ fonction BIENVENUE_REFERENCE()
   locale md = {"### Référence", "", ;
                "Sélectionnez un **paquet** ou une **fonction** dans l'arbre ci-dessus pour afficher sa fiche.", "", ;
                "- Le champ de recherche filtre l'arbre (nom, paquet ou mots de la description).", ;
-               "- Double-clic sur une fonction : insérer l'appel dans l'éditeur, ou un nœud dans la vue blueprint."}
+               "- Double-clic sur une fonction : insérer l'appel dans l'éditeur (fenêtre Blueprint : glisser depuis sa palette)."}
 retourner joindre(md, car(10))
 
 procedure REFERENCE(ev)
@@ -116,12 +116,9 @@ procedure INSERER_REFERENCE(ev)
   si d = nul
     retourner
   finsi
-  si vb:actif()
-    vb:inserer(d.signature)         && vue blueprint : nouveau nœud au centre de la vue
-  sinon
+  && (dans la fenêtre Blueprint, la palette des entités propose les mêmes fonctions)
     ed:inserer(MODELE_APPEL(d.signature))
     ed:focus()
-  finsi
 retourner
 
 fonction MODELE_APPEL(sig)
@@ -285,7 +282,7 @@ fonction FICHE(d)
   inserer(md, "---")
   inserer(md, "> **Disponibilité** : " + DISPONIBILITE(d.paquet))
   inserer(md, "")
-  inserer(md, "*Double-clic dans l'arbre : insérer l'appel (un nœud dans la vue blueprint).*")
+  inserer(md, "*Double-clic dans l'arbre : insérer l'appel dans l'éditeur (fenêtre Blueprint : glisser depuis sa palette).*")
 retourner joindre(md, car(10))
 
 fonction FICHE_PAQUET(nom)

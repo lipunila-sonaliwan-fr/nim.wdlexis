@@ -51,8 +51,220 @@ proc statTable(path: string): Value =
           "modifie": intV(info.lastWriteTime.toUnix),
           "cree": intV(info.creationTime.toUnix)})
 
+# Lecture par blocs (fichiers de plusieurs dizaines de gigaoctets) : on ne charge
+# jamais le fichier entier ; les positions sont des octets à partir de 0.
+
+const ScanChunk = 4 * 1024 * 1024
+
+proc fileSizeOf(path: string): int64 =
+  try: getFileSize(path) except OSError: -1
+
+proc readRange(f: File, pos: int64, n: int): string =
+  result = newString(max(0, n))
+  if n <= 0: return
+  f.setFilePos(pos)
+  let got = f.readBuffer(result[0].addr, n)
+  result.setLen(got)
+
+proc utf8Back(s: string, i: int): int =
+  ## Recule `i` jusqu'au début d'un caractère UTF-8 (au plus 3 octets).
+  result = i
+  var k = 0
+  while result > 0 and result < s.len and (ord(s[result]) and 0xC0) == 0x80 and k < 3:
+    dec result
+    inc k
+
+proc cleanUtf8(s: string, cut: int, cuts: var int): string =
+  ## Remplace les octets invalides par U+FFFD et NUL par « · » ; coupe les lignes plus
+  ## longues que `cut` octets (0 : jamais) en insérant des retours à la ligne.
+  result = newStringOfCap(s.len + s.len div 64)
+  var i = 0
+  var lineLen = 0
+  let n = s.len
+  while i < n:
+    let c = ord(s[i])
+    var l = 0
+    if c < 0x80: l = 1
+    elif (c and 0xE0) == 0xC0 and c >= 0xC2: l = 2
+    elif (c and 0xF0) == 0xE0: l = 3
+    elif (c and 0xF8) == 0xF0 and c <= 0xF4: l = 4
+    var ok = l > 0 and i + l <= n
+    if ok:
+      for k in 1 ..< l:
+        if (ord(s[i + k]) and 0xC0) != 0x80:
+          ok = false
+          break
+    if cut > 0 and lineLen >= cut and c != 10:
+      result.add '\n'
+      inc cuts
+      lineLen = 0
+    if not ok:
+      result.add "\xEF\xBF\xBD"
+      inc i
+      inc lineLen
+      continue
+    if c == 0:
+      result.add "\xC2\xB7"            # NUL -> « · » (fichiers binaires, zones creuses)
+    elif c == 10:
+      result.add '\n'
+      lineLen = -1
+    else:
+      for k in 0 ..< l: result.add s[i + k]
+    i += l
+    inc lineLen
+
+proc readBlock(L: Interp, a: seq[Value]): seq[Value] =
+  let path = L.checkStr(a, 1, "lirebloc")
+  let size = fileSizeOf(path)
+  if size < 0: return fail(path & " : lecture impossible")
+  var pos = int64(L.checkNum(a, 2, "lirebloc"))
+  let want = max(1, int(L.checkNum(a, 3, "lirebloc")))
+  let o = if arg(a, 4).kind == vkTable: a[3].t else: nil
+  let byLines = optField(o, "lignes", true)
+  let asText = optField(o, "texte", true)
+  let cut = optField(o, "coupe", 0)
+  pos = clamp(pos, 0'i64, size)
+  var f: File
+  if not open(f, path, fmRead): return fail(path & " : lecture impossible")
+  defer: f.close()
+  var data: string
+  var start = pos
+  try:
+    # un octet avant pour savoir si pos est en début de ligne
+    let before = if pos > 0 and byLines: f.readRange(pos - 1, 1) else: ""
+    data = f.readRange(pos, int(min(int64(want), size - pos)))
+    var a0 = 0
+    if byLines and before.len == 1 and before[0] != '\n':
+      let k = data.find('\n')
+      if k >= 0 and k + 1 < data.len: a0 = k + 1
+      elif k < 0: a0 = utf8Back(data, 0)
+    var z = data.len
+    if pos + int64(data.len) < size:
+      if byLines:
+        let k = data.rfind('\n')
+        if k >= a0: z = k + 1
+        else: z = utf8Back(data, data.len - 1)
+      else:
+        z = utf8Back(data, data.len - 1)
+    elif data.len > 0 and z < data.len: discard
+    if a0 > 0 or z < data.len: data = data[a0 ..< max(a0, z)]
+    start = pos + int64(a0)
+  except IOError, OSError:
+    return fail(path & " : lecture impossible")
+  let nl = data.count('\n')
+  let nuls = data.count('\0')
+  var cuts = 0
+  let txt = if asText: cleanUtf8(data, cut, cuts) else: data
+  @[record({"texte": strV(txt), "debut": intV(start), "fin": intV(start + int64(data.len)),
+            "lignes": intV(nl), "taille": intV(size), "coupees": intV(cuts), "nuls": intV(nuls)})]
+
+proc countLinesIn(L: Interp, a: seq[Value]): seq[Value] =
+  let path = L.checkStr(a, 1, "compterlignes")
+  let size = fileSizeOf(path)
+  if size < 0: return fail(path & " : lecture impossible")
+  let pos = clamp(int64(L.optNum(a, 2, "compterlignes", 0)), 0'i64, size)
+  let lenArg = arg(a, 3)
+  let stop = if lenArg.kind == vkNil: size else: clamp(pos + int64(L.checkNum(a, 3, "compterlignes")), pos, size)
+  var f: File
+  if not open(f, path, fmRead): return fail(path & " : lecture impossible")
+  defer: f.close()
+  var n = 0
+  var p = pos
+  var buf = newString(ScanChunk)
+  f.setFilePos(p)
+  while p < stop:
+    let want = int(min(int64(ScanChunk), stop - p))
+    let got = f.readBuffer(buf[0].addr, want)
+    if got <= 0: break
+    for i in 0 ..< got:
+      if buf[i] == '\n': inc n
+    p += int64(got)
+  @[intV(n)]
+
+proc lineOffset(L: Interp, a: seq[Value]): seq[Value] =
+  ## Position (octet) du début de la ligne `ligne` (à partir de 1), en partant d'un point
+  ## connu {octet, ligne} ; nul au-delà de la fin du fichier.
+  let path = L.checkStr(a, 1, "positionligne")
+  let target = int64(L.checkNum(a, 2, "positionligne"))
+  var p = int64(L.optNum(a, 3, "positionligne", 0))
+  var line = int64(L.optNum(a, 4, "positionligne", 1))
+  let size = fileSizeOf(path)
+  if size < 0: return fail(path & " : lecture impossible")
+  if target < line: return @[nilV]
+  if target == line: return @[intV(p)]
+  var f: File
+  if not open(f, path, fmRead): return fail(path & " : lecture impossible")
+  defer: f.close()
+  var buf = newString(ScanChunk)
+  f.setFilePos(p)
+  while p < size:
+    let got = f.readBuffer(buf[0].addr, int(min(int64(ScanChunk), size - p)))
+    if got <= 0: break
+    for i in 0 ..< got:
+      if buf[i] == '\n':
+        inc line
+        if line == target: return @[intV(p + int64(i) + 1)]
+    p += int64(got)
+  @[nilV]
+
+proc searchFile(L: Interp, a: seq[Value]): seq[Value] =
+  ## fichier.rechercher(chemin, motif, [debut], [{casse=, arriere=, limite=}])
+  ## -> {position (nul si absent de la zone parcourue), suite (où reprendre, nul à la fin)}.
+  let path = L.checkStr(a, 1, "rechercher")
+  var pat = L.checkStr(a, 2, "rechercher")
+  if pat.len == 0: return fail("rechercher : motif vide")
+  let size = fileSizeOf(path)
+  if size < 0: return fail(path & " : lecture impossible")
+  let o = if arg(a, 4).kind == vkTable: a[3].t else: nil
+  let matchCase = optField(o, "casse", false)
+  let backward = optField(o, "arriere", false)
+  let limit = int64(optField(o, "limite", 0.0))
+  var pos = clamp(int64(L.optNum(a, 3, "rechercher", (if backward: float(size) else: 0.0))), 0'i64, size)
+  if not matchCase: pat = pat.toLowerAscii
+  var f: File
+  if not open(f, path, fmRead): return fail(path & " : lecture impossible")
+  defer: f.close()
+  let ov = pat.len - 1
+  var scanned = 0'i64
+  try:
+    if not backward:
+      var p = pos
+      while p < size:
+        let n = int(min(int64(ScanChunk + ov), size - p))
+        var buf = f.readRange(p, n)
+        if not matchCase: buf = buf.toLowerAscii
+        let k = buf.find(pat)
+        if k >= 0: return @[record({"position": intV(p + int64(k)), "suite": intV(p + int64(k) + 1)})]
+        if p + int64(n) >= size: break
+        p += int64(ScanChunk)
+        scanned += int64(ScanChunk)
+        if limit > 0 and scanned >= limit:
+          return @[record({"position": nilV, "suite": intV(p)})]
+      return @[record({"position": nilV, "suite": nilV})]
+    else:
+      var z = pos                         # fin exclue de la zone à examiner
+      while z > 0:
+        let st = max(0'i64, z - int64(ScanChunk))
+        let n = int(min(size, z + int64(ov)) - st)
+        var buf = f.readRange(st, n)
+        if not matchCase: buf = buf.toLowerAscii
+        var k = buf.rfind(pat)
+        while k >= 0 and st + int64(k) >= z: k = (if k == 0: -1 else: buf.rfind(pat, last = k - 1))
+        if k >= 0: return @[record({"position": intV(st + int64(k)), "suite": intV(st + int64(k))})]
+        z = st
+        scanned += int64(ScanChunk)
+        if limit > 0 and scanned >= limit and z > 0:
+          return @[record({"position": nilV, "suite": intV(z)})]
+      return @[record({"position": nilV, "suite": nilV})]
+  except IOError, OSError:
+    return fail(path & " : lecture impossible")
+
 proc openFichier(L: Interp): Value =
   let m = newLib()
+  m.fn "lirebloc", proc (L: Interp, a: seq[Value]): seq[Value] = readBlock(L, a)
+  m.fn "compterlignes", proc (L: Interp, a: seq[Value]): seq[Value] = countLinesIn(L, a)
+  m.fn "positionligne", proc (L: Interp, a: seq[Value]): seq[Value] = lineOffset(L, a)
+  m.fn "rechercher", proc (L: Interp, a: seq[Value]): seq[Value] = searchFile(L, a)
   m.fn "lire", proc (L: Interp, a: seq[Value]): seq[Value] = readText(L.checkStr(a, 1, "lire"))
   m.fn "lireoctets", proc (L: Interp, a: seq[Value]): seq[Value] = readText(L.checkStr(a, 1, "lireoctets"))
   m.fn "ecrire", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -165,7 +377,11 @@ registerPackage PackageDef(name: "fichier", open: openFichier,
     "fichier.dossier(chemin)", "Dossier parent.", "fichier.extension(chemin)", "Extension.",
     "fichier.absolu(chemin)", "Chemin absolu.",
     "fichier.dossiertemp()", "Dossier temporaire.", "fichier.dossierperso()", "Dossier personnel.",
-    "fichier.proteger(chemin)", "Réserve le fichier à son propriétaire (droits 0600 sous Linux et macOS)."]))
+    "fichier.proteger(chemin)", "Réserve le fichier à son propriétaire (droits 0600 sous Linux et macOS).",
+    "fichier.lirebloc(chemin, position, taille, [{lignes=, texte=, coupe=}])", "Lit au plus taille octets à partir de position (octets, à partir de 0) sans charger le fichier : {texte, debut, fin, lignes, taille, coupees, nuls}. lignes = vrai (défaut) : le bloc commence et finit sur des débuts de ligne ; texte = vrai (défaut) : UTF-8 assaini (octets invalides -> U+FFFD, NUL -> « · ») ; nuls : nombre d'octets nuls (fichier binaire) ; coupe = n : lignes de plus de n octets coupées.",
+    "fichier.compterlignes(chemin, [debut], [longueur])", "Nombre de fins de ligne dans une zone du fichier (lecture par blocs de 4 Mo).",
+    "fichier.positionligne(chemin, ligne, [octet], [ligne_de_depart])", "Position (octet) du début d'une ligne, en partant d'un point connu (défaut : début du fichier, ligne 1) ; nul au-delà de la fin.",
+    "fichier.rechercher(chemin, motif, [debut], [{casse=, arriere=, limite=}])", "Cherche un texte dans un fichier de toute taille : {position (nul si absent de la zone parcourue), suite (où reprendre, nul à la fin)} ; limite : octets parcourus au plus par appel (recherche progressive)."]))
 
 #
 # binaire : coder / decoder

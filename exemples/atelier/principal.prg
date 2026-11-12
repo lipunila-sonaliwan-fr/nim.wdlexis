@@ -7,7 +7,8 @@
 &&   principal.prg   les deux fenêtres (outils, documents), réglages, démarrage
 &&   projet.prg      projet, fichiers, session
 &&   edition.prg     analyse, problèmes, structure, recherche, définition,
-&&                   pastilles des onglets et vue blueprint
+&&                   pastilles des onglets et fenêtre Blueprint
+&&   vueprojet.prg   vue projet : graphe du projet, une colonne par fichier
 &&   execution.prg   exécution, débogage, console, variables, pile d'appels
 &&   reference.prg   référence des fonctions et paquets (fiches Markdown)
 &&   generation.prg  boîte « Générer l'application » (outil wdlexisgen)
@@ -16,7 +17,7 @@
 &&   menus.prg       menus, raccourcis, aide
 &&   panneaux.prg    ensembles de pages : masquer / afficher, fenêtre dédiée
 &&
-&& L'éditeur (ui.editeur), sa vue blueprint (ui.blueprint), l'analyse et
+&& L'éditeur (ui.editeur), sa fenêtre Blueprint (ui.blueprint), l'analyse et
 && l'exécution (paquet lexis) sont natifs ; tout le reste est ici.
 ui = paquet("interface")
 
@@ -43,6 +44,12 @@ concode = ""            && fichier de code qui reçoit les procédures du formul
 etdlg = nul             && fenêtre de l'éditeur d'états
 etcanevas = nul         && son canevas (ui.etat)
 etctl = {}              && ses autres contrôles
+vpfen = nul             && fenêtre « Vue projet » (vueprojet.prg)
+vpdia = nul             && son diagramme
+vpetat = nul            && sa barre d'état
+vpinfos = {}            && fichier, ligne et détails de chaque nœud
+vpliens = {}            && liens d'appel affichés {id, de, a, croise}
+vpappels = vrai         && liens d'appel affichés ou masqués
 outils = nul            && fenêtre principale une fois l'ensemble Projet / Structure / Référence construit
 fenpdf = {}             && fenêtres de consultation PDF ouvertes
 ensembles = {}          && ensembles de pages (panneaux.prg) : GAUCHE, BAS, PALETTE, PALETTEETAT
@@ -53,7 +60,7 @@ varchoisie = nul        && rang de la variable choisie
 && Une fenêtre compacte : menu et barre de symboles collés en haut, état collé en bas ;
 && à gauche Projet / Structure / Référence, en bas Problèmes / Console / Variables /
 && Pile d'appels (chaque ensemble se masque << >> ou s'ouvre dans une fenêtre dédiée).
-fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.8.6", largeur = 1500, hauteur = 900, disposition = "bordure", ;
+fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.9.2", largeur = 1500, hauteur = 900, disposition = "bordure", ;
                  sombre = reglages.sombre, densite = "compacte", x = 40, y = 40}
 fen.marge = 0
 fen.espacement = 0
@@ -112,13 +119,13 @@ hotegauche.marge = 0
 CONSTRUIRE_OUTILS()
 
 && documents (un onglet par document, pastille de couleur selon sa nature :
-&& rouge code, orange formulaire, jaune état, bleu blueprint, vert aperçu Markdown,
-&& violet image), puis Problèmes / Console / Variables / Pile d'appels
+&& rouge code, orange formulaire, jaune état, vert aperçu Markdown, violet image ;
+&& la pastille rouge ouvre la fenêtre Blueprint), puis Problèmes / Console / Variables / Pile d'appels
 cotedroit = sepg:ajouter(ui.separateur{vertical = faux, position = 0.72})
 ed = ui.editeur{minicarte = reglages.minicarte, taille = reglages.police}
 ed.surchangement = @MODIFIE
 ed.surselection = @SIGNAL
-vb = cotedroit:ajouter(ui.blueprint(ed, {sombre = reglages.sombre}))   && éditeur + vue blueprint
+vb = cotedroit:ajouter(ui.blueprint(ed, {sombre = reglages.sombre, densite = "compacte"}))   && éditeur (+ fenêtre Blueprint)
 vb.surselection = @SIGNAL_BLUEPRINT
 
 hotebas = cotedroit:ajouter(ui.conteneur("bordure"))
@@ -210,8 +217,7 @@ fonction FICHIER_REGLAGES()
 retourner fichier.joindre(fichier.dossierperso(), ".wdlexis-atelier.json")
 
 fonction LIRE_REGLAGES()
-  locale r = {sombre = vrai, minicarte = vrai, police = 14, globales = vrai, appelsinconnus = vrai, projet = "", ;
-              gauchemasque = faux, basmasque = faux}
+  locale r = {sombre = vrai, minicarte = vrai, police = 14, globales = vrai, appelsinconnus = vrai, projet = "", gauchemasque = faux, basmasque = faux}
   locale p = FICHIER_REGLAGES()
   si fichier.existe(p)
     essayer
@@ -323,6 +329,10 @@ procedure FERMETURE(ev)
   si condlg <> nul
     condlg:fermer()
   finsi
+  si vpfen <> nul
+    vpfen:fermer()
+  finsi
+  vb:fermer()               && fenêtre Blueprint
   si etdlg <> nul
     etdlg:fermer()
   finsi

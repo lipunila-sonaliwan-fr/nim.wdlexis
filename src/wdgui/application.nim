@@ -220,7 +220,9 @@ proc applyStateRequest(f: Window) =
   let full = (SDL_GetWindowFlags(w) and SDL_WINDOW_FULLSCREEN) != 0
   if f.stateRequest != wsFullscreen and full: discard SDL_SetWindowFullscreen(w, false)
   case f.stateRequest
-  of wsNormal: discard SDL_RestoreWindow(w)
+  of wsNormal:
+    discard SDL_RestoreWindow(w)
+    discard SDL_RaiseWindow(w)           # « restaurer » ramène aussi la fenêtre au premier plan
   of wsMaximized: discard SDL_MaximizeWindow(w)
   of wsMinimized: discard SDL_MinimizeWindow(w)
   of wsFullscreen: discard SDL_SetWindowFullscreen(w, true)
@@ -239,6 +241,10 @@ proc destroyWindow(f: Window) =
     if f.drawing != nil: f.drawing.dispose()
     SDL_DestroyRenderer(f.sdlRen)
     SDL_DestroyWindow(f.sdlWin)
+    # fenêtre rattachée (boîte, palette) : le clavier revient à sa fenêtre parente.
+    let owner = f.modalFor
+    if owner != nil and owner.sdlWin != nil and owner.opened and not owner.closeRequested:
+      discard SDL_RaiseWindow(owner.sdlWin)
   f.sdlWin = nil
   f.sdlRen = nil
   f.drawing = nil

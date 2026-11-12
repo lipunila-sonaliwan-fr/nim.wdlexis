@@ -11,17 +11,22 @@
 #   nœud sélectionné (ou sur sa première entrée libre pour une expression).
 # * Détails : propriétés du nœud sélectionné (nom, cible, valeurs saisies sur
 #   les broches, mode instruction / expression...).
-# * DocHost : superpose la vue à l'éditeur de code quand l'onglet actif est une
-#   vue blueprint (pastille bleue) ; la barre d'onglets reste celle de l'éditeur.
+# * Fenêtre « Blueprint » (comme les fenêtres Concepteur) : barre d'outils à
+#   symboles, liste des fichiers ouverts en blueprint, palette des entités à
+#   gauche (affichée, masquée ou détachée dans sa propre fenêtre : DockPane),
+#   canevas au centre, détails à droite, barre d'état en bas.
+# * DocHost : l'éditeur de code et ses vues aperçu (Markdown) et image.
 #
 # Chaque modification du graphe régénère le code du document représenté
 # (bpmodel.generate : seules les instructions touchées sont réécrites) ; une
-# modification du code dans son onglet est reprise à l'activation de la vue.
+# modification du code dans l'éditeur est reprise par bpFollow (et à
+# l'activation de la fenêtre). La vue d'un fichier est identifiée par l'uid de
+# son document de code.
 
-import std/[strutils, tables, sets, math, os, algorithm, unicode, locks]
+import std/[strutils, tables, sets, math, os, algorithm, unicode, locks, atomics, times]
 import ../sdl3
 import ../wdgui
-import bpmodel, codeeditor, langdocs, compat
+import bpmodel, codeeditor, langdocs, compat, dockpane
 export bpmodel
 
 const
@@ -94,9 +99,6 @@ type
 
   DocHost* = ref object of Container
     editor*: CodeEditor
-    pane*: Container
-    canvas*: BpCanvas
-    lastBp: int
     viewer*: Container           # vue aperçu (Markdown) ou image, superposée au corps de l'éditeur.
     mdView*: MarkdownView
     imgBox*: Container
@@ -111,7 +113,15 @@ var
   bpCommand*: proc (cmd: string) {.nimcall, gcsafe.}               # raccourcis (cmd:save, cmd:run...)
   bpLocate*: proc (name: string): tuple[path: string, line: int] {.nimcall, gcsafe.}  # définition dans le projet
   bpOpenEntity*: proc (name: string) {.nimcall, gcsafe.}           # ouvrir la procédure (autre fichier) en blueprint
+  bpWindowClosed*: proc () {.nimcall, gcsafe.}                     # fenêtre Blueprint fermée
   hostId, canvasId, paletteId, searchId, detailsId, editorId, infoId: ControlId
+  bpWin, bpStatusId, bpComboId: ControlId                          # fenêtre Blueprint (0 : fermée)
+  bpPane: DockPane                                                 # palette des entités (gauche)
+  bpWinOpen: bool
+  bpComboUids: seq[int]                                            # fichiers listés dans la liste déroulante
+  bpSavedDocs: Table[int, BpDoc]                                   # vues conservées après fermeture
+  bpProjectProcs: seq[string]
+  bpHostMade: bool
   toolIds: seq[tuple[id: ControlId, cmd: string]]
   detailRows: seq[tuple[id: ControlId, action: string]]
   multilineIds: seq[ControlId]
@@ -122,6 +132,10 @@ var detailsLock: Lock
 initLock(detailsLock)
 
 proc status(msg: string) =
+  {.cast(gcsafe).}:
+    var sid: ControlId
+    guarded: sid = bpStatusId
+    if int(sid) != 0: sid.caption = msg
   if bpStatus != nil:
     {.cast(gcsafe).}: bpStatus(msg)
 
@@ -1307,13 +1321,8 @@ method onKey*(c: BpCanvas, e: KeyEvent): bool =
   if shortcut.len > 0:
     emit(c, evSelection, text = shortcut)
     return true
-  if ctrl and k == KTab and c.editor != nil and c.editor.docs.len > 1:
-    let ed = c.editor
-    var i = 0
-    for j, d in ed.docs:
-      if d.uid == c.cur: i = j
-    let nxt = (i + (if shift: ed.docs.len - 1 else: 1)) mod ed.docs.len
-    editorActivate(ed.id, ed.docs[nxt].uid)
+  if ctrl and k == KTab and c.docs.len > 1:
+    emit(c, evSelection, text = (if shift: "bp:prev" else: "bp:next"))   # fichier suivant / précédent
     return true
   let editable = doc.g.error.len == 0
   if ctrl and (k == ord('z') or k == ord('y')):
@@ -1607,81 +1616,20 @@ method layoutChildren*(h: DocHost, d: Drawing, t: Theme) =
       h.viewer.activePage = 1
     h.viewKey = key
     layoutControl(h.viewer, rect(r.x, r.y + EditorTabBarH, r.w, max(0.0, r.h - EditorTabBarH)), d, t)
-  let isBp = doc != nil and doc.kind == dkBlueprint
-  h.pane.visible = isBp
-  if isBp:
-    h.canvas.cur = doc.uid
-    layoutControl(h.pane, rect(r.x, r.y + EditorTabBarH, r.w, max(0.0, r.h - EditorTabBarH)), d, t)
-  let now = if isBp: doc.uid else: -1
-  if now != h.lastBp and h.win != nil:
-    if isBp: setFocusInternal(h.win, h.canvas)
-    elif h.win.focusedControl != nil:
-      var p = h.win.focusedControl
-      var inside = false
-      while p != nil:
-        if p == h.pane: inside = true
-        p = p.parent
-      if inside: setFocusInternal(h.win, h.editor)
-  h.lastBp = now
 
 method typeName*(h: DocHost): string = "DocHost"
 
 method preferredSize*(h: DocHost, d: Drawing, t: Theme): tuple[w, h: float] = (600.0, 400.0)
 
 proc newDocHost*(editor: CodeEditor, theme: Theme): DocHost =
-  # Éditeur de code + vue blueprint (barre d'outils, palette, canevas, détails).
-  result = DocHost(layout: lkAbsolute, margin: 0, spacing: 0, lastBp: -1, editor: editor)
+  # Éditeur de code et ses vues aperçu (Markdown) et image ; la vue blueprint
+  # s'ouvre dans sa propre fenêtre (bpShow).
+  result = DocHost(layout: lkAbsolute, margin: 0, spacing: 0, editor: editor)
   initControl(result)
   editor.kindDots = true
   discard result.addChild(editor)
-  let pane = newContainer(lkBorder, 0, 0)
-  result.pane = pane
-  discard result.addChild(pane)
-  pane.visible = false
-  # barre d'outils
-  let tb = pane.addChild(newToolbar())
-  tb.dock = dkTop
-  toolIds.setLen(0)
-  for (caption, cmd, tip) in [("Voir le code", "code", "Revenir à l'onglet du code (ou cliquer la pastille bleue)"),
-                              ("Annuler", "undo", "Ctrl+Z"), ("Rétablir", "redo", "Ctrl+Y"),
-                              ("Supprimer", "delete", "Suppr : supprime les nœuds sélectionnés"),
-                              ("Réorganiser", "layout", "Mise en page automatique du graphe"),
-                              ("Tout voir", "fit", "F ou Origine : ajuste le zoom au graphe (ou au nœud sélectionné)"),
-                              ("Zoom −", "zoomout", "Ctrl+molette ou Ctrl+-"), ("Zoom +", "zoomin", "Ctrl+molette ou Ctrl++"),
-                              ("Recharger", "reload", "Relit le code de l'onglet (positions conservées si possible)"),
-                              ("Tout plier", "foldall", "Plie toutes les procédures (leurs appels partent alors de la procédure)"),
-                              ("Tout déplier", "unfoldall", "Déplie toutes les procédures"),
-                              ("Appels", "calls", "Affiche ou masque les liens d'appel entre procédures (pointillés)")]:
-    let b = tb.addTool(caption, tip)
-    toolIds.add (b.id, cmd)
-  let info = tb.addChild(newLabel("  glisser depuis la palette · relier les broches · clic droit : menu"))
-  info.weight = 1
-  info.style.text = some(theme.textSecondary)
-  infoId = info.id
-  # palette
-  let canvas = newBpCanvas()
-  canvas.editor = editor
-  result.canvas = canvas
-  let left = pane.addChild(newContainer(lkBorder, 4, 4))
-  left.dock = dkLeft
-  left.fixedWidth = PaletteW
-  let search = left.addChild(newEdit(placeholder = "Rechercher (fonction, paquet…)"))
-  search.dock = dkTop
-  searchId = search.id
-  let pal = newBpPalette(canvas)
-  pal.dock = dkCenter
-  discard left.addChild(pal)
-  paletteId = pal.id
-  # détails
-  let right = pane.addChild(newPanel(lkVertical, smAlways, 8, 6))
-  right.dock = dkRight
-  right.fixedWidth = DetailsW
-  detailsId = right.id
-  # canevas
-  canvas.dock = dkCenter
-  discard pane.addChild(canvas)
-  canvasId = canvas.id
   editorId = editor.id
+  bpHostMade = true
   # vues aperçu Markdown et image (onglets dkPreview / dkImage).
   let viewer = newContainer(lkStack, 0, 0)
   result.viewer = viewer
@@ -1714,7 +1662,7 @@ proc bpCanvasId*(): ControlId = canvasId
 
 proc bpHostInUse*(): bool =
   # Vrai si une vue blueprint a déjà été créée dans ce processus (l'état est global).
-  int(canvasId) != 0
+  bpHostMade
 
 proc bpIsLoaded*(bpUid: int): bool =
   readControl(canvasId, BpCanvas, c): result = bpUid in c.docs
@@ -1814,6 +1762,7 @@ proc bpSync*() =
     {.cast(gcsafe).}: bpCodeChanged(src)
 
 proc bpSetProjectProcs*(names: seq[string]) =
+  guarded: bpProjectProcs = names
   withControl(paletteId, BpPalette, p):
     if p.projectProcs != names:
       p.projectProcs = names
@@ -2188,7 +2137,9 @@ proc toolCommand(cmd: string) =
     else: discard
   case cmd
   of "code":
-    if src >= 0: editorActivate(editorId, src)
+    if src >= 0:
+      editorActivate(editorId, src)
+      setWindowState(windowOf(editorId), wsNormal)    # l'atelier au premier plan
   of "reload":
     if src >= 0:
       var bp = -1
@@ -2285,6 +2236,287 @@ proc bpHandleEvent*(ev: var Event): bool =
     if action in pendingValues: applyDetail(action, pendingValues[action])
   else: discard
   true
+
+
+#
+# Fenêtre Blueprint (même ergonomie que les fenêtres Concepteur)
+#
+
+proc docTitle(uid: int): string =
+  let info = editorInfo(editorId, uid)
+  result = if info.title.len > 0: info.title else: "sans titre"
+
+proc refreshWindow() =
+  # Titre de la fenêtre et liste des fichiers ouverts en blueprint.
+  var cur = -1
+  var uids: seq[int]
+  var win, combo: ControlId
+  readControl(canvasId, BpCanvas, c):
+    cur = c.cur
+    for k in c.docs.keys: uids.add k
+  guarded:
+    win = bpWin
+    combo = bpComboId
+  if int(win) == 0: return
+  uids.sort(proc (a, b: int): int = cmp(docTitle(a).toLower, docTitle(b).toLower))
+  win.caption = "Blueprint - " & (if cur in uids: docTitle(cur) else: "aucun fichier")
+  var same = false
+  guarded: same = bpComboUids == uids
+  if not same:
+    listDeleteAll(combo)
+    for u in uids: discard listAdd(combo, docTitle(u))
+    guarded: bpComboUids = uids
+  let i = uids.find(cur)
+  if i >= 0 and listSelect(combo) != i + 1: listSelectPlus(combo, i + 1)
+
+proc bpWindowHandler(ev: var Event) {.nimcall, gcsafe.}
+
+proc buildWindow(theme: Theme) =
+  # Fenêtre : barre d'outils (symboles, libellés en infobulle), fichiers ouverts,
+  # palette des entités à gauche (DockPane), canevas, détails, barre d'état.
+  guarded:
+    let win = newWindow("Blueprint", 1320, 820, bpWindowHandler, theme, lkBorder)
+    win.root.margin = 0
+    win.root.spacing = 0
+    bpWin = win.id
+    bpWinOpen = true
+    let tb = win.addChild(newToolbar())
+    tb.dock = dkTop
+    tb.margin = 2
+    tb.spacing = 2
+    toolIds.setLen(0)
+    for (icon, caption, cmd, tip) in [
+        ("code", "Voir le code", "code", "Affiche le code dans l'atelier"),
+        ("k-undo", "Annuler", "undo", "Ctrl+Z"), ("k-redo", "Rétablir", "redo", "Ctrl+Y"),
+        ("supprimer", "Supprimer", "delete", "Suppr : supprime les nœuds sélectionnés"),
+        ("k-graph", "Réorganiser", "layout", "Mise en page automatique du graphe"),
+        ("ajuster", "Tout voir", "fit", "F ou Origine : ajuste le zoom au graphe (ou au nœud sélectionné)"),
+        ("zoommoins", "Zoom −", "zoomout", "Ctrl+molette ou Ctrl+-"),
+        ("zoomplus", "Zoom +", "zoomin", "Ctrl+molette ou Ctrl++"),
+        ("actualiser", "Recharger", "reload", "Relit le code (positions conservées si possible)"),
+        ("moins", "Tout plier", "foldall", "Plie toutes les procédures (leurs appels partent alors de la procédure)"),
+        ("plus", "Tout déplier", "unfoldall", "Déplie toutes les procédures"),
+        ("k-link", "Appels", "calls", "Affiche ou masque les liens d'appel entre procédures (pointillés)")]:
+      let b = tb.iconTool(icon, caption, tip)
+      toolIds.add (b.id, cmd)
+    tb.toolSeparator()
+    let combo = tb.addChild(newComboBox())
+    combo.fixedWidth = 220
+    combo.tooltip = "Fichiers ouverts en blueprint (Ctrl+Tab : suivant)"
+    bpComboId = combo.id
+    bpComboUids.setLen(0)
+    let info = tb.addChild(newLabel("  glisser depuis la palette · relier les broches · clic droit : menu"))
+    info.weight = 1
+    info.style.text = some(theme.textSecondary)
+    infoId = info.id
+    let bToggle = tb.iconTool("masquer", "Palette des entités", "")
+    let bDetach = tb.iconTool("fenetre", "Palette des entités", "")
+    # barre d'état.
+    let st = win.addChild(newLabel("Glisser depuis la palette · relier les broches · clic droit : menu · " &
+                                   "double-clic sur l'icône fichier : ouvre la procédure d'un autre fichier"))
+    st.dock = dkBottom
+    st.fixedHeight = 20
+    bpStatusId = st.id
+    # palette des entités (gauche) : recherche + palette, dans un DockPane.
+    let canvas = newBpCanvas()
+    for k, d in bpSavedDocs: canvas.docs[k] = d
+    bpSavedDocs.clear()
+    let left = win.addChild(newContainer(lkBorder, 0, 0))
+    left.dock = dkLeft
+    left.fixedWidth = PaletteW
+    let inner = left.addChild(newContainer(lkBorder, 4, 4))
+    inner.dock = dkCenter
+    let search = inner.addChild(newEdit(placeholder = "Rechercher (fonction, paquet…)"))
+    search.dock = dkTop
+    searchId = search.id
+    let pal = newBpPalette(canvas)
+    pal.projectProcs = bpProjectProcs
+    pal.dock = dkCenter
+    discard inner.addChild(pal)
+    paletteId = pal.id
+    bpPane = newDockPane("Palette des entités - blueprint", left, inner, bToggle, bDetach,
+                         bpWindowHandler, 280, 720)
+    # détails (droite).
+    let right = win.addChild(newPanel(lkVertical, smAlways, 8, 6))
+    right.dock = dkRight
+    right.fixedWidth = DetailsW
+    detailsId = right.id
+    # canevas.
+    canvas.dock = dkCenter
+    discard win.addChild(canvas)
+    canvasId = canvas.id
+    win.focusedControl = canvas
+    canvas.focus = true
+
+proc windowClosed() =
+  # Fenêtre Blueprint fermée (par l'utilisateur ou par programme : closeWindow
+  # n'émet pas evWindowClose) : les vues (positions, zoom, annulation) sont
+  # conservées pour la prochaine ouverture, la palette détachée se ferme.
+  var was = false
+  guarded:
+    was = bpWinOpen
+    bpWinOpen = false
+  if not was: return
+  readControl(canvasId, BpCanvas, c):
+    for k, d in c.docs: bpSavedDocs[k] = d
+  if bpPane != nil and bpPane.isDetached: closeWindow(bpPane.winId)
+  guarded:
+    bpWin = NoControl
+    bpStatusId = NoControl
+    bpComboId = NoControl
+    canvasId = NoControl
+    paletteId = NoControl
+    searchId = NoControl
+    detailsId = NoControl
+    infoId = NoControl
+    detailRows.setLen(0)
+    toolIds.setLen(0)
+    bpComboUids.setLen(0)
+  if bpWindowClosed != nil: bpWindowClosed()
+
+proc bpWindowOpen*(): bool =
+  guarded: result = bpWinOpen
+
+proc bpWindowIds*(): seq[ControlId] =
+  # Fenêtre Blueprint et palette détachée (changement de thème).
+  guarded:
+    if bpWinOpen: result.add bpWin
+  if bpPane != nil and bpPane.isDetached: result.add bpPane.winId
+
+proc bpCurrent*(): int =
+  # Document de code affiché dans la fenêtre Blueprint (-1 : aucun).
+  result = -1
+  if not bpWindowOpen(): return
+  readControl(canvasId, BpCanvas, c):
+    if c.cur in c.docs: result = c.cur
+
+proc bpSelect(uid: int) =
+  # Affiche la vue du fichier uid (déjà chargée), reprise du code s'il a changé.
+  if uid < 0: return
+  bpOpen(uid, uid, editorText(editorId, uid), editorInfo(editorId, uid).version)
+  withControl(canvasId, BpCanvas, c):
+    c.cur = uid
+    c.dropping = false
+  refreshWindow()
+  bpRebuildDetails()
+
+proc bpShow*(srcUid: int, theme: Theme): bool =
+  # Ouvre la fenêtre Blueprint (ou la ramène au premier plan) sur le code srcUid.
+  if srcUid < 0: return false
+  if not bpWindowOpen(): buildWindow(theme)
+  else:
+    var w: ControlId
+    guarded: w = bpWin
+    setWindowState(w, wsNormal)            # restaure et ramène au premier plan
+  bpSelect(srcUid)
+  setFocus(canvasId)
+  true
+
+proc bpFollow*(srcUid: int) =
+  # Code modifié dans l'éditeur : reprise par la vue de ce fichier si elle est chargée.
+  if not bpWindowOpen() or srcUid < 0: return
+  if not bpIsLoaded(srcUid): return
+  bpOpen(srcUid, srcUid, editorText(editorId, srcUid), editorInfo(editorId, srcUid).version)
+  if bpCurrent() == srcUid: bpRebuildDetails()
+
+var
+  followUid: Atomic[int]
+  followAt: Atomic[int64]           # échéance (ms) ; 0 : rien en attente
+  followThread: Thread[void]
+  followStarted: Atomic[bool]
+
+proc nowMs(): int64 = int64(epochTime() * 1000)
+
+proc followLoop() {.thread.} =
+  while true:
+    sleep(80)
+    let at = followAt.load()
+    if at != 0 and nowMs() >= at:
+      followAt.store(0)
+      {.cast(gcsafe).}: bpFollow(followUid.load())
+
+proc bpFollowLater*(srcUid: int, delayMs = 350) =
+  # Comme bpFollow, après une pause de la frappe (programmes Lexis+ : interface.blueprint).
+  if not bpWindowOpen() or srcUid < 0: return
+  followUid.store(srcUid)
+  followAt.store(nowMs() + delayMs)
+  var expected = false
+  if followStarted.compareExchange(expected, true):
+    createThread(followThread, followLoop)
+
+proc bpForget*(srcUid: int) =
+  # Fichier fermé dans l'atelier : sa vue disparaît (et la fenêtre s'il n'en reste aucune).
+  var left = -1
+  var empty = false
+  withControl(canvasId, BpCanvas, c):
+    if srcUid in c.docs:
+      c.docs.del(srcUid)
+      if c.cur == srcUid:
+        c.cur = -1
+        for k in c.docs.keys:
+          left = k
+          break
+    empty = c.docs.len == 0
+  guarded: bpSavedDocs.del(srcUid)
+  if not bpWindowOpen(): return
+  if empty:
+    var w: ControlId
+    guarded: w = bpWin
+    windowClosed()
+    guarded: bpSavedDocs.clear()
+    closeWindow(w)
+  elif left >= 0: bpSelect(left)
+  else: refreshWindow()
+
+proc bpCloseWindow*() =
+  var w: ControlId
+  var open = false
+  guarded:
+    open = bpWinOpen
+    w = bpWin
+  if open:
+    windowClosed()
+    closeWindow(w)
+
+proc cycleDoc(delta: int) =
+  var uids: seq[int]
+  var cur = -1
+  guarded: uids = bpComboUids
+  readControl(canvasId, BpCanvas, c): cur = c.cur
+  if uids.len < 2: return
+  let i = max(0, uids.find(cur))
+  bpSelect(uids[(i + delta + uids.len) mod uids.len])
+
+proc windowEvent(ev: var Event) =
+  if ev.kind == evWindowClose and bpPane != nil and bpPane.handleClose(ev.id): return
+  var win, combo: ControlId
+  guarded:
+    win = bpWin
+    combo = bpComboId
+  if ev.id == win:
+    case ev.kind
+    of evWindowClose: windowClosed()
+    of evWindowActivate:
+      let cur = bpCurrent()
+      if cur >= 0: bpFollow(cur)       # le code a pu changer dans l'atelier
+    else: discard
+    return
+  if ev.kind == evClick and bpPane != nil and bpPane.handleClick(ev.id): return
+  if ev.id == combo:
+    if ev.kind == evSelection:
+      var uids: seq[int]
+      guarded: uids = bpComboUids
+      let i = listSelect(combo) - 1
+      if i >= 0 and i < uids.len and uids[i] != bpCurrent(): bpSelect(uids[i])
+    return
+  if ev.id == canvasId and ev.kind == evSelection and ev.text in ["bp:next", "bp:prev"]:
+    cycleDoc(if ev.text == "bp:next": 1 else: -1)
+    return
+  discard bpHandleEvent(ev)
+
+proc bpWindowHandler(ev: var Event) {.nimcall, gcsafe.} =
+  if ev.current != ev.id: return
+  {.cast(gcsafe).}: windowEvent(ev)
 
 
 method dispose*(c: BpCanvas) =
