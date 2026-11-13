@@ -1,0 +1,19 @@
+.zip 4 zip
+  noms : projet/a.txt, projet/sous/b.prg
+  a.txt : 1400 inconnu : vrai
+  extraits : 1 ? 1
+.tar.gz 4 targz
+  noms : projet/a.txt, projet/sous/b.prg
+  a.txt : 1400 inconnu : vrai
+  extraits : 1 ? 1
+.tar 4 tar
+  noms : projet/a.txt, projet/sous/b.prg
+  a.txt : 1400 inconnu : vrai
+  extraits : 1 ? 1
+contient : vrai 2
+commentaire : test accentué vrai
+gzip : vrai vrai
+deflate : vrai zlib : vrai
+crc32 : 3421780262 adler32 : 300286872
+motifs : vrai vrai faux
+évasion refusée

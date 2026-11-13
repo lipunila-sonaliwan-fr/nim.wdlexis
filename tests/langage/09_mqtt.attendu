@@ -1,0 +1,7 @@
+accordé : 2 1,1
+reçus : maison/cuisine/t=19/2 | maison/salon/t=21/1/r | maison/x=z/0
+recevoir : file/1 un 1 faux
+correspond : vrai vrai faux faux
+clients : 3 connecté : vrai
+après : faux
+serveur actif : faux

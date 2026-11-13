@@ -43,6 +43,7 @@ propre dossier).
 | Rechercher, Remplacer, F3 / Ctrl+H, Aller à la ligne, F12 définition | oui (`ui.rechercher`, `ed:chercher`…) |
 | Police, minicarte, thème sombre / clair, options d'analyse | oui, conservés dans `~/.wdlexis-atelier.json` |
 | Session (fichiers ouverts), arguments, fichier principal | oui, dans `.wdlexis/atelier.json` du projet |
+| Fichier > Exporter le projet (archive)… / Importer un projet (archive)… : `.zip` ou `.tar.gz`, dossier de tête au nom du projet, sans fichiers cachés ni `distribution/` (réglages de génération gardés) ; l'import refuse d'écraser un projet existant puis ouvre le projet | oui (`projet.prg`, paquet `archive`) ; natif : `ide/projarchive.nim` |
 | Générer l'application, icône avec aperçu et cadrage (glisser le cadre, molette ou coin : taille) | boîte en Lexis+ (`ui.cadrage`), compilation par l'outil `wdlexisgen` (`--icone=`, `--cadrage=`) ; mêmes réglages (`.wdlexis/application.ini`) |
 | Concepteur de formulaires (menu Conception, double-clic sur un `form_<nom>.prg`) | oui (`concepteur.prg`) ; mêmes fichiers `form_<nom>.prg` que l'atelier natif |
 | Éditeur d'états PDF (menu Conception, double-clic sur un `etat_<nom>.prg`) | oui (`etats.prg`) ; mêmes fichiers `etat_<nom>.prg` que l'atelier natif |

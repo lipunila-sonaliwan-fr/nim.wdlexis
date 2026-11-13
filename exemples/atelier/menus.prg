@@ -6,7 +6,8 @@ retourner { ;
   {"Fichier", {"Nouveau projet…", "Ouvrir un projet…", "Ouvrir un dossier par son chemin…", ;
                "Nouveau fichier…", "Ouvrir un fichier…", "Enregistrer", "Enregistrer sous…", ;
                "Enregistrer tout", "Fermer l'onglet", "-", "Dupliquer le fichier…", "Renommer le fichier…", ;
-               "Supprimer le fichier…", "-", "Quitter"}}, ;
+               "Supprimer le fichier…", "-", "Exporter le projet (archive)…", ;
+               "Importer un projet (archive)…", "-", "Quitter"}}, ;
   {"Édition", {"Annuler", "Rétablir", "Couper", "Copier", "Coller", "Tout sélectionner", ;
                "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter"}}, ;
   {"Recherche", {"Rechercher…", "Remplacer…", "Occurrence suivante", "Aller à la ligne…", ;
@@ -149,6 +150,10 @@ procedure MENU(ev)
     FICHIER_RENOMMER(nul)
   cas choix = "Supprimer le fichier…"
     FICHIER_SUPPRIMER(nul)
+  cas choix = "Exporter le projet (archive)…"
+    PROJET_EXPORTER()
+  cas choix = "Importer un projet (archive)…"
+    PROJET_IMPORTER()
   cas choix = "Copier la console"
     COPIER_CONSOLE()
   cas choix = "Effacer la console"
@@ -173,7 +178,7 @@ procedure MENU(ev)
   cas choix = "Référence des fonctions et paquets"
     AFFICHER_OUTILS(3)
   cas choix = "À propos"
-    ui.alerte("wdlexis+ [S]tudio 1.9.2\nAtelier du langage Lexis+\n" +
+    ui.alerte("wdlexis+ [S]tudio 1.9.4\nAtelier du langage Lexis+\n" +
               "Développez naturellement vos applications métier\n\n" +
               "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
               "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" +

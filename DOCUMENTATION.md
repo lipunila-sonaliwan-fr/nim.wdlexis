@@ -828,6 +828,115 @@ retourner vrai                             && faux interrompt la réponse
 
 ---
 
+### 7.2 Archives : le paquet `archive`
+
+Le paquet `archive`, écrit en Nim pur (sans zlib ni bibliothèque externe), lit
+et écrit les archives **.zip** (deflate, Zip64, noms UTF-8, droits Unix),
+**.tar**, **.tar.gz** et les fichiers **.gz**. Le format est reconnu au contenu ;
+à l'extraction, les chemins dangereux (`..`, chemins absolus) sont refusés.
+
+```lexis
+&& tout un dossier en une fois (dossier de tête « bonjour »)
+? archive.compresser("exemples/bonjour", "bonjour.zip", {niveau = 9})
+&& lecture
+a = archive.ouvrir("bonjour.zip")
+pour chaque e dans a:liste()
+  ? e.nom, e.taille, e.compresse
+suivant
+? a:lire("bonjour/principal.prg")
+a:extraire("sortie", {motif = "*.prg"})
+a:fermer()
+&& écriture entrée par entrée (le format suit l'extension : .zip, .tar.gz…)
+w = archive.creer("sauvegarde.tar.gz")
+w:ajoutertexte("version.txt", "1.0")
+w:ajouter("exemples/markdown", "doc")      && un dossier, rangé sous doc/
+? w:fermer(), "octets"
+&& données en mémoire
+z = archive.gzip(repliquer("abc ", 1000))
+? longueur(z), longueur(archive.gunzip(z))
+```
+
+L'exemple `exemples/archives` est un archiveur complet (ouvrir, créer depuis un
+dossier ou des fichiers, ajouter, retirer, extraire tout ou la sélection, filtre,
+aperçu des textes et des images, gzip / gunzip). L'atelier s'en sert pour
+*Fichier > Exporter le projet (archive)…* et *Importer un projet (archive)…*.
+
+### 7.3 Objets connectés : le paquet `mqtt`
+
+Le paquet `mqtt`, en Nim pur, parle **MQTT 3.1.1**, le protocole de messagerie
+des objets connectés : un **client** (TCP ou TLS ; QoS 0, 1 et 2 ; messages
+retenus ; jokers `+` et `#` ; testament ; session persistante ; maintien de la
+connexion ; reconnexion et réabonnement automatiques) et un **serveur**
+(« broker ») intégré qui tourne sur son propre fil d'exécution.
+
+```lexis
+s = mqtt.serveur(0)                          && port libre ; mqtt.serveur(1883)
+c = mqtt.connecter("127.0.0.1", s:port(), {id = "capteur", ;
+                   testament = {sujet = "maison/capteur/etat", message = "hors ligne", retenu = vrai}})
+c:abonner("maison/+/temperature", 1, @RECU)
+c:publier("maison/salon/temperature", "21.5", {qos = 1, retenu = vrai})
+c:attendre(0.5)                              && dans une fenêtre : c:traiter() par une minuterie
+? s:statistiques().recus, mqtt.correspond("maison/#", "maison/salon/lampe")
+c:deconnecter()
+
+procedure RECU(m)
+  ? m.sujet, "=", m.message, "(QoS " + m.qos + ")"
+retourner
+```
+
+Les attentes réseau libèrent l'interpréteur : les fenêtres restent réactives.
+Un client se connecte aussi à un serveur externe (Mosquitto, EMQX, HiveMQ…),
+en TLS avec `{tls = vrai}` (port 8883). L'exemple `exemples/mqtt` (« maison
+connectée ») fait dialoguer capteurs, lampes, thermostat et tableau de bord à
+travers le serveur intégré, ou à travers un serveur externe passé en argument.
+
+### 7.4 Documents et recherche documentaire (RAG) : le paquet `document`
+
+Le paquet `document`, en Nim pur, extrait le texte des documents et prépare
+leur exploitation par une recherche plein texte ou un modèle de langage :
+
+- **lecture** : PDF (objets et flux compressés, polices ToUnicode, encodages,
+  polices composites ; ni pages scannées ni PDF chiffrés), HTML (contenu
+  principal, sans scripts ni menus ; titre, liens), Markdown, texte, DOCX, ODT,
+  PPTX, EPUB ; langue probable, nombre de mots ;
+- **découpage** en passages qui se recouvrent, coupés entre paragraphes ou
+  phrases ; **phrases** ; **mots** sans les mots vides ; clef de comparaison
+  sans accents ni pluriel ;
+- **mots-clés** (mots et expressions caractéristiques) et **carte des
+  concepts** d'un ensemble de passages : concepts pondérés (TF-IDF équilibré
+  entre documents) reliés par leurs cooccurrences, et **disposition** du graphe
+  par forces, qui garde les positions connues ;
+- **extraits** : phrases les plus proches d'une question, avec leur source.
+
+```lexis
+d = document.lire("rapport.pdf")
+? d.titre, d.pages, d.langue, d.mots
+passages = document.decouper(d.texte, {taille = 900, chevauchement = 150})
+pour chaque k dans document.motscles(d.texte, 8)
+  ? k.terme, k.nombre
+suivant
+c = document.concepts({{texte = d.texte, source = "rapport.pdf"}}, {max = 20})
+? #c.concepts, #c.liens
+pour chaque e dans document.extraits(d.texte, "Quel est le budget ?", 3)
+  ? e.phrase
+suivant
+```
+
+L'exemple `exemples/rag` est une application de **veille documentaire** :
+
+- **recherche automatisée sur Internet** (Wikipédia, DuckDuckGo, ou des
+  adresses) : chaque page devient un fichier du corpus, en Markdown ou en PDF ;
+- **analyse des documents au fil de leurs ajouts** : le dossier du corpus est
+  surveillé, chaque document ajouté, modifié ou retiré (texte, Markdown, PDF,
+  HTML) est lu, découpé en passages et indexé avec **Lucene** ;
+- **carte des concepts** (toile en mode plateau) recalculée après chaque
+  document, avec filtre et recherche ; un clic sur un concept montre ses
+  voisins, ses documents et ses phrases en contexte ;
+- **questions** : passages les plus pertinents, réponse extractive citée, ou
+  rédigée par un modèle de langage local (paquet `llm`) s'il y en a un.
+
+Sans la bibliothèque Lucene, l'exemple cherche les passages en mémoire.
+
 ## 8. L'atelier
 
 L'atelier ouvre **deux fenêtres** :
@@ -888,6 +997,11 @@ L'atelier ouvre **deux fenêtres** :
   globales et zone de base de données courante), **Pile d'appels** (cliquer un
   niveau affiche ses variables).
 - Les documents ouverts sont exécutés tels qu'à l'écran, même non enregistrés.
+- *Fichier > Exporter le projet (archive)…* : le projet en `.zip` ou `.tar.gz`
+  (dossier de tête au nom du projet ; sans fichiers cachés, session ni dossier
+  `distribution`, mais avec les réglages de génération) ; *Importer un projet
+  (archive)…* l'extrait dans le dossier choisi (sans écraser un projet
+  existant) puis l'ouvre.
 
 ### 8.1 Générer une application (Zig embarqué)
 
@@ -1945,6 +2059,101 @@ Index de recherche plein texte (Lucene++) - disponible par son nom (`lucene.…`
 | `idx:vider()` | Supprime tous les documents. |
 | `idx:optimiser()` | Fusionne les segments (index plus compact, recherches plus rapides). |
 | `idx:fermer()` | Valide puis ferme l'index (automatique à la fin du programme). |
+
+### Paquet `archive`
+
+Archives zip, tar, tar.gz et gzip, en Nim pur - disponible par son nom (`archive.…`) ou par `paquet("archive")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `archive.ouvrir(chemin)` | Ouvre une archive .zip, .tar, .tar.gz (.tgz) ou .gz (format reconnu au contenu) ; renvoie une archive. |
+| `archive.creer(chemin, [{format=, niveau=6, commentaire=}])` | Crée une archive à remplir (format d'après l'extension : .zip, .tar, .tar.gz, .tgz, .gz ; ou format = "zip", "tar", "targz", "gzip") ; niveau de compression 0 (stocké) à 9. Renvoie un archiveur, à fermer par w:fermer(). |
+| `archive.compresser(sources, chemin, [{format=, niveau=, racine=, motif=}])` | Crée une archive en une fois à partir d'un fichier, d'un dossier ou d'une liste ; racine : dossier de tête dans l'archive ; motif : "*.prg" ou liste de motifs (fichiers des dossiers retenus). Renvoie le nombre d'entrées. |
+| `archive.extraire(chemin, [dossier], [motif \| {noms} \| {motif=, ecraser=vrai, aplatir=faux}])` | Extrait tout ou partie d'une archive (dossier courant par défaut) ; renvoie la liste des fichiers écrits. Les chemins dangereux (.., absolus) sont refusés, les liens ignorés. |
+| `archive.liste(chemin)` | Contenu d'une archive : liste de {nom, chemin, taille, compresse, date, dossier, mode, lien}. |
+| `archive.format(chemin)` | "zip", "tar", "targz", "gzip" ou nul. |
+| `archive.gzip(donnees, [niveau])` | Compresse des données au format gzip. |
+| `archive.gunzip(donnees)` | Décompresse des données gzip (membres successifs acceptés). |
+| `archive.gzipfichier(source, [destination], [niveau])` | Compresse un fichier (destination : source.gz) ; renvoie la destination. |
+| `archive.gunzipfichier(source, [destination])` | Décompresse un fichier .gz ; renvoie la destination. |
+| `archive.deflate(donnees, [niveau])` | Flux deflate brut (RFC 1951). |
+| `archive.inflate(donnees)` | Décompresse un flux deflate brut. |
+| `archive.zlib(donnees, [niveau])` | Flux zlib (RFC 1950). |
+| `archive.dezlib(donnees)` | Décompresse un flux zlib. |
+| `archive.crc32(donnees)` | Somme CRC-32 (entier). |
+| `archive.adler32(donnees)` | Somme Adler-32 (entier). |
+| `archive.correspond(motif, nom)` | Vrai si le nom correspond au motif (* et ?, sans distinction de casse ; un motif sans / s'applique aussi au seul nom du fichier). |
+| `a:liste([motif])` | Entrées : liste de {nom, chemin, taille, compresse, date (secondes Unix), dossier, mode, lien}. |
+| `a:noms()` | Noms des fichiers (sans les dossiers). |
+| `a:nombre()` | Nombre d'entrées. |
+| `a:existe(nom)` | Vrai si l'entrée existe. |
+| `a:infos(nom)` | Fiche d'une entrée ou nul. |
+| `a:lire([nom])` | Contenu d'une entrée (texte ou octets), nul si elle n'existe pas ; sans nom pour un .gz. |
+| `a:extraire([dossier], [motif \| {noms} \| {motif=, ecraser=, aplatir=}])` | Extrait tout ou partie ; renvoie la liste des fichiers écrits. |
+| `a:extrairefichier(nom, chemin)` | Extrait une entrée vers un fichier ; faux si elle n'existe pas. |
+| `a:format()` | "zip", "tar", "targz" ou "gzip". |
+| `a:chemin()` | Chemin de l'archive. |
+| `a:commentaire()` | Commentaire d'une archive zip. |
+| `a:fermer()` | Ferme l'archive (automatique à la fin du programme). |
+| `w:ajouter(source \| {sources}, [nom_dans_archive \| {nom=, motif=}])` | Ajoute un fichier, ou un dossier et son contenu ; renvoie le nombre d'entrées ajoutées. |
+| `w:ajoutertexte(nom, contenu, [date])` | Ajoute une entrée à partir d'un texte ou d'octets. |
+| `w:ajouterdossier(nom)` | Ajoute un dossier vide. |
+| `w:nombre()` | Nombre d'entrées ajoutées. |
+| `w:contient(nom)` | Vrai si l'entrée a déjà été ajoutée. |
+| `w:fermer()` | Écrit l'archive et la ferme ; renvoie sa taille en octets (fait aussi à la fin du programme). |
+
+### Paquet `mqtt`
+
+Protocole MQTT 3.1.1 (client et serveur), en Nim pur - disponible par son nom (`mqtt.…`) ou par `paquet("mqtt")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `mqtt.connecter([hote], [port], [{id=, utilisateur=, motdepasse=, tls=, maintien=60, propre=vrai, testament=, reconnecter=, delai=10}])` | Connexion à un serveur MQTT (port 1883, 8883 en TLS) ; renvoie un client. id : identifiant (aléatoire par défaut) ; maintien : secondes entre deux signes de vie ; propre = faux : session persistante (abonnements et messages QoS 1-2 gardés par le serveur) ; testament = {sujet=, message=, qos=, retenu=} : publié par le serveur si la connexion se perd ; reconnecter = vrai : reconnexion et réabonnement automatiques ; delai : attente maximale des réponses (secondes). |
+| `mqtt.serveur([port=1883], [{hote="0.0.0.0", utilisateurs={nom=motdepasse}, anonymes=vrai, file=1000}])` | Démarre un serveur MQTT (broker) sur son propre fil d'exécution : messages retenus, testaments, QoS 0 à 2, sessions persistantes (file : messages gardés par client absent), comptes (anonymes = faux : compte obligatoire). Port 0 : port libre choisi par le système. Arrêté à la fin du programme. |
+| `mqtt.correspond(filtre, sujet)` | Vrai si le sujet correspond au filtre (+ : un niveau, # : tous les niveaux suivants). |
+| `c:publier(sujet, message, [{qos=0, retenu=faux, attendre=vrai}])` | Publie un message (texte, octets ; une table est encodée en JSON). QoS 1 et 2 : attend l'accusé du serveur (attendre = faux : sans attendre). retenu : le serveur garde le dernier message du sujet pour les futurs abonnés (message vide : l'efface). Aussi c:publier(sujet, message, qos, retenu). |
+| `c:abonner(filtre \| {filtres}, [qos], [@procedure])` | S'abonne (jokers + et #) ; la procédure reçoit chaque message {sujet, message, qos, retenu, doublon, horodatage} lors de c:traiter() ou c:attendre(). Renvoie la QoS accordée (faux si refusé), une liste pour plusieurs filtres. |
+| `c:desabonner(filtre \| {filtres})` | Se désabonne. |
+| `c:abonnements()` | Liste de {filtre, qos, procedure}. |
+| `c:traiter([delai=0])` | Reçoit les messages arrivés (attente au plus delai secondes) et les distribue aux procédures des abonnements (ou à c:surmessage) ; maintient la connexion. Renvoie le nombre de messages distribués. À appeler régulièrement, par exemple par une minuterie. |
+| `c:attendre(secondes)` | Traite les messages pendant la durée donnée (programmes sans fenêtre) ; renvoie le nombre distribué. |
+| `c:recevoir([delai])` | Message suivant sans procédure associée (attente au plus delai secondes ; sans délai : jusqu'à l'arrivée d'un message) ; nul sinon. |
+| `c:enattente()` | Nombre de messages reçus non encore lus. |
+| `c:surmessage(@procedure)` | Procédure appelée pour les messages qu'aucune procédure d'abonnement ne prend. |
+| `c:suretat(@procedure)` | Procédure appelée avec "deconnecte" ou "reconnecte" quand la connexion change. |
+| `c:connecte()` | Vrai si la connexion est ouverte. |
+| `c:reconnecter()` | Rouvre la connexion et rétablit les abonnements. |
+| `c:deconnecter()` | Ferme proprement la connexion (sans testament). |
+| `c:ping()` | Aller-retour avec le serveur, en secondes. |
+| `c:infos()` | {id, hote, port, tls, connecte, recus, envoyes, enattente, abonnements, session, erreur}. |
+| `s:arreter()` | Arrête le serveur. |
+| `s:actif()` | Vrai tant que le serveur fonctionne. |
+| `s:port()` | Port d'écoute. |
+| `s:clients()` | Clients et sessions : liste de {id, adresse, connecte, utilisateur, enattente, abonnements = {{filtre, qos}}}. |
+| `s:statistiques()` | {clients, recus, distribues, connexions, retenus, duree, actif}. |
+| `s:journal([tout])` | Lignes du journal (connexions, abonnements, testaments) apparues depuis le dernier appel ; tout = vrai : tout le journal. |
+
+### Paquet `document`
+
+Texte des documents (PDF, HTML, Markdown, DOCX, ODT, EPUB), passages, mots-clés, concepts, en Nim pur - disponible par son nom (`document.…`) ou par `paquet("document")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `document.lire(chemin, [{pages=}])` | Lit un document et en extrait le texte : PDF (Nim pur : polices, ToUnicode, flux compressés ; pas les pages scannées), HTML, Markdown, texte, DOCX, ODT, PPTX, EPUB. Renvoie {texte, titre, auteur, type, chemin, taille, langue, mots, pages, textepages}. pages : nombre maximal de pages PDF lues. |
+| `document.texte(chemin)` | Texte seul d'un document. |
+| `document.pdf(chemin, [pages])` | Texte d'un PDF : {texte, pages (liste, une entrée par page), titre, auteur, nombre}. |
+| `document.html(html, [url])` | Texte d'une page HTML (contenu principal, sans scripts ni menus) : {texte, titre, description, liens = {{texte, url}}} ; url : adresse de la page, pour rendre les liens absolus. |
+| `document.markdown(texte)` | Texte brut d'un document Markdown (sans balisage). |
+| `document.entites(texte)` | Remplace les entités HTML (&eacute; &#233; &amp;...). |
+| `document.langue(texte)` | Langue probable : "fr", "en", "de", "es", "it" ou "". |
+| `document.mots(texte, [tous])` | Mots en minuscules (élisions retirées) ; sans les mots vides (le, de, the...) sauf si tous = vrai. |
+| `document.cle(mot)` | Clef de comparaison d'un mot : minuscules, sans accents, sans pluriel simple (« Données » -> « donnee »). |
+| `document.phrases(texte)` | Liste des phrases. |
+| `document.decouper(texte, [{taille=900, chevauchement=150}])` | Passages d'environ taille caractères, coupés entre paragraphes ou phrases et qui se recouvrent : liste de {texte, debut, fin, numero}. |
+| `document.motscles(texte, [max=20])` | Termes caractéristiques d'un texte (mots et expressions) : {terme, cle, nombre}. |
+| `document.concepts(passages, [{max=40, min=2, liens=4, seuil=0.12}])` | Carte des concepts d'un ensemble de passages (textes ou {texte=, source=}) : {concepts = {{terme, cle, poids (0 à 1), frequence, passages, sources}}, liens = {{a, b, poids, nombre}}} ; a et b sont des clefs de concepts, reliés quand ils apparaissent dans les mêmes passages. |
+| `document.disposer(noeuds, liens, [{largeur=1200, hauteur=800, iterations=300}])` | Disposition d'un graphe par forces (noeuds : identifiants ou {id=, taille=, x=, y=} ; liens : {a=, b=, poids=}) ; renvoie {id = {x, y}}. Des nœuds déjà placés (x, y) bougent peu : une carte qui grandit reste reconnaissable. |
+| `document.extraits(textes, question, [n=3])` | Phrases les plus proches d'une question (termes communs pondérés par leur rareté) : liste de {phrase, source, score}. textes : texte ou liste de {texte=, source=}. |
 
 ### Paquet `tache`
 

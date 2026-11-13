@@ -7,7 +7,7 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [S]tudio 1.9.2 - " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [S]tudio 1.9.4 - " + fichier.nom(dossier)
   ARBRE_PROJET()
   vb:projet(dossier)        && procédures du projet : palette et liens d'appel entre fichiers
   VP_SUIVRE()               && la vue projet ouverte suit
@@ -369,6 +369,92 @@ procedure OUVRIR_PROJET
     CHARGER_PROJET(fichier.dossier(p))
     ed:ouvrir(p)
   finsi
+retourner
+
+&& Archive du projet (paquet archive) :
+&& Même règle que l'atelier natif (ide/projarchive.nim) : les fichiers sont
+&& rangés sous un dossier de tête au nom du projet ; fichiers cachés, session et
+&& dossier « distribution » laissés de côté, réglages de génération gardés.
+fonction FICHIERS_A_ARCHIVER()
+  locale res = {}
+  pour chaque rel dans fichier.liste(dossier, vrai)
+    rel = remplacertexte(rel, "\\", "/")
+    faire cas
+    cas finitpar(rel, "/")
+      && dossier : son contenu est listé
+    cas rel = ".wdlexis/application.ini"
+      inserer(res, rel)
+    cas commencepar(rel, ".") ou contient(rel, "/.")
+      && caché (session, .git…)
+    cas rel = "distribution" ou commencepar(rel, "distribution/")
+      && applications générées
+    autrement
+      inserer(res, rel)
+    fincas
+  suivant
+  trier(res)
+retourner res
+
+procedure PROJET_EXPORTER
+  si dossier = "" ou non fichier.estdossier(dossier)
+    ui.alerte("Aucun projet ouvert.", "attention")
+    retourner
+  finsi
+  TOUT_ENREGISTRER()
+  locale nom = fichier.nom(dossier)
+  locale dest = ui.enregistrerfichier{nom = fichier.joindre(fichier.dossier(dossier), nom + ".zip"), ;
+                                       filtre = "Archive zip|*.zip|Archive tar.gz|*.tar.gz"}
+  si dest = nul
+    retourner
+  finsi
+  locale liste = FICHIERS_A_ARCHIVER()
+  essayer
+    locale w = archive.creer(dest, {niveau = 9})
+    pour chaque rel dans liste
+      w:ajouter(fichier.joindre(dossier, rel), nom + "/" + rel)
+    suivant
+    locale octets = w:fermer()
+    etat.libelle = "Projet exporté : " + dest + " (" + #liste + " fichier(s), " + arrondi(octets / 1024, 1) + " Ko)"
+  capturer e
+    ui.alerte("Export impossible : " + e, "stop")
+  finessayer
+retourner
+
+procedure PROJET_IMPORTER
+  locale src = ui.ouvrirfichier{titre = "Importer un projet", dossier = fichier.dossier(dossier), ;
+                                filtre = "Archives|*.zip;*.tar.gz;*.tgz;*.tar|Tous les fichiers|*"}
+  si src = nul
+    retourner
+  finsi
+  locale dest = ui.demander("Extraire le projet dans le dossier :", fichier.dossier(dossier))
+  si dest = nul ou rogner(dest) = ""
+    retourner
+  finsi
+  dest = rogner(dest)
+  essayer
+    && dossier de tête commun ?
+    locale tete = ""
+    locale unique = vrai
+    pour chaque e dans archive.liste(src)
+      locale premier = decouper(e.nom, "/")[1]
+      si tete = ""
+        tete = premier
+      sinonsi premier <> tete
+        unique = faux
+      finsi
+    suivant
+    locale racine = sisinon(unique, fichier.joindre(dest, tete), dest)
+    si unique et fichier.estdossier(racine) et #fichier.liste(racine) > 0
+      ui.alerte("Le dossier existe déjà et n'est pas vide : " + racine, "attention")
+      retourner
+    finsi
+    fichier.creerdossier(dest)
+    locale ecrits = archive.extraire(src, dest, {ecraser = faux})
+    CHARGER_PROJET(fichier.absolu(racine))
+    etat.libelle = "Projet importé : " + racine + " (" + #ecrits + " fichier(s))"
+  capturer e
+    ui.alerte("Import impossible : " + e, "stop")
+  finessayer
 retourner
 
 procedure OUVRIR_DOSSIER

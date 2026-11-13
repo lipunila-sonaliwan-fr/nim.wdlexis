@@ -40,12 +40,22 @@ type
     line, col: int
 
 proc significant(lines: openArray[string], toks: openArray[seq[Token]]): seq[seq[Sig]] =
-  # Jetons significatifs, ligne par ligne.
+  # Jetons significatifs, ligne par ligne. Une instruction continuée (« ; » en
+  # fin de ligne) est rangée en entier sur sa première ligne (les lignes
+  # suivantes restent vides) : « cle = valeur » en tête d'une ligne de suite
+  # n'est pas une affectation. Chaque jeton garde sa ligne d'origine.
   result = newSeq[seq[Sig]](min(lines.len, toks.len))
+  var start = -1
   for li in 0 ..< result.len:
+    let target = if start >= 0: start else: li
     for t in toks[li]:
       if t.kind notin {tkSpace, tkComment, tkPod}:
-        result[li].add Sig(kind: t.kind, text: tokText(lines[li], t), line: li, col: t.start)
+        result[target].add Sig(kind: t.kind, text: tokText(lines[li], t), line: li, col: t.start)
+    if result[target].len > 0 and result[target][^1].text == ";":
+      result[target].setLen(result[target].len - 1)
+      start = target
+    else:
+      start = -1
 
 proc isName(s: Sig): bool {.inline.} = s.kind in {tkIdent, tkBuiltin, tkCallback}
 proc isKw(s: Sig, w: string): bool {.inline.} = s.kind == tkKeyword and s.text == w

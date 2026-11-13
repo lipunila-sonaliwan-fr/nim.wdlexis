@@ -73,6 +73,11 @@ wdlexis/
   nimllm/, nimllm.nim    bibliothèque LLM (inférence GGUF, dialogue, entraînement)
   paquets/               paquets fournis (tous.nim les enregistre tous)
     pkg_firebird.nim     client Firebird (bibliothèque fbclient chargée à l'exécution)
+    pkg_lucene.nim       recherche plein texte Lucene++ (bibliothèque wdlexis_lucene)
+    pkg_archive.nim      archives zip, tar, tar.gz, gzip (Nim pur ; compression.nim)
+    pkg_mqtt.nim         MQTT 3.1.1 : client et serveur intégré (Nim pur)
+    pkg_document.nim     texte des documents (pdftexte.nim : PDF en Nim pur), passages,
+                         mots-clés, carte des concepts, extraits
     pkg_webview.nim      pages HTML / JavaScript dans une fenêtre native (bibliothèque webview
                          chargée à l'exécution), pont JavaScript <-> Lexis+
     pkg_llm.nim ...      llm, gguf, dessin, audio, tenseur, entrainement
@@ -81,6 +86,11 @@ wdlexis/
   exemples/              programmes d'exemple (un dossier par projet)
     llm/                 20 exemples d'IA (01_bonjour ... 20_reprise_entrainement)
     firebird/            base Firebird
+    lucene/              bibliothèque de livres : recherche plein texte pendant la frappe
+    archives/            archiveur zip / tar.gz / gzip
+    mqtt/                maison connectée : capteurs, lampes, thermostat (serveur intégré)
+    rag/                 veille documentaire : recherche sur Internet, index Lucene,
+                         analyse au fil des ajouts, carte des concepts, questions (RAG)
     webview/             pages web : bonjour, Lexis+ -> JS, JS -> Lexis+, application
     formulaire/          fiche client dessinée avec le concepteur de formulaires
     etats/               facture PDF de deux pages (éditeur d'états, paquet rapport)
@@ -106,6 +116,7 @@ wdlexis/
   paquets/pkg_rapport.nim  paquet rapport (rapport.debut, r.ajoute, r.entete, r.pied, r.fin)
   ide/shellview.nim, ide/cropview.nim, ide/imagetools.nim, ide/archives.nim
                          journal coloré, cadrage d'icône, images (stb), zip / tar.gz
+  ide/projarchive.nim    Fichier > Exporter / Importer un projet (archive)
   rtc/                   runtime Lexis+ pré-transpilé en C, pour chaque cible
                          (généré par « nimble rtc »)
   linZG/, macZG/, winZG/ Zig embarqué pour l'hôte Linux, macOS, Windows :
@@ -192,6 +203,9 @@ Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 | SQLite 3 | paquet `sqlite` | bibliothèque du système |
 | Client Firebird (`libfbclient.so`, `.dylib`, `fbclient.dll`) | paquet `firebird` | client Firebird installé, dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme, ou chemin dans `WDLEXIS_FIREBIRD` |
 | webview (`webview.so`, `webview.dylib`, `webview.dll`) | paquet `webview` | dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme (fournies), ou chemin dans `WDLEXIS_WEBVIEW` ; moteur web du système : WebView2 (Windows 10/11), WKWebView (macOS), WebKitGTK 4.1 (Linux : `libwebkit2gtk-4.1-0`) |
+
+Les paquets `archive`, `mqtt` et `document` sont écrits en Nim pur, sans
+bibliothèque externe (TLS de `mqtt` : OpenSSL, comme HTTPS).
 
 Les paquets d'IA (`llm`, `gguf`, `dessin`, `audio`, `tenseur`, `entrainement`)
 n'utilisent aucune bibliothèque externe ; il suffit d'un modèle au format GGUF

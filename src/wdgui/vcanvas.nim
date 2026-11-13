@@ -1428,7 +1428,7 @@ method onMouse*(c: VectorCanvas, e: MouseEvent) =
 method onWheel*(c: VectorCanvas, dx, dy: float): bool =
   let mods = SDL_GetModState()
   if c.mode == vmView: return false
-  if c.mode == vmEdit and (mods and (KMOD_CTRL or KMOD_GUI)) != 0:
+  if c.mode in {vmEdit, vmBoard} and (mods and (KMOD_CTRL or KMOD_GUI)) != 0:
     let f = if dy > 0: 1.12 elif dy < 0: 1 / 1.12 else: 1.0
     if f == 1.0: return false
     c.setZoomAt(c.zoom * f, c.rect.x + c.curX, c.rect.y + c.curY)

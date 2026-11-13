@@ -1,0 +1,23 @@
+markdown : Les index /  / Un index inversé garde, pour chaque terme, la liste des documents. L'index inversé rend la recherche rapide. /  / Analyse / Un analyseur découpe le texte en termes. Les termes sont normalisés. / 
+langue : fr en
+mots : index,données,termes | index,des
+clés : donnee cheval index bateau jeu flux corpus
+phrase : Titre court
+phrase : Première phrase.
+phrase : Deuxième phrase, dit M. Martin.
+phrase : Fin suite ici.
+passages : 9 1 vrai
+mot-clé : index inversé 2
+mot-clé : termes 3
+mot-clé : garde 1
+concept : index inversé index inverse 3 a+b
+concept : terme terme 4 a+b
+concept : garde garde 1 a
+concept : analyseur analyseur 1 a
+concept : liste liste 1 a
+liens : vrai
+extrait : Un index inversé garde, pour chaque terme, la liste des documents.
+html : T & co | T & co
+Bonjour été lien | https://exemple.fr/a
+entités : <b> A  fin
+disposer : vrai vrai

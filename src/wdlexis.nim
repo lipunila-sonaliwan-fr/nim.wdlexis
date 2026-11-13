@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.9.2,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 1.9.4,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -44,6 +44,7 @@ import ide/reportdesigner
 import ide/appicon
 import ide/blueprint
 import ide/projectview
+import ide/projarchive
 import ide/dockpane
 from ide/etats import isReportFile
 import lexis/api
@@ -572,6 +573,39 @@ proc newFileInProject() =
     return
   fillProjectTree()
   discard openFile(path)
+
+proc exportProjectArchive() =
+  ## Fichier > Exporter le projet (archive)… : .zip ou .tar.gz du projet.
+  if root().len == 0 or not dirExists(root()):
+    alert(iconExclamation, "Aucun projet ouvert.")
+    return
+  discard saveAll()
+  let name = extractFilename(root().strip(leading = false, chars = {'/', '\\'}))
+  let dest = saveFileDialog(title = "Exporter le projet", folder = root().parentDir, defaultName = name & ".zip",
+                            filter = "Archive zip|*.zip\nArchive tar.gz|*.tar.gz")
+  if dest.len == 0: return
+  try:
+    let n = exportProject(root(), dest)
+    status("Projet exporté : " & dest & " (" & $n & " fichier(s), " & formatSize(getFileSize(dest)) & ")")
+  except ProjectArchiveError as e:
+    alert(iconStop, e.msg)
+
+proc importProjectArchive() =
+  ## Fichier > Importer un projet (archive)… : extrait puis ouvre le projet.
+  let src = openFileDialog(title = "Importer un projet",
+                           filter = "Archives|*.zip;*.tar.gz;*.tgz;*.tar\nTous les fichiers|*")
+  if src.len == 0: return
+  var dir = (if root().len > 0: root().parentDir else: getHomeDir())
+  if not promptOk(iconQuestion, "Extraire le projet dans le dossier :", dir): return
+  dir = dir.strip()
+  if dir.len == 0: return
+  try:
+    createDir(dir)
+    let proj = importProject(src, dir)
+    openProject(proj)
+    status("Projet importé : " & proj)
+  except ProjectArchiveError, OSError, IOError:
+    alert(iconStop, getCurrentExceptionMsg())
 
 proc newProject() =
   var dir = getHomeDir() / "projet_lexis"
@@ -1631,6 +1665,8 @@ proc onMenu(path: string) =
   of "Dupliquer le fichier…": duplicateSelected()
   of "Renommer le fichier…": renameSelected()
   of "Supprimer le fichier…": deleteSelected()
+  of "Exporter le projet (archive)…": exportProjectArchive()
+  of "Importer un projet (archive)…": importProjectArchive()
   of "Quitter":
     var dirty = false
     for d in editorDocs(edId):
@@ -1733,7 +1769,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 1.9.2\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 1.9.4\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" &
@@ -1747,7 +1783,8 @@ proc buildMenu(m: ControlId) =
     ("Fichier", @["Nouveau projet…", "Ouvrir un projet…", "Ouvrir un dossier par son chemin…",
                   "Nouveau fichier…", "Ouvrir un fichier…", "Enregistrer", "Enregistrer sous…",
                   "Enregistrer tout", "Fermer l'onglet", "-", "Dupliquer le fichier…", "Renommer le fichier…",
-                  "Supprimer le fichier…", "-", "Quitter"]),
+                  "Supprimer le fichier…", "-", "Exporter le projet (archive)…", "Importer un projet (archive)…",
+                  "-", "Quitter"]),
     ("Édition", @["Annuler", "Rétablir", "Couper", "Copier", "Coller", "Tout sélectionner",
                   "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter"]),
     ("Recherche", @["Rechercher…", "Remplacer…", "Occurrence suivante", "Aller à la ligne…",
