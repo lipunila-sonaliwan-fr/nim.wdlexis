@@ -60,7 +60,7 @@ varchoisie = nul        && rang de la variable choisie
 && Une fenêtre compacte : menu et barre de symboles collés en haut, état collé en bas ;
 && à gauche Projet / Structure / Référence, en bas Problèmes / Console / Variables /
 && Pile d'appels (chaque ensemble se masque << >> ou s'ouvre dans une fenêtre dédiée).
-fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.9.4", largeur = 1500, hauteur = 900, disposition = "bordure", ;
+fen = ui.fenetre{titre = "wdlexis+ [S]tudio 1.9.6", largeur = 1500, hauteur = 900, disposition = "bordure", ;
                  sombre = reglages.sombre, densite = "compacte", x = 40, y = 40}
 fen.marge = 0
 fen.espacement = 0

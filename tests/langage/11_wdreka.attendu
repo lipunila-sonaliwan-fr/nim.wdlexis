@@ -1,0 +1,10 @@
+optimum : optimal 38 10 2 38 vrai
+noms : vrai faux
+affectation : optimal 12
+  vrai : 0 1
+  vrai : 1 0
+  vrai : 2 2
+toutes : toutes 3 3
+infaisable : infaisable
+erreur : vrai 2
+correct : vrai

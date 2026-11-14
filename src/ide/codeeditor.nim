@@ -147,7 +147,7 @@ const
 proc monoFonts(): seq[string] =
   var env = getEnv("WDGUI_PATH")
   env = if env.len > 0 and dirExists(env): env else: "."
-  env &= "/ttf/DejaVuSansMono.ttf"
+  env &= "/ttf/JuliaMono-Regular.ttf"
   return @[ env,
             "/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
             "/System/Library/Fonts/Monaco.ttf",

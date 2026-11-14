@@ -78,6 +78,7 @@ wdlexis/
     pkg_mqtt.nim         MQTT 3.1.1 : client et serveur intégré (Nim pur)
     pkg_document.nim     texte des documents (pdftexte.nim : PDF en Nim pur), passages,
                          mots-clés, carte des concepts, extraits
+    pkg_wdreka.nim       solveur de contraintes CP-SAT de wdreka, langage NCP (cpsat/, Nim pur)
     pkg_webview.nim      pages HTML / JavaScript dans une fenêtre native (bibliothèque webview
                          chargée à l'exécution), pont JavaScript <-> Lexis+
     pkg_llm.nim ...      llm, gguf, dessin, audio, tenseur, entrainement
@@ -204,7 +205,7 @@ Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 | Client Firebird (`libfbclient.so`, `.dylib`, `fbclient.dll`) | paquet `firebird` | client Firebird installé, dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme, ou chemin dans `WDLEXIS_FIREBIRD` |
 | webview (`webview.so`, `webview.dylib`, `webview.dll`) | paquet `webview` | dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme (fournies), ou chemin dans `WDLEXIS_WEBVIEW` ; moteur web du système : WebView2 (Windows 10/11), WKWebView (macOS), WebKitGTK 4.1 (Linux : `libwebkit2gtk-4.1-0`) |
 
-Les paquets `archive`, `mqtt` et `document` sont écrits en Nim pur, sans
+Les paquets `archive`, `mqtt`, `document` et `wdreka` sont écrits en Nim pur, sans
 bibliothèque externe (TLS de `mqtt` : OpenSSL, comme HTTPS).
 
 Les paquets d'IA (`llm`, `gguf`, `dessin`, `audio`, `tenseur`, `entrainement`)

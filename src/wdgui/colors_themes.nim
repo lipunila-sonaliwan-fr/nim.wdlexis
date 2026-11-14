@@ -72,7 +72,7 @@ proc paletteFor(accent: Color): seq[Color] =
     hex"#00B7C3", hex"#D13438", hex"#498205", hex"#CA5010", hex"#4F6BED"]
 
 proc themeFonts(): seq[string] =
-  var env = wdguiBase("ttf/GoNotoEuropeAmericas.ttf") & "/ttf/GoNotoEuropeAmericas.ttf"
+  var env = wdguiBase("/ttf/Poppins-Regular.ttf") & "/ttf/Poppins-Regular.ttf"
   return @[ env,
             "/System/Library/Fonts/SFNS.ttf",
             "/System/Library/Fonts/Helvetica.ttc",

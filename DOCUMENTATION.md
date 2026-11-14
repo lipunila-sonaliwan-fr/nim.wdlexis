@@ -922,20 +922,55 @@ pour chaque e dans document.extraits(d.texte, "Quel est le budget ?", 3)
 suivant
 ```
 
-L'exemple `exemples/rag` est une application de **veille documentaire** :
 
-- **recherche automatisée sur Internet** (Wikipédia, DuckDuckGo, ou des
-  adresses) : chaque page devient un fichier du corpus, en Markdown ou en PDF ;
-- **analyse des documents au fil de leurs ajouts** : le dossier du corpus est
-  surveillé, chaque document ajouté, modifié ou retiré (texte, Markdown, PDF,
-  HTML) est lu, découpé en passages et indexé avec **Lucene** ;
-- **carte des concepts** (toile en mode plateau) recalculée après chaque
-  document, avec filtre et recherche ; un clic sur un concept montre ses
-  voisins, ses documents et ses phrases en contexte ;
-- **questions** : passages les plus pertinents, réponse extractive citée, ou
-  rédigée par un modèle de langage local (paquet `llm`) s'il y en a un.
+### 7.5 Contraintes et optimisation : le paquet `wdreka`
 
-Sans la bibliothèque Lucene, l'exemple cherche les passages en mémoire.
+Le paquet `wdreka` intègre le solveur **CP-SAT** de wdreka (propagation, apprentissage
+de clauses paresseux, recherche VSIDS avec redémarrages), écrit en Nim pur. Un modèle
+s'écrit dans le langage **NCP** de wdreka : variables entières ou booléennes,
+tableaux, `forall`, contraintes globales (`alldifferent`, `cumulative`,
+`disjunctive`, `table`, `circuit`, `count`, `sum`…), puis
+`solve satisfy`, `minimize`, `maximize` ou `all`. Le programme Lexis+ construit le
+texte du modèle à partir de ses données, le résout et lit les valeurs trouvées.
+
+```lexis
+m = wdreka.modele([[
+  var x : 0..10;
+  var y : 0..10;
+  constraint x + 2 * y <= 14;
+  constraint 3 * x - y >= 0;
+  solve maximize 3 * x + 4 * y;
+]])
+r = m:resoudre({delai = 5})
+? r.statut, r.objectif, m:valeur("x"), m:valeur("y")
+```
+
+La résolution libère l'interpréteur : une minuterie peut suivre `m:progression()`
+et un bouton appeler `m:arreter()` ; la procédure `solution` de `m:resoudre` reçoit
+chaque solution améliorante. `m:vrais(nom)` donne directement les coordonnées des
+éléments vrais d'un tableau booléen, la forme la plus efficace pour les problèmes
+d'affectation (« la séance s commence au créneau t », « l'élève e va en classe k »).
+
+L'exemple `exemples/etablissement` est une application de **gestion d'un
+établissement scolaire** (base DuckDB, données d'un collège fictif) qui enchaîne
+quatre modèles wdreka :
+
+- **répartition des élèves** dans les classes de chaque niveau : effectifs, filles
+  et garçons, profils fort / moyen / faible équilibrés, élèves à séparer, affinités
+  respectées autant que possible, options regroupées ou réparties ;
+- **services des enseignants** : chaque cours (classe ou groupe d'option) reçoit un
+  enseignant compétent pour la matière et le niveau, dans la limite de son service
+  et des heures d'une même classe ;
+- **emploi du temps** de la semaine type : volumes horaires par niveau et par
+  classe, groupes d'options en barrette, indisponibilités des enseignants,
+  fermetures, limites par jour, capacité des salles par profil d'équipement ;
+- **salles** : places, équipements exigés par matière (matrice), salle attitrée de
+  la classe, salles en préparation ou en travaux.
+
+Le calendrier projette ensuite la semaine type sur l'année (jours ouvrables,
+vacances par niveau, classe ou enseignant, absences, travaux) ; les plannings des
+classes, enseignants et salles se consultent par semaine type ou par date, et une
+séance peut être épinglée ou déplacée à la main avec contrôle des conflits.
 
 ## 8. L'atelier
 
@@ -2154,6 +2189,27 @@ Texte des documents (PDF, HTML, Markdown, DOCX, ODT, EPUB), passages, mots-clés
 | `document.concepts(passages, [{max=40, min=2, liens=4, seuil=0.12}])` | Carte des concepts d'un ensemble de passages (textes ou {texte=, source=}) : {concepts = {{terme, cle, poids (0 à 1), frequence, passages, sources}}, liens = {{a, b, poids, nombre}}} ; a et b sont des clefs de concepts, reliés quand ils apparaissent dans les mêmes passages. |
 | `document.disposer(noeuds, liens, [{largeur=1200, hauteur=800, iterations=300}])` | Disposition d'un graphe par forces (noeuds : identifiants ou {id=, taille=, x=, y=} ; liens : {a=, b=, poids=}) ; renvoie {id = {x, y}}. Des nœuds déjà placés (x, y) bougent peu : une carte qui grandit reste reconnaissable. |
 | `document.extraits(textes, question, [n=3])` | Phrases les plus proches d'une question (termes communs pondérés par leur rareté) : liste de {phrase, source, score}. textes : texte ou liste de {texte=, source=}. |
+
+### Paquet `wdreka`
+
+Solveur de contraintes CP-SAT de wdreka (langage NCP), en Nim pur - disponible par son nom (`wdreka.…`) ou par `paquet("wdreka")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `wdreka.modele(texte)` | Compile un modèle NCP (var, let, const, constraint, forall, solve satisfy \| minimize \| maximize \| all ; contraintes alldifferent, cumulative, disjunctive, reservoir, windows, table, circuit, count, sum, min, max…). Erreur « wdreka : ligne N : … » si le texte est incorrect. |
+| `wdreka.resoudre(texte, [options])` | Compile et résout en une fois ; le résultat a en plus le champ modele. |
+| `wdreka.verifier(texte)` | nul si le modèle se compile, sinon {ligne, message}. |
+| `m:resoudre([{delai=0, solutions=0, solution=@proc}])` | Résout : délai en secondes (0 : sans limite), nombre maximal de solutions (solve all), procédure appelée à chaque solution ou amélioration avec {solution, objectif, duree} (renvoyer faux arrête). Renvoie {statut, solutions, complet, genre, objectif, duree, statistiques} ; statut : optimal, solution, toutes, infaisable, temps, arrete. |
+| `m:valeur(nom)` | Valeur d'un nom du modèle dans la dernière solution : entier, booléen, ou liste (tableaux, imbriqués s'ils ont plusieurs dimensions) ; nul sans solution. |
+| `m:vrais(nom)` | Indices (base 0) des éléments vrais d'un tableau booléen ; pour un tableau à plusieurs dimensions, leurs coordonnées {i, j, …}. |
+| `m:contient(nom)` | Vrai si le modèle définit ce nom. |
+| `m:noms()` | Noms qui dépendent des variables de décision. |
+| `m:objectif()` | Objectif de la dernière solution (nul sans objectif). |
+| `m:bornes()` | Bornes connues de l'objectif (deux valeurs). |
+| `m:progression()` | Pendant ou après la résolution (depuis un autre gestionnaire, par exemple une minuterie) : {encours, solutions, objectif, duree, conflits, decisions, statut}. |
+| `m:arreter()` | Arrête la résolution en cours ; la meilleure solution trouvée est gardée. |
+| `m:statistiques()` | Taille et effort : {booleens, entiers, clauses, propagateurs, apprises, conflits, decisions, propagations, redemarrages}. |
+| `m:texte()` | Texte NCP du modèle. |
 
 ### Paquet `tache`
 

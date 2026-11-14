@@ -41,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>wdlexis+</string>
   <key>CFBundleIdentifier</key><string>fr.sonaliwan.wdlexis</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.9.4/string>
+  <key>CFBundleShortVersionString</key><string>1.9.6/string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   $ICON

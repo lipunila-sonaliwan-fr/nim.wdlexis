@@ -168,7 +168,7 @@ proc analyzeProject*(root0: string, mainRel = "", knownPackages: openArray[strin
   if known.len == 0:
     for p in ["interface", "llm", "gguf", "entrainement", "dessin", "audio", "tenseur", "fichier",
               "json", "csv", "binaire", "http", "reseau", "ftp", "ssh", "sftp", "sqlite",
-              "firebird", "lucene", "archive", "mqtt", "document", "tache", "fil", "webview"]: known.incl p
+              "firebird", "lucene", "archive", "mqtt", "document", "wdreka", "tache", "fil", "webview"]: known.incl p
   if not dirExists(root): return
   var found = initHashSet[string]()
   var files: seq[string]

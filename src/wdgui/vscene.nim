@@ -420,7 +420,7 @@ proc fontDirList(): seq[string] =
   {.cast(gcsafe).}:
     result = fontDirs
   result.add wdguiBase("ttf/Poppins-Regular.ttf") / "ttf"
-  result.add wdguiBase("ttf/GoNotoEuropeAmericas.ttf") / "ttf"
+  result.add wdguiBase("ttf/JuliaMono-Regular.ttf") / "ttf"
   result.add getAppDir() / "ttf"
 
 proc findFont(file: string): string =
@@ -447,7 +447,7 @@ proc fontFile*(family: string, bold, italic: bool): tuple[path: string, synthBol
     if "light" in f: cands.add ("Poppins-Light.ttf", bold, italic)
     if "medium" in f: cands.add ("Poppins-Medium.ttf", bold, italic)
     cands.add ("Poppins-Regular.ttf", bold, italic)
-  cands.add ("GoNotoEuropeAmericas.ttf", bold, italic)
+  cands.add ("JuliaMono-Regular.ttf", bold, italic)
   for (file, sb, si) in cands:
     let p = findFont(file)
     if p.len > 0: return (p, sb, si)
@@ -2429,4 +2429,3 @@ proc baselineOf*(s: VShape, line = 0): float =
   ## Ligne de base de la ligne `line` d'un texte (repère de la forme).
   let fm = fontMetrics(s.font, s.fontSize, s.bold, s.italic)
   s.y + line.float * s.lineStep + (s.lineStep - fm.height) / 2 + fm.ascent
-

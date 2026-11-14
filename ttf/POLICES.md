@@ -2,9 +2,9 @@
 
 | Fichier | Famille | Licence |
 | --- | --- | --- |
-| GoNotoEuropeAmericas.ttf | Go Noto (interface) | SIL Open Font License 1.1 (OFL.txt) |
-| DejaVuSansMono.ttf | DejaVu Sans Mono (code) | licence DejaVu (libre) |
-| Poppins-*.ttf | Poppins, Indian Type Foundry | SIL Open Font License 1.1 (OFL.txt) |
+| JuliaMono-Regular.ttf | JuliaMono (code) | SIL Open Font License 1.1 (OFL.txt) |
+| DejaVuSansMono.ttf | DejaVu Sans Mono | licence DejaVu (libre) |
+| Poppins-*.ttf | Poppins, Indian Type Foundry (interface) | SIL Open Font License 1.1 (OFL.txt) |
 | Lora-*.ttf | Lora, Cyreal | SIL Open Font License 1.1 (OFL.txt) |
 
 Poppins et Lora sont les polices des documents, présentations et storyboards de
