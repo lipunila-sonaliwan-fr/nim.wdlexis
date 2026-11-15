@@ -9,6 +9,7 @@
 import std/[os, strutils, json, times, parsecsv, streams, tables, math, algorithm]
 from std/unicode import toUpper
 import ../lexis/[api, fonctions]
+import compression
 
 #
 # fichier
@@ -541,6 +542,99 @@ proc openBinaire(L: Interp): Value =
       for i in countup(0, s.len - 2, 2): r.add chr(parseHexInt(s[i .. i + 1]))
     except ValueError: return fail("chaîne hexadécimale invalide")
     @[strV(r)]
+  # opérations bit à bit (entiers de 64 bits)
+  proc bitArgs(L: Interp, a: seq[Value], fname: string): seq[int64] =
+    if a.len < 1: argError(1, fname, "entier attendu")
+    for i in 1 .. a.len: result.add L.checkInt(a, i, fname)
+  m.fn "et", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let v = L.bitArgs(a, "et")
+    var r = v[0]
+    for x in v[1 .. ^1]: r = r and x
+    @[intV(r)]
+  m.fn "ou", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let v = L.bitArgs(a, "ou")
+    var r = v[0]
+    for x in v[1 .. ^1]: r = r or x
+    @[intV(r)]
+  m.fn "oux", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let v = L.bitArgs(a, "oux")
+    var r = v[0]
+    for x in v[1 .. ^1]: r = r xor x
+    @[intV(r)]
+  m.fn "non", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let x = L.checkInt(a, 1, "non")
+    let bits = L.optInt(a, 2, "non", 64)
+    if bits >= 64: return @[intV(not x)]
+    if bits < 1: return fail("binaire.non : nombre de bits invalide")
+    @[intV((not x) and ((1'i64 shl bits) - 1))]
+  m.fn "decaler", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let x = L.checkInt(a, 1, "decaler")
+    let n = L.checkInt(a, 2, "decaler")
+    if n >= 64 or n <= -64: return @[intV(0)]
+    if n >= 0: @[intV(x shl n)] else: @[intV(cast[int64](cast[uint64](x) shr (-n)))]
+  m.fn "bit", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let x = L.checkInt(a, 1, "bit")
+    let n = L.checkInt(a, 2, "bit")
+    if n < 0 or n > 63: return @[boolV(false)]
+    @[boolV(((x shr n) and 1) == 1)]
+  m.fn "masquer", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ## (valeur and not masque) or (nouveau and masque)
+    let x = L.checkInt(a, 1, "masquer")
+    let v = L.checkInt(a, 2, "masquer")
+    let mk = L.checkInt(a, 3, "masquer")
+    @[intV((x and not mk) or (v and mk))]
+  # octets bruts (les chaînes Lexis+ sont des suites d'octets)
+  m.fn "longueur", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(L.checkStr(a, 1, "longueur").len)]
+  m.fn "octet", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let s = L.checkStr(a, 1, "octet")
+    let i = L.optInt(a, 2, "octet", 1)
+    if i < 1 or i > s.len: return @[nilV()]
+    @[intV(ord(s[i - 1]))]
+  m.fn "crc32", proc (L: Interp, a: seq[Value]): seq[Value] =
+    @[intV(int64(crc32(L.checkStr(a, 1, "crc32"))))]
+  m.fn "extraire", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let s = L.checkStr(a, 1, "extraire")
+    let d = max(int(L.checkInt(a, 2, "extraire")), 1)
+    let n = int(L.optInt(a, 3, "extraire", s.len))
+    if n <= 0 or d > s.len: return @[strV("")]
+    @[strV(s[d - 1 ..< min(d - 1 + n, s.len)])]
+  m.fn "octets", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let s = L.checkStr(a, 1, "octets")
+    let d = int(L.optInt(a, 2, "octets", 1))
+    let n = int(L.optInt(a, 3, "octets", s.len))
+    let t = newLTable()
+    var k = 1
+    for i in max(d, 1) .. min(d + n - 1, s.len):
+      t.rawSet(k, intV(ord(s[i - 1]))); inc k
+    @[tableV(t)]
+  m.fn "depuisoctets", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = L.checkTable(a, 1, "depuisoctets")
+    var r = newStringOfCap(t.rawLen)
+    for i in 1 .. t.rawLen:
+      var ok: bool
+      let v = toInteger(t.rawGet(i), ok)
+      r.add chr(int(v and 0xff))
+    @[strV(r)]
+  m.fn "mots", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ## mots de 16 bits petit-boutistes -> liste
+    let s = L.checkStr(a, 1, "mots")
+    let t = newLTable()
+    var k = 1
+    var i = 0
+    while i + 1 < s.len:
+      t.rawSet(k, intV(ord(s[i]) or (ord(s[i + 1]) shl 8))); inc k; i += 2
+    @[tableV(t)]
+  m.fn "depuismots", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let t = L.checkTable(a, 1, "depuismots")
+    var r = newStringOfCap(t.rawLen * 2)
+    for i in 1 .. t.rawLen:
+      var ok: bool
+      var v = toInteger(t.rawGet(i), ok)
+      if v < 0: v = 0
+      if v > 65535: v = 65535
+      r.add chr(int(v and 0xff)); r.add chr(int(v shr 8))
+    @[strV(r)]
   tableV(m)
 
 registerPackage PackageDef(name: "binaire", open: openBinaire,
@@ -550,7 +644,22 @@ registerPackage PackageDef(name: "binaire", open: openBinaire,
     "binaire.decoder(format, donnees, [position])", "Décode ; renvoie la liste des valeurs, avec le champ suite (position suivante).",
     "binaire.taille(format)", "Taille d'un format fixe.",
     "binaire.hex(donnees)", "Représentation hexadécimale.",
-    "binaire.dehex(hex)", "Octets à partir de l'hexadécimal."]))
+    "binaire.dehex(hex)", "Octets à partir de l'hexadécimal.",
+    "binaire.et(a, b, ...)", "Et bit à bit (entiers).",
+    "binaire.ou(a, b, ...)", "Ou bit à bit.",
+    "binaire.oux(a, b, ...)", "Ou exclusif bit à bit.",
+    "binaire.non(a, [bits])", "Complément bit à bit, limité à bits bits (64 par défaut) : binaire.non(0x10, 8) vaut 0xef.",
+    "binaire.decaler(a, n)", "Décalage : à gauche si n > 0, à droite (logique) si n < 0.",
+    "binaire.bit(a, n)", "Vrai si le bit n (0 = poids faible) de a vaut 1.",
+    "binaire.masquer(a, valeur, masque)", "Remplace dans a les bits du masque par ceux de valeur.",
+    "binaire.longueur(donnees)", "Longueur en octets (#chaine compte les caractères UTF-8).",
+    "binaire.octet(donnees, [i])", "Valeur (0-255) de l'octet i (à partir de 1) ; nul hors limites.",
+    "binaire.crc32(donnees)", "Somme de contrôle CRC-32 (celle de zip et PNG).",
+    "binaire.extraire(donnees, debut, [n])", "Sous-chaîne d'octets : n octets (tous par défaut) à partir de l'octet debut (à partir de 1).",
+    "binaire.octets(donnees, [debut, n])", "Liste des valeurs des octets.",
+    "binaire.depuisoctets(liste)", "Chaîne d'octets à partir d'une liste de valeurs (0-255).",
+    "binaire.mots(donnees)", "Liste des mots de 16 bits petit-boutistes.",
+    "binaire.depuismots(liste)", "Mots de 16 bits petit-boutistes à partir d'une liste."]))
 
 #
 # json

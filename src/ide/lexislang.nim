@@ -128,6 +128,12 @@ proc lexLine*(s: string, st: var LexState): seq[Token] =
       j = min(j, s.len)
       push(if closed: tkString else: tkError, segStart, j)
       i = j
+    elif c == '0' and i + 2 < s.len and s[i + 1] in {'x', 'X', 'b', 'B'} and
+         (s[i + 2] in HexDigits):
+      var j = i + 2
+      while j < s.len and (s[j] in HexDigits or s[j] == '_'): inc j
+      push(tkNumber, i, j)
+      i = j
     elif c in Digits:
       var j = i
       while j < s.len and s[j] in Digits: inc j

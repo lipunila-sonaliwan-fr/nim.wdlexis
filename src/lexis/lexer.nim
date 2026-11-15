@@ -97,6 +97,21 @@ proc tokenize*(src, source: string): seq[Tok] =
       else: endOfLine()
       inc i
       continue
+    # nombres hexadécimaux (0x1f) et binaires (0b101)
+    if c == '0' and i + 2 < n and src[i + 1] in {'x', 'X', 'b', 'B'} and
+       (if src[i + 1] in {'x', 'X'}: src[i + 2] in HexDigits else: src[i + 2] in {'0', '1'}):
+      let hex = src[i + 1] in {'x', 'X'}
+      var j = i + 2
+      var v: BiggestInt = 0
+      while j < n and (if hex: src[j] in HexDigits or src[j] == '_' else: src[j] in {'0', '1', '_'}):
+        if src[j] != '_':
+          v = v * (if hex: 16 else: 2) + BiggestInt(if hex: parseHexInt($src[j]) else: ord(src[j]) - ord('0'))
+        inc j
+      if j < n and (isIdentStart(src[j]) or src[j] in Digits):
+        err("nombre mal formé près de « " & src[i .. j] & " »")
+      add Tok(kind: tkNum, text: src[i ..< j], line: line, col: col, ival: v, isInt: true)
+      i = j
+      continue
     # nombres
     if c in Digits:
       var j = i

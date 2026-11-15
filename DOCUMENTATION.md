@@ -124,7 +124,7 @@ locale total = 1 + 2 + ;
 | --- | --- | --- |
 | `nul` | `nul` | absence de valeur ; s'affiche vide |
 | `logique` | `vrai`, `faux`, `.v.`, `.f.` | seuls `nul` et `faux` sont faux dans un `si` (`0` et `""` sont vrais) |
-| `nombre` | `42`, `3.14`, `1e3` | entiers et décimaux ; `5.0` s'affiche `5` |
+| `nombre` | `42`, `3.14`, `1e3`, `0x1f`, `0b101` | entiers et décimaux ; hexadécimal (`0x`) et binaire (`0b`, `_` permis : `0b1010_0001`) ; `5.0` s'affiche `5` |
 | `chaine` | `"texte"`, `'texte'`, `[[sur plusieurs lignes]]` | échappements `\n \t \" \\` |
 | `table` | `{1, 2}`, `{nom = "Ada"}` | listes, fiches, objets |
 | `procedure` | `@CARRE` | référence de procédure |
@@ -971,6 +971,40 @@ Le calendrier projette ensuite la semaine type sur l'année (jours ouvrables,
 vacances par niveau, classe ou enseignant, absences, travaux) ; les plannings des
 classes, enseignants et salles se consultent par semaine type ou par date, et une
 séance peut être épinglée ou déplacée à la main avec contrôle des conflits.
+
+### 7.6 Piloter un périphérique : les paquets `usb` et `trame`
+
+Le paquet `usb` donne accès aux périphériques USB par **libusb-1.0**, chargée
+à la demande. Il sert à écrire un pilote « en espace utilisateur » directement
+en Lexis+ : lister et ouvrir un périphérique, puis faire des transferts de
+contrôle, bulk et d'interruption. Les transferts libèrent l'interpréteur, si
+bien que l'interface reste réactive pendant les attentes. `p:tracer(fichier)`
+journalise chaque transfert, par exemple pour comparer avec une capture faite
+sous le pilote du fabricant. Les nombres hexadécimaux (`0x83`) et les
+opérations bit à bit du paquet `binaire` (`et`, `ou`, `decaler`, `masquer`…)
+simplifient l'écriture des registres.
+
+```lexis
+p = usb.ouvrir(0x04a9, 0x190e)                       && nul s'il est absent
+r = p:controle(0xc0, 0x04, 0x8e, 0x22 + binaire.decaler(0x06, 8), 2)
+? "registre 0x06 :", binaire.octet(r, 1), "accusé :", binaire.octet(r, 2)
+p:controle(0x40, 0x04, 0x83, 0, binaire.depuisoctets({0x0f, 0x01}))
+d = p:lire(0x81, 61424)                               && bulk entrant
+```
+
+Le paquet `trame` traite les images de 8 ou 16 bits :
+
+- assemblage des lignes reçues, y compris les lignes R, G, B séparées d'un
+  capteur CIS ;
+- recadrage, mise à l'échelle, niveaux, gris, trait et rotation ;
+- enregistrement en PNG, JPEG, TIFF ou PDF (une page ou plusieurs).
+
+`t:capter` simule le capteur d'un scanner qui lirait une image : il permet de
+mettre un pilote au point sans le matériel.
+
+Un simulateur de la puce permet de l'essayer sans scanner. Le dossier
+`verification/` compare sa programmation, registre par registre, avec celle de
+SANE compilé en mode test.
 
 ## 8. L'atelier
 
@@ -1926,6 +1960,21 @@ Données binaires - disponible par son nom (`binaire.…`) ou par `paquet("binai
 | `binaire.taille(format)` | Taille d'un format fixe. |
 | `binaire.hex(donnees)` | Représentation hexadécimale. |
 | `binaire.dehex(hex)` | Octets à partir de l'hexadécimal. |
+| `binaire.et(a, b, ...)` | Et bit à bit (entiers). |
+| `binaire.ou(a, b, ...)` | Ou bit à bit. |
+| `binaire.oux(a, b, ...)` | Ou exclusif bit à bit. |
+| `binaire.non(a, [bits])` | Complément bit à bit, limité à bits bits (64 par défaut) : binaire.non(0x10, 8) vaut 0xef. |
+| `binaire.decaler(a, n)` | Décalage : à gauche si n > 0, à droite (logique) si n < 0. |
+| `binaire.bit(a, n)` | Vrai si le bit n (0 = poids faible) de a vaut 1. |
+| `binaire.masquer(a, valeur, masque)` | Remplace dans a les bits du masque par ceux de valeur. |
+| `binaire.longueur(donnees)` | Longueur en octets (#chaine compte les caractères UTF-8). |
+| `binaire.octet(donnees, [i])` | Valeur (0-255) de l'octet i (à partir de 1) ; nul hors limites. |
+| `binaire.crc32(donnees)` | Somme de contrôle CRC-32 (celle de zip et PNG). |
+| `binaire.extraire(donnees, debut, [n])` | Sous-chaîne d'octets : n octets (tous par défaut) à partir de l'octet debut (à partir de 1). |
+| `binaire.octets(donnees, [debut, n])` | Liste des valeurs des octets. |
+| `binaire.depuisoctets(liste)` | Chaîne d'octets à partir d'une liste de valeurs (0-255). |
+| `binaire.mots(donnees)` | Liste des mots de 16 bits petit-boutistes. |
+| `binaire.depuismots(liste)` | Mots de 16 bits petit-boutistes à partir d'une liste. |
 
 ### Paquet `json`
 
@@ -2210,6 +2259,64 @@ Solveur de contraintes CP-SAT de wdreka (langage NCP), en Nim pur - disponible p
 | `m:arreter()` | Arrête la résolution en cours ; la meilleure solution trouvée est gardée. |
 | `m:statistiques()` | Taille et effort : {booleens, entiers, clauses, propagateurs, apprises, conflits, decisions, propagations, redemarrages}. |
 | `m:texte()` | Texte NCP du modèle. |
+
+### Paquet `usb`
+
+Accès direct aux périphériques USB (libusb-1.0) : pilotes en espace utilisateur - disponible par son nom (`usb.…`) ou par `paquet("usb")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `usb.disponible()` | Vrai si la bibliothèque libusb-1.0 est chargée (voir usb.erreur()). |
+| `usb.erreur()` | Raison pour laquelle libusb n'a pas pu être chargée ("" sinon). |
+| `usb.peripheriques([vendeur, produit])` | Liste des périphériques : {bus, adresse, vendeur, produit, id ("04a9:190e"), version (bcdDevice), usb (bcdUSB), classe, vitesse}. |
+| `usb.ouvrir(vendeur, produit, [{bus=, adresse=, interface=0, reclamer=vrai, configuration=}])` | Ouvre le premier périphérique correspondant (nul s'il est absent) et réclame son interface (le pilote du système est détaché sous Linux). Erreur explicite si l'accès est refusé. |
+| `p:descripteur()` | Description : bus, adresse, vendeur, produit, version, vitesse, fabricant, nom, serie. |
+| `p:points()` | Points de terminaison de la configuration active : {adresse, sens (entree, sortie), genre (controle, isochrone, bulk, interruption), taille, interface}. |
+| `p:configuration([n])` | Configuration active (la change si n est donné). |
+| `p:reclamer([interface])` | Réclame une interface (0 par défaut). |
+| `p:liberer([interface])` | Libère une interface. |
+| `p:controle(type, requete, valeur, index, donnees \| longueur, [delai_ms=5000])` | Transfert de contrôle. Sens donné par le bit 7 de type : entrant (0x80) → renvoie les octets lus (longueur demandée) ; sortant → envoie donnees (octets) et renvoie le nombre envoyé. |
+| `p:lire(point, longueur, [delai_ms=30000])` | Transfert bulk entrant : renvoie les octets reçus (au plus longueur). |
+| `p:ecrire(point, donnees, [delai_ms=30000])` | Transfert bulk sortant : renvoie le nombre d'octets envoyés. |
+| `p:interruption(point, longueur, [delai_ms=1000])` | Transfert d'interruption entrant ; nul si rien n'arrive dans le délai. |
+| `p:debloquer(point)` | Efface l'état bloqué (halt) d'un point de terminaison. |
+| `p:reinitialiser()` | Réinitialise le périphérique (réénumération USB). |
+| `p:tracer([chemin])` | Journalise chaque transfert dans un fichier (sans chemin : arrête) ; utile pour comparer avec une capture usbmon ou Wireshark. |
+| `p:statistiques()` | {transferts, octetslus, octetsecrits, ouvert}. |
+| `p:fermer()` | Libère les interfaces et ferme le périphérique (fait aussi à la fin du programme). |
+
+### Paquet `trame`
+
+Images matricielles 8 / 16 bits (scanner, capteur) : assemblage, retouches, PNG, JPEG, TIFF, PDF - disponible par son nom (`trame.…`) ou par `paquet("trame")`.
+
+| Appel | Rôle |
+| --- | --- |
+| `trame.nouvelle(largeur, hauteur, [canaux=3, profondeur=8, {dpi=, cis=, valeur=}])` | Nouvelle image (canaux 1 ou 3, profondeur 8 ou 16 bits). hauteur 0 et cis = vrai : image à remplir par t:ajouter avec des lignes séparées R, G, B (capteur CIS). |
+| `trame.depuisoctets(octets, largeur, [hauteur, canaux=3, profondeur=8, {dpi=, cis=}])` | Image à partir de données brutes (lignes, canaux entrelacés, 16 bits petit-boutistes ; cis : une ligne par canal). |
+| `trame.mire(largeur, hauteur, [dpi=100])` | Mire de test en couleurs (bandes, dégradé, cercles, grille de 2 cm, lignes de texte). |
+| `trame.pdf(chemin, {trames}, [{qualite=85, sansperte=faux}])` | PDF d'une page par image (taille selon le dpi de chaque image) ; JPEG, ou Flate avec sansperte. |
+| `trame.mediane16(octets, lignes, elements, [centile=0.5])` | Pour des mots de 16 bits rangés en lignes : la valeur au centile de chaque colonne (moyenne robuste d'étalonnage). |
+| `trame.moyennes16(octets, [segments=1])` | Moyenne des mots de 16 bits de chacun des segments consécutifs (ex. lignes R, G, B). |
+| `t:largeur()` | Largeur en pixels. |
+| `t:hauteur()` | Hauteur en pixels. |
+| `t:canaux()` | 1 (gris) ou 3 (RGB). |
+| `t:profondeur()` | 8 ou 16 bits. |
+| `t:dpi([valeur])` | Résolution enregistrée dans les fichiers (la change si valeur est donnée). |
+| `t:octets()` | Données brutes. |
+| `t:ajouter(octets)` | Ajoute des lignes complètes (les octets d'une ligne incomplète sont gardés pour l'appel suivant) ; renvoie la hauteur. |
+| `t:copier()` | Copie. |
+| `t:recadrer(x, y, largeur, hauteur)` | Nouvelle image : la zone donnée (pixels). |
+| `t:redimensionner(largeur, [hauteur])` | Nouvelle image mise à l'échelle (moyenne de surface en réduction, interpolation linéaire en agrandissement) ; une dimension à 0 garde les proportions. |
+| `t:en8bits()` | Nouvelle image en 8 bits. |
+| `t:en16bits()` | Nouvelle image en 16 bits. |
+| `t:gris()` | Nouvelle image en niveaux de gris (luminance). |
+| `t:trait([seuil=128])` | Nouvelle image noir et blanc (0 / 255). |
+| `t:pivoter(angle)` | Nouvelle image tournée de 90, 180 ou 270 degrés (sens horaire). |
+| `t:niveaux({gamma=1, luminosite=0, contraste=0, noir=0, blanc=1})` | Corrige l'image sur place : noir et blanc (fractions), gamma, contraste et luminosité (-100 à 100). |
+| `t:statistiques()` | Par canal : {min, max, moyenne}. |
+| `t:pixel(x, y)` | Valeurs des canaux d'un pixel. |
+| `t:enregistrer(chemin, [{qualite=88, dpi=, sansperte=}])` | Enregistre selon l'extension : .png (8 / 16 bits), .jpg (qualité 1 à 100), .tif (non compressé, 8 / 16 bits), .pnm / .ppm / .pgm, .pdf ; renvoie la taille du fichier. |
+| `t:capter({x=, y=, pixels=, resolution=, canal=, profondeur=16, lampe=vrai, gain=1, noir=0.03, bruit=0.004, decalage=0, vignetage=0.15, ombrage=, coefficient=0x4000, gamma=})` | Simulation d'un capteur de scanner lisant l'image comme un document posé sur la vitre : une ligne de pixels (16 ou 8 bits) à la position y (pouces), avec sensibilité inégale des pixels, courant d'obscurité, bruit, correction d'ombrage (4 octets par pixel : noir, gain) et table gamma comme le ferait le circuit du scanner. Sert à essayer un pilote sans le matériel. |
 
 ### Paquet `tache`
 

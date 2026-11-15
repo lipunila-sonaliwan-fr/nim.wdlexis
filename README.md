@@ -79,6 +79,8 @@ wdlexis/
     pkg_document.nim     texte des documents (pdftexte.nim : PDF en Nim pur), passages,
                          mots-clés, carte des concepts, extraits
     pkg_wdreka.nim       solveur de contraintes CP-SAT de wdreka, langage NCP (cpsat/, Nim pur)
+    pkg_usb.nim          accès direct aux périphériques USB (libusb-1.0 chargée à la demande)
+    pkg_trame.nim        images 8 / 16 bits : lignes de capteur, retouches, PNG, JPEG, TIFF, PDF
     pkg_webview.nim      pages HTML / JavaScript dans une fenêtre native (bibliothèque webview
                          chargée à l'exécution), pont JavaScript <-> Lexis+
     pkg_llm.nim ...      llm, gguf, dessin, audio, tenseur, entrainement
@@ -90,8 +92,6 @@ wdlexis/
     lucene/              bibliothèque de livres : recherche plein texte pendant la frappe
     archives/            archiveur zip / tar.gz / gzip
     mqtt/                maison connectée : capteurs, lampes, thermostat (serveur intégré)
-    rag/                 veille documentaire : recherche sur Internet, index Lucene,
-                         analyse au fil des ajouts, carte des concepts, questions (RAG)
     webview/             pages web : bonjour, Lexis+ -> JS, JS -> Lexis+, application
     formulaire/          fiche client dessinée avec le concepteur de formulaires
     etats/               facture PDF de deux pages (éditeur d'états, paquet rapport)
@@ -205,7 +205,7 @@ Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 | Client Firebird (`libfbclient.so`, `.dylib`, `fbclient.dll`) | paquet `firebird` | client Firebird installé, dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme, ou chemin dans `WDLEXIS_FIREBIRD` |
 | webview (`webview.so`, `webview.dylib`, `webview.dll`) | paquet `webview` | dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme (fournies), ou chemin dans `WDLEXIS_WEBVIEW` ; moteur web du système : WebView2 (Windows 10/11), WKWebView (macOS), WebKitGTK 4.1 (Linux : `libwebkit2gtk-4.1-0`) |
 
-Les paquets `archive`, `mqtt`, `document` et `wdreka` sont écrits en Nim pur, sans
+Les paquets `archive`, `mqtt`, `document`, `wdreka` et `trame` sont écrits en Nim pur, sans
 bibliothèque externe (TLS de `mqtt` : OpenSSL, comme HTTPS).
 
 Les paquets d'IA (`llm`, `gguf`, `dessin`, `audio`, `tenseur`, `entrainement`)

@@ -1,0 +1,20 @@
+littéraux : 31 255 5 161 17
+bits : 3 145 240 239
+décalages : 4096 2048 vrai faux
+masque : 163
+octets : 4 255 vrai 0 255
+extraire : 00ff 07
+mots : 1 65535 300 3421780262
+cis : 0 2 102 202 302 1 4 7
+8 bits : 8 0 1 1 300
+redimensionner : 100 75 12.5
+pivoter : 300 400 50
+gris : 1 1 255
+statistiques : 40 40 40
+niveaux : 126
+médiane : 7 4 5
+moyennes : 15 40
+formats : png=ok jpg=ok tif=ok pgm=ok pdf=ok pdf2=ok
+capteur : 20
+usb : logique chaine
+erreur : trame : 1 ou 3 canaux
