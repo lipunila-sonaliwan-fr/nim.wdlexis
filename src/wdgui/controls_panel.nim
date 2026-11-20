@@ -25,6 +25,7 @@ type
 
   Panel* = ref object of Container
     scrollbars*: ScrollbarMode
+    verticalOnly*: bool           # vertical scrolling only: the content takes the panel's width.
     scrollX*, scrollY*: float     # current offset of the content (pixels).
     lineStep*: float              # pixels per wheel notch.
     contentW*, contentH*: float   # natural size of the content (computed at layout).
@@ -121,14 +122,16 @@ method preferredSize*(p: Panel, d: Drawing, t: Theme): tuple[w, h: float] =
 method layoutChildren*(p: Panel, d: Drawing, t: Theme) =
   # natural size of the content, laid out with the panel's own layout
   let c = procCall preferredSize(Container(p), d, t)
-  p.contentW = c.w
+  p.contentW = if p.verticalOnly: 0.0 else: c.w
   p.contentH = c.h
   p.computeBars()
   p.clampScroll()
-  # lay the children out in a virtual rectangle of the content's natural size,
-  # shifted by the scroll offset: children keep their size, only their position moves
+  # lay the children out in a virtual rectangle of the content's natural size (at least the
+  # viewport: content smaller than the panel fills it, weighted children take the extra
+  # height), shifted by the scroll offset: children keep their size, only their position moves
   let saved = p.rect
-  p.rect = rect(p.viewport.x - p.scrollX, p.viewport.y - p.scrollY, c.w, c.h)
+  let cw = if p.verticalOnly: p.viewport.w else: max(c.w, p.viewport.w)
+  p.rect = rect(p.viewport.x - p.scrollX, p.viewport.y - p.scrollY, cw, max(c.h, p.viewport.h))
   procCall layoutChildren(Container(p), d, t)
   p.rect = saved
 

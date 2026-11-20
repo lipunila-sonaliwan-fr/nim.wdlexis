@@ -1,16 +1,20 @@
-# Test du paquet firebird sans serveur
+# Test du paquet firebird sans serveur Firebird
 
-`fbmock.c` est une bibliothèque cliente Firebird **factice** : elle reproduit
-les structures exactes d'`ibase.h` et le sous-ensemble de l'API ISC/DSQL
-utilisé par `src/paquets/pkg_firebird.nim` (connexion, transactions,
-descripteurs XSQLDA, paramètres, types de colonnes, BLOB en plusieurs
-segments, messages d'erreur). Elle permet de vérifier la liaison sans
-serveur Firebird.
+Le paquet `firebird` parle directement le protocole réseau de Firebird
+(`src/paquets/firebird/fbwire.nim`) : il n'utilise plus la bibliothèque cliente
+`fbclient`. `serveur_simule.py` est un **faux serveur** Firebird (protocole 17)
+écrit en Python sans dépendance : il réalise côté serveur l'authentification
+SRP (Srp256, ou Srp après un nouvel échange de clé publique), le chiffrement
+Arc4, la description des instructions par éléments d'information (y compris
+une réponse tronquée), l'exécution avec messages BLR, la lecture par lots, les
+BLOB en segments et les erreurs (vecteur d'état), sur une petite table en
+mémoire.
 
 ```
-gcc -shared -fPIC -o libfbclient.so tests/firebird/fbmock.c
-WDLEXIS_FIREBIRD=$PWD/libfbclient.so ./wdlexisrt tests/firebird/principal.prg
+python3 tests/firebird/serveur_simule.py 3055 srp256 &     # ou srp, nocrypt
+FBPORT=3055 ./wdlexisrt tests/firebird/principal.prg
 ```
 
-Les valeurs renvoyées sont celles du simulateur (et non d'une vraie base).
-Pour un essai réel : `exemples/firebird` avec un serveur Firebird.
+Le serveur simulé suit la description publique du protocole : il vérifie la
+cohérence du pilote (cadrage XDR, SRP, Arc4, BLR) mais ne remplace pas un essai
+avec un vrai serveur Firebird 3, 4 ou 5 (`exemples/firebird`).

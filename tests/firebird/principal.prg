@@ -1,114 +1,48 @@
-&& Test de la liaison firebird avec la bibliothèque factice fbmock.c (voir LISEZMOI.md).
-? "disponible :", firebird.disponible()
-? "version :", firebird.version()
-essayer
-  firebird.connecter("serveur:/data/absente.fdb", "SYSDBA", "x")
-capturer e
-  ? "connexion refusée :", e
-finessayer
-
-locale db = firebird.connecter("serveur/3050:/data/test.fdb", "SYSDBA", "masterkey", {role = "ADMIN", isolation = "instantane", attente = 5})
-? "dpb/tpb :", db:valeur("select dpb from rdb$database")
-locale db2 = firebird.connecter({hote = "srv", port = 3051, base = "/b.fdb", utilisateur = "u1", motdepasse = "p1", jeu = "WIN1252", attente = faux, lecture = vrai})
-? "dpb/tpb (table) :", db2:valeur("select dpb from rdb$database")
-db2:fermer()
-
-? "--- requete"
-pour chaque r dans db:requete("select * from client")
-  ? json(r)
+&& CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
+&& Test du paquet firebird (pilote natif) contre le serveur simulé
+&& serveur_simule.py (voir LISEZMOI.md) : authentification SRP, chiffrement Arc4,
+&& paramètres, types, BLOB en plusieurs segments, RETURNING, EXECUTE PROCEDURE,
+&& lecture par lots, description tronquée (600 colonnes), séquence, erreurs.
+fb = paquet("firebird")
+? "version", fb.version(), fb.disponible()
+port = systeme.env("FBPORT") ou "3055"
+db = fb.connecter("127.0.0.1/" + port + ":/data/test.fdb", "sysdba", "masterkey")
+? "serveur", db:serveur()
+? "create", db:executer("create table t (id integer)")
+long = ""
+pour i = 1 a 5000
+  long = long + "0123456789"
 suivant
-locale r1 = db:premier("select * from client")
-? "notes :", longueur(r1.notes), gauche(r1.notes, 20), droite(r1.notes, 8)
-? "types :", type(r1.id), type(r1.credit), type(r1.actif), type(r1.gros), r1.gros
-
-? "--- paramètres (aller-retour)"
-locale e1 = db:premier("select echo /*T:LNFDBOVV*/ ? ? ? ? ? ? ? ?", 42, 7, 2.5, "2024-03-12", repliquer("blob é ", 3000), vrai, "Élise", nul)
-? e1.p1, e1.p2, e1.p3, e1.p4, longueur(e1.p5), e1.p5 = repliquer("blob é ", 3000), e1.p6, e1.p7, e1.p8
-locale e2 = db:premier("select echo /*T:DVL*/ ? ? ?", "12.03.2024", 3.5, "17")
-? e2.p1, e2.p2, e2.p3
-locale e3 = db:premier("select echo /*T:LV*/ ? ?", {5, "liste"})
-? e3.p1, e3.p2
-essayer
-  db:requete("select echo /*T:LL*/ ? ?", 1)
-capturer e
-  ? "paramètres manquants :", e
-finessayer
-essayer
-  db:requete("select echo /*T:L*/ ?", {1, 2})
-capturer e
-  ? "table :", e
-finessayer
-
-? "--- executer"
-? "insert :", db:executer("insert into client(nom) values (?)", "x"), db:modifications()
-? "update :", db:executer("update client set nom = 'y'")
-? "delete :", db:executer("delete from client")
-? "script :", db:executer("insert into a values (1); update a set x = 2; -- commentaire ; \n delete from a where s = 'a;b'")
-? "returning :", json(db:premier("insert into client(nom) values (?) returning id", "z"))
-? "requete returning :", json(db:requete("insert into client(nom) values (?) returning id", "z"))
-? "sequence :", db:sequence("GEN_CLIENT")
-? "valeur :", db:valeur("select * from client")
-
-? "--- transactions"
-? "etat :", json(db:premier("select etat"))
-db:transaction(@OK)
-? "après transaction ok :", json(db:premier("select etat"))
-essayer
-  db:transaction(@RATEE)
-capturer e
-  ? "transaction ratée :", e
-finessayer
-? "après ratée :", json(db:premier("select etat")), db:entransaction()
-db:debut({isolation = "serialisable", attente = faux})
-? "en transaction :", db:entransaction(), db:valeur("select dpb from rdb$database")
-db:executer("update t set a = 1")
-db:valider()
+? "insert", db:executer("insert into t (nom, prix, dt, note, ok, code, taux) values (?, ?, ?, ?, ?, ?, ?)", "Dupont é", 12.5, "2026-11-17", long, vrai, "AB", 0.25)
+? "insert2", db:executer("insert into t (nom, prix, ok) values (?, ?, ?)", "Martin", 7, nul)
+r = db:requete("insert into t (nom) values (?) returning id", "Durand")
+? "returning", r[1].id
+pour i = 1 a 450
+  db:executer("insert into t (nom, prix) values (?, ?)", "n" + chaine(i), i)
+suivant
+lignes = db:requete("select * from t")
+? "nb lignes", #lignes
+l1 = lignes[1]
+? "l1", l1.id, l1.nom, l1.prix, l1.dt, longueur(l1.note), l1.ok, "[" + l1.code + "]", l1.big, l1.ts, l1.taux
+? "l2", lignes[2].nom, lignes[2].prix, lignes[2].ok, lignes[2].note
+? "premier", db:premier("select * from t where id > ?", 2).nom
+? "valeur", db:valeur("select * from t")
+n = 0
+pour chaque x dans db:lignes("select * from t")
+  n = n + 1
+suivant
+? "iterateur", n
+? "proc", db:requete("execute procedure p")[1].total
+? "large", db:premier("select * from large").c599
+? "sequence", db:sequence("g"), db:sequence("g")
 db:debut()
+? "entransaction", db:entransaction()
 db:annuler()
-? "après debut/annuler :", json(db:premier("select etat"))
+? "supprime", db:executer("delete from t")
 essayer
-  db:valider()
+  db:requete("select * from nope")
 capturer e
-  ? "valider sans transaction :", e
+  ? "erreur attendue", e
 finessayer
-
-? "--- itérateur"
-locale n = 0
-pour chaque r dans db:lignes("select * from client")
-  n += 1
-suivant
-? "lignes :", n, json(db:premier("select etat"))
-pour chaque r dans db:lignes("select * from client")
-  sortir
-suivant
-? "itérateur interrompu :", json(db:premier("select etat"))
-pour chaque r dans db:lignes("insert into c(n) values (?) returning id", "q")
-  ? "ligne returning :", json(r)
-suivant
-
-? "--- erreurs"
-essayer
-  db:executer("select syntaxe! from x")
-capturer e
-  ? "syntaxe :", e
-finessayer
-? "après erreur :", json(db:premier("select etat"))
-
-locale db3 = firebird.creer("/tmp/nouvelle.fdb", "SYSDBA", "masterkey", {taillepage = 16384})
-? "creer :", db3:valeur("select dpb from rdb$database")
-db3:fermer()
+? "tables ok apres erreur", db:valeur("select rdb$get_context('SYSTEM','ENGINE_VERSION') from rdb$database")
 db:fermer()
-essayer
-  db:requete("select 1")
-capturer e
-  ? "après fermeture :", e
-finessayer
-
-procedure OK(db)
-  db:executer("insert into client(nom) values (?)", "ok")
-retourner
-
-procedure RATEE(db)
-  db:executer("insert into client(nom) values (?)", "a")
-  db:executer("insert into client erreur (nom) values (?)", nul)
-retourner

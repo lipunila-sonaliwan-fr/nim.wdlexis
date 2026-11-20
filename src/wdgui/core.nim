@@ -1,7 +1,7 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
 # wdgui core: controls, containers, windows, thread-safe registry (id-based
 # access), event emission, layouts, hit testing, focus.
-import std/[locks, math, strutils]
+import std/[locks, math, strutils, options]
 import ../sdl3, colors_themes, drawing
 export colors_themes, drawing
 
@@ -588,6 +588,9 @@ proc controlAt*(c: Control, x, y: float): Control =
 
 proc drawTree*(c: Control, d: Drawing, t: Theme) =
   if not c.visible or c.rect.w <= 0 or c.rect.h <= 0: return
+  # fond d'un conteneur simple (rangée, colonne...) : `fond = "#RRGGBB"`.
+  if c of Container and c.style.background.isSome and Container(c).typeName == "Supercontrol":
+    d.fillRect(c.rect, c.style.background.get)
   c.draw(d, t)
   if c of Container:
     let k = Container(c)

@@ -226,6 +226,7 @@ type
     output*: proc (s: string) {.closure.}
     errput*: proc (s: string) {.closure.}
     input*: proc (prompt: string): (bool, string) {.closure.}
+    lastErrorTrace*: string        # message et pile d'appels de la dernière erreur capturée (pileerreur()).
     sourceProvider*: proc (path: string): (bool, string) {.closure.}
     onError*: proc (msg: string) {.closure.}     # erreurs dans les gestionnaires d'événements.
     searchDirs*: seq[string]

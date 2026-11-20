@@ -803,11 +803,13 @@ proc execStmt(L: Interp, fr: Frame, s: Stmt): ExecResult =
       raise
     except LexisError as e:
       c.frames.setLen(depth)
+      L.lastErrorTrace = e.msg & (if e.traceback.len > 0: "\n" & e.traceback else: "")
       if s.blocks.len > 1:
         if s.slots[0] >= 0: fr.setLocal(s.slots[0], (if e.value.kind == vkNil: strV(e.msg) else: e.value))
         return L.execBlock(fr, s.blocks[1])
     except CatchableError as e:
       c.frames.setLen(depth)
+      L.lastErrorTrace = e.msg
       if s.blocks.len > 1:
         if s.slots[0] >= 0: fr.setLocal(s.slots[0], strV(e.msg))
         return L.execBlock(fr, s.blocks[1])

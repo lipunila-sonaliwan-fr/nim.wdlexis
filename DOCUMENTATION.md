@@ -459,8 +459,10 @@ désigne explicitement la variable.
 Les paquets `sqlite` et `firebird` donnent accès à d'autres bases, avec les
 mêmes méthodes : `executer`, `requete`, `premier`, `lignes`, `transaction`,
 `fermer` (paramètres `?`, lignes rendues comme des tables aux colonnes en
-majuscules). La bibliothèque cliente est chargée à l'exécution, seulement si le
-programme s'en sert.
+majuscules). SQLite passe par la bibliothèque du système ; Firebird par un pilote
+natif intégré, qui parle directement le protocole réseau d'un serveur Firebird 3,
+4 ou 5 (authentification SRP, flux chiffré Arc4) : aucune bibliothèque cliente
+`fbclient` n'est nécessaire.
 
 ```lexis
 db = firebird.connecter("localhost:/data/gestion.fdb", "SYSDBA", "masterkey")
@@ -478,7 +480,11 @@ Firebird : sans transaction explicite, chaque instruction est validée
 automatiquement ; `db:debut()` ... `db:valider()` / `db:annuler()` ou
 `db:transaction(@proc)` regroupent plusieurs instructions. Les dates se passent
 en texte (`"2024-03-12"`), les BLOB texte se lisent et s'écrivent comme des
-chaînes. Exemple complet : `exemples/firebird`.
+chaînes. Une base désignée sans hôte (`/data/gestion.fdb`, alias) est ouverte
+par le serveur local (`localhost`, port 3050) ; l'option `chiffrement` vaut
+`vrai` (si le serveur le propose), `faux` ou `"exige"`. Les serveurs Firebird 2.5
+et antérieurs (authentification `Legacy_Auth`) ne sont pas pris en charge.
+Exemple complet : `exemples/firebird`.
 
 ### 4.4 Recherche plein texte : Lucene
 
@@ -486,8 +492,8 @@ Le paquet `lucene` crée et interroge des index de recherche plein texte avec
 **Lucene++** (<https://github.com/luceneplusplus/LucenePlusPlus>), le portage C++
 d'Apache Lucene 3.0 (double licence LGPL 3 / Apache 2.0). Il s'appuie sur une
 seule bibliothèque, `wdlexis_lucene` (`libwdlexis_lucene.so`, `.dylib` ou
-`wdlexis_lucene.dll`), qui contient Lucene++ et Boost liés statiquement : comme le
-client Firebird, elle est chargée à l'exécution, depuis le dossier `linOS`
+`wdlexis_lucene.dll`), qui contient Lucene++ et Boost liés statiquement : elle est
+chargée à l'exécution, depuis le dossier `linOS`
 (`macOS`, `winOS`) à côté de l'exécutable ou du programme, ou depuis le chemin
 donné par la variable `WDLEXIS_LUCENE`. `sh outils/lucenepp.sh` (ou `nimble
 lucenepp`) la construit. Une application générée l'emporte avec ses autres
@@ -1002,9 +1008,6 @@ Le paquet `trame` traite les images de 8 ou 16 bits :
 `t:capter` simule le capteur d'un scanner qui lirait une image : il permet de
 mettre un pilote au point sans le matériel.
 
-Un simulateur de la puce permet de l'essayer sans scanner. Le dossier
-`verification/` compare sa programmation, registre par registre, avec celle de
-SANE compilé en mode test.
 
 ## 8. L'atelier
 
@@ -1866,6 +1869,7 @@ Fonctions intégrées de Lexis+
 | `enregistrement([alias])` | L'enregistrement courant sous forme de table. |
 | `paquet(nom)` | Charge un paquet : interface, fichier, json, csv, http, reseau, tache... |
 | `saisir([invite])` | Lit une ligne saisie (console de l'atelier ou terminal) ; nul en fin d'entrée. |
+| `pileerreur()` | Message et pile d'appels (lignes « source.prg:ligne dans … ») de la dernière erreur capturée par `essayer … capturer`. |
 
 ### Paquet `es`
 
@@ -2094,18 +2098,19 @@ Bases SQLite - disponible par son nom (`sqlite.…`) ou par `paquet("sqlite")`.
 
 ### Paquet `firebird`
 
-Bases Firebird (client natif fbclient) - disponible par son nom (`firebird.…`) ou par `paquet("firebird")`.
+Bases Firebird 3 à 5 (pilote réseau natif, sans fbclient) - disponible par son nom (`firebird.…`) ou par `paquet("firebird")`.
 
 | Appel | Rôle |
 | --- | --- |
-| `firebird.connecter(base, utilisateur, motdepasse[, options])` | Connexion : "serveur:/chemin/base.fdb", "serveur/3050:alias" ou fichier local. Accepte aussi une table {base=, hote=, port=, utilisateur=, motdepasse=, role=, jeu="UTF8", isolation=, attente=}. |
+| `firebird.connecter(base, utilisateur, motdepasse[, options])` | Connexion : "serveur:/chemin/base.fdb", "serveur/3050:alias" ou fichier local. Accepte aussi une table {base=, hote=, port=, utilisateur=, motdepasse=, role=, jeu="UTF8", isolation=, attente=, chiffrement=vrai\|faux\|"exige"}. Sans hôte, le serveur local (localhost:3050) est utilisé. |
 | `firebird.creer(base, utilisateur, motdepasse[, {taillepage=8192, jeu="UTF8"}])` | Crée une base puis s'y connecte. |
-| `firebird.version()` | Version de la bibliothèque cliente. |
-| `firebird.disponible()` | Vrai si la bibliothèque cliente est trouvée. |
+| `firebird.version()` | Version du pilote natif. |
+| `firebird.disponible()` | Toujours vrai : le pilote est intégré (aucune bibliothèque cliente requise). |
 | `db:executer(sql, ...)` | Exécute une instruction avec paramètres « ? » ; renvoie le nombre de lignes modifiées. Sans paramètre, accepte un script d'instructions séparées par « ; » (hors blocs PSQL). |
 | `db:requete(sql, ...)` | Liste des lignes ; chaque ligne est une table colonne (majuscules) -> valeur. Accepte INSERT ... RETURNING et EXECUTE PROCEDURE. |
 | `db:premier(sql, ...)` | Première ligne ou nul. |
 | `db:valeur(sql, ...)` | Première colonne de la première ligne ou nul. |
+| `db:resultat(sql, ...)` | Résultat complet d'une instruction : {colonnes = noms dans l'ordre, lignes, modifications, genre = "selection", "procedure", "modification", "definition" ou "autre", tronque}. |
 | `db:lignes(sql, ...)` | Itérateur sur les lignes : pour chaque r dans db:lignes(sql) ... suivant. |
 | `db:modifications()` | Lignes modifiées par le dernier executer(). |
 | `db:sequence(nom[, pas=1])` | Valeur suivante d'une séquence (générateur). |
@@ -2611,14 +2616,14 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `interface.onglets()` | Onglets. |
 | `interface.separateur{vertical=, position=}` | Séparateur (deux enfants). Si l'un est masqué (`visible = faux`), l'autre prend toute la place et la position est conservée. |
 | `interface.conteneur([disposition], [colonnes])` | Conteneur. |
-| `interface.colonne()` | Conteneur vertical. |
+| `interface.colonne()` | Conteneur vertical (`c.fond = "#RRGGBB"` : fond coloré, comme pour `rangee` et `conteneur`). |
 | `interface.rangee()` | Conteneur horizontal. |
 | `interface.superconteneur([disposition])` | Conteneur sans marge. |
 | `interface.cadre(titre, [disposition])` | Cadre de groupe. |
-| `interface.panneau{disposition=, defilement=, colonnes=}` | Conteneur défilant (defilement : toujours, automatique, masque). |
+| `interface.panneau{disposition=, defilement=, colonnes=}` | Conteneur défilant (defilement : toujours, automatique, masque, vertical — défilement vertical seul, le contenu prend la largeur du panneau). Un contenu plus petit que le panneau le remplit ; les contrôles qui ont un poids se partagent la place restante. |
 | `interface.pdf()` | Visionneuse PDF (PDFium). |
-| `interface.editeur([{minicarte=, taille=, numeros=, raccourcis=}])` | Éditeur de code à onglets (coloration, complétion, structure, minicarte, points d'arrêt) : Lexis+, SQL, Markdown et tout langage défini par `interface.definirlangage` ; `numeros = "simples"` : numéros de ligne sans les repères de l'atelier ; `raccourcis = "palette"` : F1 et Ctrl+Maj+P envoient `"cmd:palette"`, Ctrl+P `"cmd:quickopen"`, Ctrl+W `"cmd:closetab"`, Ctrl+Maj+O `"cmd:symbols"` (et Ctrl+N / Ctrl+O même sans document). `valeur` : texte du document actif ; `surchangement` : texte modifié ; `surselection` : signal dans `ev.texte` (`"pos:L:C"`, `"doc:UID"`, `"cmd:save"`, `"cmd:run"`...). |
-| `interface.markdown(texte \| {texte=, fichier=})` | Visionneuse Markdown en lecture seule, retour à la ligne automatique et ascenseur vertical ; `surselection` reçoit l'URL d'un lien cliqué (`ev.texte`) ; `fichier` relatif au dossier du programme. |
+| `interface.editeur([{minicarte=, taille=, numeros=, raccourcis=, onglets=, ajuster=, lignesmin=, lignesmax=}])` | Éditeur de code à onglets (`onglets = faux` : sans barre d'onglets, la molette passe au conteneur quand tout le texte est visible, Maj+Entrée envoie `"cmd:shiftenter"` et Ctrl+Entrée `"cmd:ctrlenter"` — cellule de carnet ; `ajuster = vrai` : la hauteur suit le nombre de lignes, entre `lignesmin` et `lignesmax` ; coloration, complétion, structure, minicarte, points d'arrêt) : Lexis+, SQL, Markdown et tout langage défini par `interface.definirlangage` ; `numeros = "simples"` : numéros de ligne sans les repères de l'atelier ; `raccourcis = "palette"` : F1 et Ctrl+Maj+P envoient `"cmd:palette"`, Ctrl+P `"cmd:quickopen"`, Ctrl+W `"cmd:closetab"`, Ctrl+Maj+O `"cmd:symbols"` (et Ctrl+N / Ctrl+O même sans document). `valeur` : texte du document actif ; `surchangement` : texte modifié ; `surselection` : signal dans `ev.texte` (`"pos:L:C"`, `"doc:UID"`, `"cmd:save"`, `"cmd:run"`...). |
+| `interface.markdown(texte \| {texte=, fichier=, ajuster=, hauteurmax=})` | Visionneuse Markdown en lecture seule, retour à la ligne automatique et ascenseur vertical ; `ajuster = vrai` : la hauteur suit le contenu (sans ascenseur ; la molette passe au conteneur), jusqu'à `hauteurmax` pixels s'il est donné (ascenseur au-delà) ; `surselection` reçoit l'URL d'un lien cliqué (`ev.texte`) ; `fichier` relatif au dossier du programme. |
 | `interface.alerte(message, [icone], [titre])` | Message (icone : information, question, attention, stop, aucune). |
 | `interface.confirmer(message, [icone])` | OK / Annuler ; renvoie un logique. |
 | `interface.demander(message, [defaut])` | Saisie d'un texte. |

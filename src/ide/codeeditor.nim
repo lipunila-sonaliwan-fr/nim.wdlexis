@@ -116,6 +116,10 @@ type
     plainNumbers*: bool          # numéros de ligne simples (sinon : repères de l'atelier toutes les 10 lignes).
     paletteKeys*: bool           # F1, Ctrl+P, Ctrl+Maj+P, Ctrl+W, Ctrl+Maj+O signalés (éditeur à palette de commandes).
     hoverDot: int
+    hideTabs*: bool              # sans barre d'onglets (cellule de carnet) : la molette passe au parent
+    autoHeight*: bool            # hauteur = nombre de lignes (cellule de carnet)
+    autoMin*, autoMax*: int      # bornes de autoHeight, en lignes (0 : aucune)
+                                 # quand tout le texte est visible.
 
 
 const ImageExts = [
@@ -850,7 +854,8 @@ proc doc*(ed: CodeEditor): Document =
   if ed.current >= 0 and ed.current < ed.docs.len: ed.docs[ed.current] else: nil
 
 proc bodyRect(ed: CodeEditor): Rect =
-  rect(ed.rect.x, ed.rect.y + tabBarH, ed.rect.w, max(0.0, ed.rect.h - tabBarH))
+  let th = (if ed.hideTabs: 0.0 else: tabBarH)
+  rect(ed.rect.x, ed.rect.y + th, ed.rect.w, max(0.0, ed.rect.h - th))
 
 proc numbersW(ed: CodeEditor): float =
   let d = ed.doc
@@ -880,7 +885,10 @@ proc lineY(ed: CodeEditor, l: int): float =
 proc clampScroll(ed: CodeEditor) =
   let d = ed.doc
   if d == nil: return
-  d.scroll = clamp(d.scroll, 0.0, max(0.0, float(d.lines.len) - 1))
+  if ed.hideTabs:
+    d.scroll = clamp(d.scroll, 0.0, max(0.0, float(d.lines.len - ed.visibleLines)))
+  else:
+    d.scroll = clamp(d.scroll, 0.0, max(0.0, float(d.lines.len) - 1))
   d.scrollX = max(0.0, d.scrollX)
 
 method scrollTrackTo*(ed: CodeEditor, vertical: bool, pos: float) =
@@ -1190,51 +1198,65 @@ proc runPending(ed: CodeEditor)
 method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
   ed.ensureFont(d)
   ed.runPending()
+  if ed.autoHeight and ed.doc != nil:
+    var n = ed.doc.lines.len
+    if ed.autoMin > 0: n = max(n, ed.autoMin)
+    if ed.autoMax > 0: n = min(n, ed.autoMax)
+    var cols = 0
+    for l in ed.doc.lines: cols = max(cols, l.len)
+    let cw = ed.codeRect.w
+    let hb = (if float(cols + 4) * ed.charW > cw - 24: 12.0 else: 0.0)
+    let th = (if ed.hideTabs: 0.0 else: tabBarH)
+    let want = ceil(float(n) * ed.lineH + 10 + hb + th)
+    if abs(ed.fixedHeight - want) > 0.5:
+      ed.fixedHeight = want
+      if ed.win != nil: ed.win.animating = true
   let colors = colorsFor(t)
   let r = ed.rect
-  # tab strip.
-  d.fillRect(rect(r.x, r.y, r.w, tabBarH), colors.tabBar)
-  d.fillRect(rect(r.x, r.y + tabBarH - 1, r.w, 1), colors.separator)
-  if not ed.hovered:
-    ed.hoverTab = -1
-    ed.hoverClose = -1
-    ed.hoverDot = -1
-  let tabs = ed.tabRects(d)
-  d.pushClip(rect(r.x, r.y, r.w, tabBarH))
-  for i, tr in tabs:
-    let doc = ed.docs[i]
-    let active = i == ed.current
-    if active:
-      d.fillRoundRect(rect(tr.x, tr.y, tr.w, tr.h + 6), 6, colors.tabActive)
-      d.fillRect(rect(tr.x + 8, tr.y, tr.w - 16, 2), t.accent)
-    elif i == ed.hoverTab:
-      d.fillRoundRect(rect(tr.x, tr.y, tr.w, tr.h + 6), 6, colors.tabActive.withAlpha(110))
-    var bw = 0.0
-    if doc.badge.len > 0:
-      bw = d.textWidth(doc.badge) + 14
-      let bc = if doc.badgeColor.a == 0: t.accent else: doc.badgeColor
-      let br = rect(tr.x + tr.w - 30 - bw + 4, tr.y + (tr.h - 16) / 2 + 1, bw - 6, 16)
-      d.fillRoundRect(br, 8, bc)
-      d.textIn(br, doc.badge, hex"#FFFFFF", alCenter)
-    var tx = tr.x + 12
-    if ed.kindDots:
-      let dc = (if doc.kind == dkText and doc.isMarkdown: kindColor(dkPreview) elif doc.kind == dkText and doc.isSql: hex"#3B82F6" else: kindColor(doc.kind))
-      let dy = tr.y + tr.h / 2
-      if i == ed.hoverDot: d.fillCircle(tr.x + 14, dy, 8, dc.withAlpha(70))
-      d.fillCircle(tr.x + 14, dy, 5, dc)
-      tx += dotSpace
-    d.textIn(rect(tx, tr.y, tr.w - 36 - bw - (tx - tr.x - 12), tr.h), ed.tabTitle(doc),
+  if not ed.hideTabs:
+    # tab strip.
+    d.fillRect(rect(r.x, r.y, r.w, tabBarH), colors.tabBar)
+    d.fillRect(rect(r.x, r.y + tabBarH - 1, r.w, 1), colors.separator)
+    if not ed.hovered:
+      ed.hoverTab = -1
+      ed.hoverClose = -1
+      ed.hoverDot = -1
+    let tabs = ed.tabRects(d)
+    d.pushClip(rect(r.x, r.y, r.w, tabBarH))
+    for i, tr in tabs:
+      let doc = ed.docs[i]
+      let active = i == ed.current
+      if active:
+        d.fillRoundRect(rect(tr.x, tr.y, tr.w, tr.h + 6), 6, colors.tabActive)
+        d.fillRect(rect(tr.x + 8, tr.y, tr.w - 16, 2), t.accent)
+      elif i == ed.hoverTab:
+        d.fillRoundRect(rect(tr.x, tr.y, tr.w, tr.h + 6), 6, colors.tabActive.withAlpha(110))
+      var bw = 0.0
+      if doc.badge.len > 0:
+        bw = d.textWidth(doc.badge) + 14
+        let bc = if doc.badgeColor.a == 0: t.accent else: doc.badgeColor
+        let br = rect(tr.x + tr.w - 30 - bw + 4, tr.y + (tr.h - 16) / 2 + 1, bw - 6, 16)
+        d.fillRoundRect(br, 8, bc)
+        d.textIn(br, doc.badge, hex"#FFFFFF", alCenter)
+      var tx = tr.x + 12
+      if ed.kindDots:
+        let dc = (if doc.kind == dkText and doc.isMarkdown: kindColor(dkPreview) elif doc.kind == dkText and doc.isSql: hex"#3B82F6" else: kindColor(doc.kind))
+        let dy = tr.y + tr.h / 2
+        if i == ed.hoverDot: d.fillCircle(tr.x + 14, dy, 8, dc.withAlpha(70))
+        d.fillCircle(tr.x + 14, dy, 5, dc)
+        tx += dotSpace
+      d.textIn(rect(tx, tr.y, tr.w - 36 - bw - (tx - tr.x - 12), tr.h), ed.tabTitle(doc),
              (if active: colors.tabTextActive else: colors.tabText))
-    let cx = tr.x + tr.w - 16
-    let cy = tr.y + tr.h / 2
-    if i == ed.hoverClose:
-      d.fillCircle(cx, cy, 8, colors.separator)
-    if ed.tabModified(doc) and i != ed.hoverTab and i != ed.hoverClose:
-      d.fillCircle(cx, cy, 4, t.accent)
-    elif active or i == ed.hoverTab:
-      d.line(cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5, colors.tabText, 1.5)
-      d.line(cx + 3.5, cy - 3.5, cx - 3.5, cy + 3.5, colors.tabText, 1.5)
-  d.popClip()
+      let cx = tr.x + tr.w - 16
+      let cy = tr.y + tr.h / 2
+      if i == ed.hoverClose:
+        d.fillCircle(cx, cy, 8, colors.separator)
+      if ed.tabModified(doc) and i != ed.hoverTab and i != ed.hoverClose:
+        d.fillCircle(cx, cy, 4, t.accent)
+      elif active or i == ed.hoverTab:
+        d.line(cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5, colors.tabText, 1.5)
+        d.line(cx + 3.5, cy - 3.5, cx - 3.5, cy + 3.5, colors.tabText, 1.5)
+    d.popClip()
   let doc = ed.doc
   if doc == nil:
     ed.drawWelcome(d, t, colors)
@@ -1282,7 +1304,7 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
     let s = doc.lines[l]
     if l == doc.execLine:
       d.fillRect(rect(c.x, y, c.w, lh), hex"#4A3B10")
-    elif l == doc.line and not doc.hasSelection:
+    elif l == doc.line and not doc.hasSelection and (ed.focus or not ed.hideTabs):
       d.fillRect(rect(c.x, y, c.w, lh), colors.currentLine)
     if doc.hasSelection and l >= sel.l1 and l <= sel.l2:
       let a = if l == sel.l1: runeCol(s, sel.c1) else: 0
@@ -1331,7 +1353,9 @@ method draw*(ed: CodeEditor, d: Drawing, t: Theme) =
       if dgSeverity(dg) > 2: continue
       let y = m.y + 4 + float(dg.line) / float(n) * (m.h - 8)
       d.fillRect(rect(m.x + m.w - 5, y, 4, 3), severityColor(dgSeverity(dg)))
-  ed.drawScrollBar(d, t, vBarArea(c), float(doc.lines.len + ed.visibleLines - 1),
+  if not (ed.hideTabs and doc.lines.len <= ed.visibleLines):
+    ed.drawScrollBar(d, t, vBarArea(c),
+                     (if ed.hideTabs: float(doc.lines.len) else: float(doc.lines.len + ed.visibleLines - 1)),
                    float(ed.visibleLines), doc.scroll)
   # ascenseur horizontal : seulement si une ligne dépasse la largeur visible.
   var maxCols = 0
@@ -1455,7 +1479,7 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
   if d == nil: return
   let r = ed.rect
   # tab strip.
-  if e.y < r.y + tabBarH and not ed.dragging and not ed.draggingMini:
+  if not ed.hideTabs and e.y < r.y + tabBarH and not ed.dragging and not ed.draggingMini:
     ed.hoverTab = -1
     ed.hoverClose = -1
     let oldDot = ed.hoverDot
@@ -1571,6 +1595,7 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
 method onWheel*(ed: CodeEditor, dx, dy: float): bool =
   let doc = ed.doc
   if doc == nil or doc.kind in {dkBlueprint, dkPreview, dkImage}: return false
+  if ed.hideTabs and dx == 0 and doc.lines.len <= ed.visibleLines: return false
   var h = dx
   var v = dy
   if h == 0 and (SDL_GetModState() and KMOD_SHIFT) != 0:
@@ -1688,6 +1713,9 @@ method onKey*(ed: CodeEditor, e: KeyEvent): bool =
           ed.switchTo((ed.current + (if shift: ed.docs.len - 1 else: 1)) mod ed.docs.len)
         return true
       else: discard
+  # cellule de carnet : Maj+Entrée exécute et passe à la suivante, Ctrl+Entrée exécute
+  if ed.hideTabs and (e.key == SDLK_RETURN or e.key == SDLK_KP_ENTER) and (shift or ctrlOnly):
+    shortcut = (if shift: "cmd:shiftenter" else: "cmd:ctrlenter")
   if shortcut.len > 0:
     ed.signal(shortcut)
     return true

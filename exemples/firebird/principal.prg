@@ -4,18 +4,13 @@
 &&
 &&   wdlexisrt exemples/firebird/principal.prg [base] [utilisateur] [motdepasse]
 &&
-&& Il faut un serveur Firebird (https://www.firebirdsql.org) et la bibliothèque
-&& cliente (libfbclient.so / libfbclient.dylib / fbclient.dll) : installée avec
-&& le client Firebird, placée dans le dossier linOS (macOS, winOS) à côté de
-&& l'exécutable ou du programme, ou indiquée par la variable WDLEXIS_FIREBIRD.
+&& Il faut un serveur Firebird 3, 4 ou 5 (https://www.firebirdsql.org) ; aucune
+&& bibliothèque cliente : le paquet parle directement le protocole réseau.
+&& Une base sans hôte est ouverte par le serveur local (localhost:3050).
 && Adaptez les paramètres de connexion (arguments ou variables FB_BASE,
 && ISC_USER, ISC_PASSWORD).
 
-si non firebird.disponible()
-  ? "Bibliothèque cliente Firebird introuvable : voir l'en-tête de ce programme."
-  systeme.quitter(1)
-finsi
-? "Client Firebird :", firebird.version()
+? "Pilote Firebird :", firebird.version()
 
 locale base = systeme.args[1] ou systeme.env("FB_BASE") ou ;
               "localhost:" + fichier.joindre(fichier.dossiertemp(), "lexis_demo.fdb")

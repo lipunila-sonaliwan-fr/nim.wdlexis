@@ -915,9 +915,12 @@ method onWheel*(g: Grid, dx, dy: float): bool =
   if g.win == nil: return false
   let t = g.win.theme
   g.buildVisual()
+  let maxV = max(0, g.visual.len - g.visibleRowCount(t))
+  # rien à faire défiler dans ce sens : la molette passe au conteneur (panneau défilant)
+  if dx == 0 and maxV == 0: return false
   if dx != 0:
     g.scrollX = clamp(g.scrollX - dx * 30, 0.0, g.maxScrollX(t))
-  g.scroll = clamp(g.scroll - int(dy * 3), 0, max(0, g.visual.len - g.visibleRowCount(t)))
+  g.scroll = clamp(g.scroll - int(dy * 3), 0, maxV)
   true
 
 method onPopupChoice*(g: Grid, i: int, text: string) =

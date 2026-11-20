@@ -769,6 +769,10 @@ proc infoPlist(name, exe: string, hasIcon: bool): string =
   (if hasIcon: "  <key>CFBundleIconFile</key><string>" & name & ".icns</string>\n" else: "") &
   "  <key>LSMinimumSystemVersion</key><string>11.0</string>\n" &
   "  <key>NSHighResolutionCapable</key><true/>\n" &
+  # macOS 15+ : sans cette clé, l'accès au réseau local (serveur de base de données,
+  # NAS, MQTT...) est refusé à l'application lancée depuis le Finder (« No route to host »).
+  "  <key>NSLocalNetworkUsageDescription</key><string>" & name &
+  " se connecte à des serveurs de votre réseau local (bases de données, services).</string>\n" &
   "</dict>\n</plist>\n"
 
 proc readmeText(info: ProjectInfo, s: BuildSettings, t: Target, exe: string): string =
@@ -1089,6 +1093,14 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
         createDir(base / "models")
         writeFile(base / "models" / "models.txt", modelsText(appDir))
         hooks.log(lgOutput, "models/models.txt (paquets d'IA)")
+      # signature locale du paquet macOS : scelle Info.plist (autorisation « Réseau local »
+      # gardée par macOS, pas de refus « application endommagée »). Seulement sur un Mac.
+      when defined(macosx):
+        if s.appType == atGraphique and t.isMac and findExe("codesign").len > 0:
+          let app = stage / (info.name & ".app")
+          let (outp, code) = execCmdEx("codesign --force --deep -s - " & quoteShell(app))
+          if code == 0: hooks.log(lgOutput, info.name & ".app signé (signature locale)")
+          else: hooks.log(lgWarning, "signature du paquet impossible : " & outp.strip)
       # licences (à embarquer).
       if dirExists(appDir / "LICENCES"):
         copyDir(appDir / "LICENCES", stage / "LICENCES")

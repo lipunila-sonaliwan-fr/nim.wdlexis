@@ -14,7 +14,7 @@
 # Une base (fichier) n'est ouverte qu'une fois par processus (DuckDB verrouille
 # le fichier) ; chaque interpréteur a sa propre connexion.
 
-import std/[dynlib, os, locks, tables, strutils, unicode]
+import std/[dynlib, os, locks, tables, strutils, unicode, math, algorithm, times]
 
 const
   osDir* = when defined(windows): "winOS" elif defined(macosx): "macOS" else: "linOS"
@@ -25,7 +25,7 @@ type
   PDatabase = pointer
   PConnection = pointer
   PPrepared = pointer
-  DuckResult* = object
+  DuckResult* {.bycopy.} = object
     columnCount, rowCount, rowsChanged: uint64
     columns: pointer
     errorMessage: cstring
@@ -67,6 +67,31 @@ type
     free: proc (p: pointer) {.cdecl, gcsafe.}
     interrupt: proc (c: PConnection) {.cdecl, gcsafe.}
     libraryVersion: proc (): cstring {.cdecl, gcsafe.}
+    # lecture par blocs (API vectorielle) : tous les types, y compris UUID, horodatages
+    # avec fuseau, listes, structures... (facultatif : sinon, lecture valeur par valeur)
+    resultChunkCount: proc (r: DuckResult): uint64 {.cdecl, gcsafe.}
+    resultGetChunk: proc (r: DuckResult, i: uint64): pointer {.cdecl, gcsafe.}
+    destroyChunk: proc (c: ptr pointer) {.cdecl, gcsafe.}
+    chunkSize: proc (c: pointer): uint64 {.cdecl, gcsafe.}
+    chunkVector: proc (c: pointer, col: uint64): pointer {.cdecl, gcsafe.}
+    vectorType: proc (v: pointer): pointer {.cdecl, gcsafe.}
+    vectorData: proc (v: pointer): pointer {.cdecl, gcsafe.}
+    vectorValidity: proc (v: pointer): pointer {.cdecl, gcsafe.}
+    listChild: proc (v: pointer): pointer {.cdecl, gcsafe.}
+    structChild: proc (v: pointer, i: uint64): pointer {.cdecl, gcsafe.}
+    arrayChild: proc (v: pointer): pointer {.cdecl, gcsafe.}
+    typeId: proc (lt: pointer): cint {.cdecl, gcsafe.}
+    destroyType: proc (lt: ptr pointer) {.cdecl, gcsafe.}
+    decimalScale: proc (lt: pointer): uint8 {.cdecl, gcsafe.}
+    decimalInternal: proc (lt: pointer): cint {.cdecl, gcsafe.}
+    enumInternal: proc (lt: pointer): cint {.cdecl, gcsafe.}
+    enumSize: proc (lt: pointer): uint32 {.cdecl, gcsafe.}
+    enumValue: proc (lt: pointer, i: uint64): cstring {.cdecl, gcsafe.}
+    structCount: proc (lt: pointer): uint64 {.cdecl, gcsafe.}
+    structName: proc (lt: pointer, i: uint64): cstring {.cdecl, gcsafe.}
+    unionCount: proc (lt: pointer): uint64 {.cdecl, gcsafe.}
+    unionName: proc (lt: pointer, i: uint64): cstring {.cdecl, gcsafe.}
+    arraySize: proc (lt: pointer): uint64 {.cdecl, gcsafe.}
 
   DuckError* = object of CatchableError
 
@@ -98,6 +123,7 @@ type
 var
   api: Api
   loaded = false
+  chunked = false               # API vectorielle disponible : lecture de tous les types
   loadError = ""
   libLock: Lock
   dbs: Table[string, SharedDb]
@@ -178,6 +204,54 @@ proc loadDuck*(extraDirs: openArray[string] = []): bool =
     sym(free, "duckdb_free")
     sym(interrupt, "duckdb_interrupt")
     sym(libraryVersion, "duckdb_library_version")
+    template optsym(field: untyped, name: string) =
+      api.field = cast[typeof(api.field)](lib.symAddr(name))
+    optsym(resultChunkCount, "duckdb_result_chunk_count")
+    optsym(resultGetChunk, "duckdb_result_get_chunk")
+    optsym(destroyChunk, "duckdb_destroy_data_chunk")
+    optsym(chunkSize, "duckdb_data_chunk_get_size")
+    optsym(chunkVector, "duckdb_data_chunk_get_vector")
+    optsym(vectorType, "duckdb_vector_get_column_type")
+    optsym(vectorData, "duckdb_vector_get_data")
+    optsym(vectorValidity, "duckdb_vector_get_validity")
+    optsym(listChild, "duckdb_list_vector_get_child")
+    optsym(structChild, "duckdb_struct_vector_get_child")
+    optsym(arrayChild, "duckdb_array_vector_get_child")
+    optsym(typeId, "duckdb_get_type_id")
+    optsym(destroyType, "duckdb_destroy_logical_type")
+    optsym(decimalScale, "duckdb_decimal_scale")
+    optsym(decimalInternal, "duckdb_decimal_internal_type")
+    optsym(enumInternal, "duckdb_enum_internal_type")
+    optsym(enumSize, "duckdb_enum_dictionary_size")
+    optsym(enumValue, "duckdb_enum_dictionary_value")
+    optsym(structCount, "duckdb_struct_type_child_count")
+    optsym(structName, "duckdb_struct_type_child_name")
+    optsym(unionCount, "duckdb_union_type_member_count")
+    optsym(unionName, "duckdb_union_type_member_name")
+    optsym(arraySize, "duckdb_array_type_array_size")
+    chunked = not api.resultChunkCount.isNil and
+                   not api.resultGetChunk.isNil and
+                   not api.destroyChunk.isNil and
+                   not api.chunkSize.isNil and
+                   not api.chunkVector.isNil and
+                   not api.vectorType.isNil and
+                   not api.vectorData.isNil and
+                   not api.vectorValidity.isNil and
+                   not api.listChild.isNil and
+                   not api.structChild.isNil and
+                   not api.arrayChild.isNil and
+                   not api.typeId.isNil and
+                   not api.destroyType.isNil and
+                   not api.decimalScale.isNil and
+                   not api.decimalInternal.isNil and
+                   not api.enumInternal.isNil and
+                   not api.enumSize.isNil and
+                   not api.enumValue.isNil and
+                   not api.structCount.isNil and
+                   not api.structName.isNil and
+                   not api.unionCount.isNil and
+                   not api.unionName.isNil and
+                   not api.arraySize.isNil
     loaded = true
     return true
 
@@ -244,10 +318,11 @@ proc typeNameOf(id: int): string =
   const names = ["INVALID", "BOOLEAN", "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "UTINYINT", "USMALLINT",
                  "UINTEGER", "UBIGINT", "FLOAT", "DOUBLE", "TIMESTAMP", "DATE", "TIME", "INTERVAL", "HUGEINT",
                  "VARCHAR", "BLOB", "DECIMAL", "TIMESTAMP_S", "TIMESTAMP_MS", "TIMESTAMP_NS", "ENUM", "LIST",
-                 "STRUCT", "MAP", "UUID", "UNION", "BIT", "TIME_TZ", "TIMESTAMP_TZ", "UHUGEINT", "ARRAY"]
+                 "STRUCT", "MAP", "UUID", "UNION", "BIT", "TIME_TZ", "TIMESTAMP_TZ", "UHUGEINT", "ARRAY",
+                 "ANY", "BIGNUM", "SQLNULL"]
   if id >= 0 and id < names.len: names[id] else: "INCONNU"
 
-proc readResult(r: var DuckResult): QueryResult =
+proc readResultLegacy(r: var DuckResult): QueryResult =
   let nc = int(api.columnCount(addr r))
   let nr = int(api.rowCount(addr r))
   result.changed = int64(api.rowsChanged(addr r))
@@ -285,6 +360,310 @@ proc readResult(r: var DuckResult): QueryResult =
         else:
           line[c] = DbCell(kind: ckText, s: s)
     result.rows.add line
+
+# ---------------------------------------------------------------- lecture par blocs
+# Chaque colonne d'un bloc est décodée d'après son type logique, sans passer par
+# les fonctions duckdb_value_* (dépréciées) qui ne savent pas lire UUID, TIMESTAMP
+# WITH TIME ZONE, BIT, LIST, STRUCT... (types fournis notamment par les extensions
+# mssql, postgres, sqlite...). Les valeurs simples restent des nombres, booléens
+# et textes ; les autres deviennent du texte au format de DuckDB.
+
+type
+  Dec = ref object
+    tid: int                       # identifiant de type DuckDB
+    data: pointer
+    valid: ptr UncheckedArray[uint64]
+    kids: seq[Dec]
+    names: seq[string]
+    scale: int                     # DECIMAL
+    inner: int                     # type interne de DECIMAL / ENUM
+    dict: seq[string]              # ENUM
+    arrSize: int                   # ARRAY
+
+template at[T](p: pointer, i: int): T = cast[ptr UncheckedArray[T]](p)[i]
+
+proc mkDec(vec: pointer): Dec =
+  result = Dec(data: api.vectorData(vec), valid: cast[ptr UncheckedArray[uint64]](api.vectorValidity(vec)))
+  var lt = api.vectorType(vec)
+  if lt.isNil:
+    result.tid = 0
+    return
+  defer: api.destroyType(addr lt)
+  result.tid = int(api.typeId(lt))
+  case result.tid
+  of 19:
+    result.scale = int(api.decimalScale(lt))
+    result.inner = int(api.decimalInternal(lt))
+  of 23:
+    result.inner = int(api.enumInternal(lt))
+    for i in 0 ..< int(api.enumSize(lt)):
+      let p = api.enumValue(lt, uint64(i))
+      result.dict.add(if p.isNil: "" else: $p)
+      if not p.isNil: api.free(p)
+  of 24, 26:                       # LIST, MAP (liste de structures clé / valeur)
+    result.kids.add mkDec(api.listChild(vec))
+  of 33:
+    result.arrSize = int(api.arraySize(lt))
+    result.kids.add mkDec(api.arrayChild(vec))
+  of 25:
+    for i in 0 ..< int(api.structCount(lt)):
+      let p = api.structName(lt, uint64(i))
+      result.names.add(if p.isNil: "" else: $p)
+      if not p.isNil: api.free(p)
+      result.kids.add mkDec(api.structChild(vec, uint64(i)))
+  of 28:                           # UNION : enfant 0 = étiquette, puis les membres
+    let n = int(api.unionCount(lt))
+    for i in 0 ..< n:
+      let p = api.unionName(lt, uint64(i))
+      result.names.add(if p.isNil: "" else: $p)
+      if not p.isNil: api.free(p)
+    for i in 0 .. n: result.kids.add mkDec(api.structChild(vec, uint64(i)))
+  else: discard
+
+proc ok(d: Dec, i: int): bool =
+  d.valid.isNil or ((d.valid[i shr 6] shr uint64(i and 63)) and 1'u64) == 1'u64
+
+proc strAt(p: pointer, i: int): string =
+  ## duckdb_string_t : longueur sur 4 octets, puis 12 octets en ligne ou préfixe + pointeur.
+  let base = cast[uint](p) + uint(i * 16)
+  let n = int(cast[ptr uint32](base)[])
+  result = newString(n)
+  if n == 0: return
+  if n <= 12: copyMem(addr result[0], cast[pointer](base + 4), n)
+  else: copyMem(addr result[0], cast[ptr pointer](base + 8)[], n)
+
+proc u128str(hi, lo: uint64): string =
+  if hi == 0: return $lo
+  var limbs = [uint32(hi shr 32), uint32(hi and 0xFFFFFFFF'u64), uint32(lo shr 32), uint32(lo and 0xFFFFFFFF'u64)]
+  while limbs != [0'u32, 0, 0, 0]:
+    var rem = 0'u64
+    for k in 0 .. 3:
+      let cur = (rem shl 32) or uint64(limbs[k])
+      limbs[k] = uint32(cur div 10)
+      rem = cur mod 10
+    result.add char(ord('0') + int(rem))
+  result.reverse()
+
+proc i128str(hi: int64, lo: uint64): string =
+  if hi >= 0: return u128str(uint64(hi), lo)
+  let nlo = (not lo) + 1
+  let nhi = (not uint64(hi)) + (if nlo == 0: 1'u64 else: 0'u64)
+  "-" & u128str(nhi, nlo)
+
+proc p2(n: int64): string = (if n < 10: "0" else: "") & $n
+
+proc civil(z0: int64): (int64, int, int) =
+  ## jours depuis 1970-01-01 -> (année, mois, jour), calendrier grégorien proleptique
+  let z = z0 + 719468
+  let era = (if z >= 0: z else: z - 146096) div 146097
+  let doe = z - era * 146097
+  let yoe = (doe - doe div 1460 + doe div 36524 - doe div 146096) div 365
+  let doy = doe - (365 * yoe + yoe div 4 - yoe div 100)
+  let mp = (5 * doy + 2) div 153
+  let d = int(doy - (153 * mp + 2) div 5 + 1)
+  let m = int(if mp < 10: mp + 3 else: mp - 9)
+  (yoe + era * 400 + (if m <= 2: 1 else: 0), m, d)
+
+proc fmtDate(days: int64): string =
+  let (y, m, d) = civil(days)
+  if y <= 0: return align($(1 - y), 4, '0') & "-" & p2(m) & "-" & p2(d) & " (BC)"
+  align($y, 4, '0') & "-" & p2(m) & "-" & p2(d)
+
+proc fmtClock(units, perSec: int64): string =
+  ## durée dans la journée (en unités de 1/perSec s) -> HH:MM:SS[.fraction]
+  let secs = units div perSec
+  let frac = units mod perSec
+  result = p2(secs div 3600) & ":" & p2((secs div 60) mod 60) & ":" & p2(secs mod 60)
+  if frac != 0:
+    let w = (if perSec == 1_000_000_000: 9 elif perSec == 1000: 3 else: 6)
+    result.add "." & align($frac, w, '0').strip(leading = false, chars = {'0'})
+
+proc fmtStamp(v: int64, perSec: int64): string =
+  if v == high(int64): return "infinity"
+  if v == -high(int64): return "-infinity"
+  let perDay = 86400 * perSec
+  let days = floorDiv(v, perDay)
+  fmtDate(days) & " " & fmtClock(v - days * perDay, perSec)
+
+proc fmtInterval(months, days: int32, us: int64): string =
+  var parts: seq[string]
+  let y = months div 12
+  let mo = months mod 12
+  if y != 0: parts.add $y & (if abs(y) == 1: " year" else: " years")
+  if mo != 0: parts.add $mo & (if abs(mo) == 1: " month" else: " months")
+  if days != 0: parts.add $days & (if abs(days) == 1: " day" else: " days")
+  if us != 0 or parts.len == 0:
+    parts.add (if us < 0: "-" else: "") & fmtClock(abs(us), 1_000_000)
+  parts.join(" ")
+
+proc fmtOffset(sec: int): string =
+  let a = abs(sec)
+  result = (if sec < 0: "-" else: "+") & p2(a div 3600)
+  if (a div 60) mod 60 != 0 or a mod 60 != 0: result.add ":" & p2((a div 60) mod 60)
+  if a mod 60 != 0: result.add ":" & p2(a mod 60)
+
+proc fmtUuid(hi: int64, lo: uint64): string =
+  let h = toHex(uint64(hi) xor 0x8000000000000000'u64, 16).toLowerAscii & toHex(lo, 16).toLowerAscii
+  h[0 .. 7] & "-" & h[8 .. 11] & "-" & h[12 .. 15] & "-" & h[16 .. 19] & "-" & h[20 .. 31]
+
+proc fmtBits(s: string): string =
+  if s.len == 0: return ""
+  let pad = ord(s[0])
+  for b in pad ..< (s.len - 1) * 8:
+    result.add(if ((ord(s[1 + b div 8]) shr (7 - b mod 8)) and 1) == 1: '1' else: '0')
+
+proc fmtBlob(s: string): string =
+  for ch in s:
+    if ord(ch) >= 32 and ord(ch) < 127 and ch != '\\': result.add ch
+    else: result.add "\\x" & toHex(ord(ch), 2)
+
+proc fmtFloat(f: float64): string =
+  if f == trunc(f) and abs(f) < 1e15: $int64(f) & ".0" else: $f
+
+proc decimalDigits(d: Dec, i: int): string =
+  let raw = case d.inner
+    of 3: $at[int16](d.data, i)
+    of 4: $at[int32](d.data, i)
+    of 5: $at[int64](d.data, i)
+    else: i128str(at[int64](d.data, 2 * i + 1), at[uint64](d.data, 2 * i))
+  if d.scale <= 0: return raw
+  let neg = raw.startsWith("-")
+  var digits = (if neg: raw[1 .. ^1] else: raw)
+  if digits.len <= d.scale: digits = align(digits, d.scale + 1, '0')
+  (if neg: "-" else: "") & digits[0 ..< digits.len - d.scale] & "." & digits[digits.len - d.scale .. ^1]
+
+proc enumIndex(d: Dec, i: int): int =
+  case d.inner
+  of 6: int(at[uint8](d.data, i))
+  of 7: int(at[uint16](d.data, i))
+  else: int(at[uint32](d.data, i))
+
+proc textOf(d: Dec, i: int, nested = false): string
+
+proc nestedText(d: Dec, i: int): string =
+  if not d.ok(i): "NULL" else: textOf(d, i, true)
+
+proc textOf(d: Dec, i: int, nested = false): string =
+  ## valeur en texte, au format de DuckDB
+  case d.tid
+  of 1: (if at[bool](d.data, i): "true" else: "false")
+  of 2: $at[int8](d.data, i)
+  of 3: $at[int16](d.data, i)
+  of 4: $at[int32](d.data, i)
+  of 5: $at[int64](d.data, i)
+  of 6: $at[uint8](d.data, i)
+  of 7: $at[uint16](d.data, i)
+  of 8: $at[uint32](d.data, i)
+  of 9: $at[uint64](d.data, i)
+  of 10: fmtFloat(float64(at[float32](d.data, i)))
+  of 11: fmtFloat(at[float64](d.data, i))
+  of 12: fmtStamp(at[int64](d.data, i), 1_000_000)
+  of 31:                           # avec fuseau : heure locale du poste, comme DuckDB par défaut
+    let v = at[int64](d.data, i)
+    if v == high(int64) or v == -high(int64): fmtStamp(v, 1_000_000)
+    else:
+      var off = 0
+      try: off = -fromUnix(floorDiv(v, 1_000_000)).local.utcOffset
+      except CatchableError: off = 0
+      fmtStamp(v + int64(off) * 1_000_000, 1_000_000) & fmtOffset(off)
+  of 20: fmtStamp(at[int64](d.data, i), 1)
+  of 21: fmtStamp(at[int64](d.data, i), 1000)
+  of 22: fmtStamp(at[int64](d.data, i), 1_000_000_000)
+  of 13:
+    let v = at[int32](d.data, i)
+    if v == high(int32): "infinity" elif v == -high(int32): "-infinity" else: fmtDate(int64(v))
+  of 14: fmtClock(at[int64](d.data, i), 1_000_000)
+  of 30:
+    let bits = at[uint64](d.data, i)
+    fmtClock(int64(bits shr 24), 1_000_000) & fmtOffset(57599 - int(bits and 0xFFFFFF'u64))
+  of 15:
+    let base = cast[uint](d.data) + uint(i * 16)
+    fmtInterval(cast[ptr int32](base)[], cast[ptr int32](base + 4)[], cast[ptr int64](base + 8)[])
+  of 16: i128str(at[int64](d.data, 2 * i + 1), at[uint64](d.data, 2 * i))
+  of 32: u128str(at[uint64](d.data, 2 * i + 1), at[uint64](d.data, 2 * i))
+  of 27: fmtUuid(at[int64](d.data, 2 * i + 1), at[uint64](d.data, 2 * i))
+  of 17: strAt(d.data, i)
+  of 18: (if nested: fmtBlob(strAt(d.data, i)) else: strAt(d.data, i))
+  of 29: fmtBits(strAt(d.data, i))
+  of 19: decimalDigits(d, i)
+  of 23:
+    let k = enumIndex(d, i)
+    if k < d.dict.len: d.dict[k] else: $k
+  of 24, 26:
+    let off = int(at[uint64](d.data, 2 * i))
+    let n = int(at[uint64](d.data, 2 * i + 1))
+    var parts: seq[string]
+    let kid = d.kids[0]
+    for j in off ..< off + n:
+      if d.tid == 26 and kid.kids.len >= 2:
+        parts.add nestedText(kid.kids[0], j) & "=" & nestedText(kid.kids[1], j)
+      else:
+        parts.add nestedText(kid, j)
+    if d.tid == 26: "{" & parts.join(", ") & "}" else: "[" & parts.join(", ") & "]"
+  of 33:
+    var parts: seq[string]
+    for j in i * d.arrSize ..< (i + 1) * d.arrSize: parts.add nestedText(d.kids[0], j)
+    "[" & parts.join(", ") & "]"
+  of 25:
+    var parts: seq[string]
+    for k in 0 ..< d.kids.len:
+      parts.add "'" & d.names[k] & "': " & nestedText(d.kids[k], i)
+    "{" & parts.join(", ") & "}"
+  of 28:
+    let tag = int(at[uint8](d.kids[0].data, i))
+    if tag + 1 < d.kids.len: nestedText(d.kids[tag + 1], i) else: ""
+  else: ""
+
+proc numCell(s: string): DbCell =
+  ## nombre exact si possible ; texte si un nombre Lexis+ perdrait des chiffres
+  ## (entiers au-delà de 64 bits, décimaux de plus de 15 chiffres significatifs).
+  var sig = 0
+  for ch in s.strip(chars = {'-', '0', '.'}):
+    if ch in Digits: inc sig
+  try:
+    if '.' notin s:
+      return DbCell(kind: ckInt, i: parseBiggestInt(s))
+    if sig > 15: return DbCell(kind: ckText, s: s)
+    DbCell(kind: ckFloat, f: parseFloat(s))
+  except ValueError: DbCell(kind: ckText, s: s)
+
+proc cellOf(d: Dec, i: int): DbCell =
+  if not d.ok(i) or d.tid == 36: return DbCell(kind: ckNull)
+  case d.tid
+  of 1: DbCell(kind: ckBool, b: at[bool](d.data, i))
+  of 2: DbCell(kind: ckInt, i: int64(at[int8](d.data, i)))
+  of 3: DbCell(kind: ckInt, i: int64(at[int16](d.data, i)))
+  of 4: DbCell(kind: ckInt, i: int64(at[int32](d.data, i)))
+  of 5: DbCell(kind: ckInt, i: at[int64](d.data, i))
+  of 6: DbCell(kind: ckInt, i: int64(at[uint8](d.data, i)))
+  of 7: DbCell(kind: ckInt, i: int64(at[uint16](d.data, i)))
+  of 8: DbCell(kind: ckInt, i: int64(at[uint32](d.data, i)))
+  of 10: DbCell(kind: ckFloat, f: float64(at[float32](d.data, i)))
+  of 11: DbCell(kind: ckFloat, f: at[float64](d.data, i))
+  of 9, 16, 32, 19: numCell(textOf(d, i))
+  else: DbCell(kind: ckText, s: textOf(d, i))
+
+proc readResult(r: var DuckResult): QueryResult =
+  if not chunked: return readResultLegacy(r)
+  let nc = int(api.columnCount(addr r))
+  result.changed = int64(api.rowsChanged(addr r))
+  for c in 0 ..< nc:
+    result.columns.add $api.columnName(addr r, uint64(c))
+    result.types.add typeNameOf(int(api.columnType(addr r, uint64(c))))
+  let nch = int(api.resultChunkCount(r))
+  for k in 0 ..< nch:
+    var ch = api.resultGetChunk(r, uint64(k))
+    if ch.isNil: continue
+    try:
+      let n = int(api.chunkSize(ch))
+      var decs = newSeq[Dec](nc)
+      for c in 0 ..< nc: decs[c] = mkDec(api.chunkVector(ch, uint64(c)))
+      for row in 0 ..< n:
+        var line = newSeq[DbCell](nc)
+        for c in 0 ..< nc: line[c] = cellOf(decs[c], row)
+        result.rows.add line
+    finally:
+      api.destroyChunk(addr ch)
 
 proc exec*(c: Connection, sql: string, params: openArray[DbCell] = []): QueryResult =
   ## Exécute une requête (paramètres « ? »). Lève DuckError. Sûr entre fils : les

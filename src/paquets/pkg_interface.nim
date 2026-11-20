@@ -2374,9 +2374,13 @@ proc openInterface(L: Interp): Value =
   m.fn "panneau", proc (L: Interp, a: seq[Value]): seq[Value] =
     let o = optsArg(a, 1)
     var sb = smAlways
+    var vonly = false
     case optField(o, "defilement", "toujours").toLowerAscii
     of "automatique", "automatic": sb = smAutomatic
     of "masque", "cache", "hidden": sb = smHidden
+    of "vertical":
+      sb = smAutomatic
+      vonly = true
     else: discard
     let lk = layoutOf(optField(o, "disposition", "vertical"))
     var pn: Control
@@ -2384,6 +2388,7 @@ proc openInterface(L: Interp): Value =
       pn = newPanel(lk, scrollbars = sb, columns = optField(o, "colonnes", 2))
     else:
       pn = newPanel(lk, scrollbars = sb)
+    if pn of Panel: Panel(pn).verticalOnly = vonly
     @[L.newCtl(pn, "panneau")]
   ctor("pdf", "pdf"):
     newPdfViewer()
@@ -2395,6 +2400,10 @@ proc openInterface(L: Interp): Value =
     ed.fontSize = optField(o, "taille", 14.0)
     ed.plainNumbers = optField(o, "numeros", "") == "simples"
     ed.paletteKeys = optField(o, "raccourcis", "") == "palette"
+    ed.hideTabs = not optField(o, "onglets", true)
+    ed.autoHeight = optField(o, "ajuster", false)
+    ed.autoMin = optField(o, "lignesmin", 0)
+    ed.autoMax = optField(o, "lignesmax", 0)
     @[L.newCtl(ed, "editeur")]
   m.fn "definirlangage", proc (L: Interp, a: seq[Value]): seq[Value] =
     # ui.definirlangage(nom, {titre=, extensions=, motscles=, ...}) : coloration et structure
@@ -2451,7 +2460,10 @@ proc openInterface(L: Interp): Value =
     var txt = if arg(a, 1).kind == vkStr: a[0].s else: optField(o, "texte", "")
     let path = optField(o, "fichier", "")
     if path.len > 0: txt = L.readMarkdown(path, "interface.markdown")
-    @[L.newCtl(newMarkdownView(txt), "markdown")]
+    let mv = newMarkdownView(txt)
+    mv.autoHeight = optField(o, "ajuster", false)
+    mv.autoMaxH = optField(o, "hauteurmax", 0.0)
+    @[L.newCtl(mv, "markdown")]
   m.fn "concepteur", proc (L: Interp, a: seq[Value]): seq[Value] =
     # Canevas du concepteur de formulaires : {projet=, fichier=} rouvre form_<nom>.prg,
     # {projet=, nom=} crée un formulaire neuf.
@@ -2663,7 +2675,7 @@ const uiDocs = [
   "interface.superconteneur([disposition])", "Conteneur sans marge.", "interface.cadre(titre, [disposition])", "Cadre de groupe.",
   "interface.panneau{disposition=, defilement=, colonnes=}", "Conteneur défilant (defilement : toujours, automatique, masque).",
   "interface.pdf()", "Visionneuse PDF (PDFium).",
-  "interface.editeur([{minicarte=, taille=, numeros=, raccourcis=}])", "Éditeur de code à onglets (numeros = \"simples\" : numéros de ligne sans les repères de l'atelier ; raccourcis = \"palette\" : F1 et Ctrl+Maj+P -> cmd:palette, Ctrl+P -> cmd:quickopen, Ctrl+W -> cmd:closetab, Ctrl+Maj+O -> cmd:symbols, et Ctrl+N / Ctrl+O sans document) (coloration, complétion, structure, minicarte, points d'arrêt). valeur : texte du document actif. surchangement : texte modifié ; surselection : signal dans ev.texte (\"pos:L:C\", \"doc:UID\", \"cmd:save\", \"cmd:run\"...).",
+  "interface.editeur([{minicarte=, taille=, numeros=, raccourcis=, onglets=}])", "Éditeur de code à onglets (onglets = faux : sans barre d'onglets, la molette passe au conteneur quand tout le texte est visible, pour une cellule de carnet) (numeros = \"simples\" : numéros de ligne sans les repères de l'atelier ; raccourcis = \"palette\" : F1 et Ctrl+Maj+P -> cmd:palette, Ctrl+P -> cmd:quickopen, Ctrl+W -> cmd:closetab, Ctrl+Maj+O -> cmd:symbols, et Ctrl+N / Ctrl+O sans document) (coloration, complétion, structure, minicarte, points d'arrêt). valeur : texte du document actif. surchangement : texte modifié ; surselection : signal dans ev.texte (\"pos:L:C\", \"doc:UID\", \"cmd:save\", \"cmd:run\"...).",
   "interface.definirlangage(nom, {titre=, extensions=, motscles=, types=, fonctions=, constantes=, casse=, commentaire=, commentairebloc=, documentation=, chaines=, chaineslongues=, echappement=, directive=, annotation=, variable=, identificateurs=, definitions=, appels=, balises=, blocs=, crochets=, structure=, commenter=, indenterapres=})", "Définit (ou remplace) un langage pour les éditeurs : coloration et diagramme de structure. Listes : table de mots ou texte « a b c ». blocs : accolades, indentation, motscles, balises (ou plusieurs). structure = {routines=, conditions=, boucles=, essais=, sections=, branches=, ouvrants=, fermants=, modificateurs=} : nature des blocs d'après le premier mot de leur ligne d'en-tête. Un document prend ce langage d'après son extension (extensions = {\".py\", \"makefile\"}) ou par ed:langage(nom).",
   "interface.langages()", "Langages définis : liste de {nom, titre, extensions}.",
   "interface.langagede(chemin)", "Nom du langage défini pour un chemin (extension ou nom de fichier) ; nul si aucun.",

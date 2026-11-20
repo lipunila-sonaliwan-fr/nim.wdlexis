@@ -414,6 +414,9 @@ proc openBase(L: Interp): Value =
     let v = L.openPackage(name)
     if v.kind == vkNil: rtError("paquet inconnu : " & name)
     v
+  def "pileerreur":
+    # message et pile d'appels (« source.prg:ligne dans … ») de la dernière erreur capturée
+    strV(L.lastErrorTrace)
   def "saisir":
     let prompt = L.optStr(a, 1, "saisir", "")
     var got: (bool, string)
@@ -428,6 +431,7 @@ registerPackage PackageDef(name: "base", global: true, open: openBase,
     "majuscule(s)", "Texte en majuscules (accents compris).",
     "minuscule(s)", "Texte en minuscules.",
     "rogner(s)", "Retire les espaces aux deux bouts (ALLTRIM).",
+    "pileerreur()", "Message et pile d'appels (lignes « source.prg:ligne dans … ») de la dernière erreur capturée par essayer … capturer.",
     "rognerg(s)", "Retire les espaces à gauche (LTRIM).",
     "rognerd(s)", "Retire les espaces à droite (RTRIM).",
     "longueur(s)", "Nombre de caractères (ou d'éléments d'une liste).",

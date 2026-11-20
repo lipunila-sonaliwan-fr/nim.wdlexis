@@ -66,6 +66,8 @@ type
     draggingBar, hoverBar: bool
     dragOffset: float
     pendingEnd: bool      # scrollToEnd demandé avant la mise en page.
+    autoHeight*: bool     # hauteur = contenu (pas d'ascenseur) : cellule de carnet.
+    autoMaxH*: float      # avec autoHeight : hauteur maximale (0 : aucune), ascenseur au-delà.
 
 const
   BarW = 10.0
@@ -697,7 +699,13 @@ method draw*(v: MarkdownView, d: Drawing, t: Theme) =
   let key = $z.w & "|" & $z.h & "|" & v.fontKey & "|" & t.name & "|" & $t.dark
   if key != v.layoutKey:
     v.layoutKey = key
-    v.layout(d, t, z.w - BarW - 4)   # place réservée à l'ascenseur (toujours affiché).
+    v.layout(d, t, z.w - (if v.autoHeight and v.autoMaxH <= 0: 0.0 else: BarW + 4))   # place de l'ascenseur.
+  if v.autoHeight:
+    var want = ceil(v.contentH) + 2
+    if v.autoMaxH > 0: want = min(want, v.autoMaxH)
+    if abs(v.fixedHeight - want) > 0.5:
+      v.fixedHeight = want
+      if v.win != nil: v.win.animating = true   # nouvelle mise en page à la prochaine image
   if v.pendingEnd:
     v.scrollY = v.maxScroll
     v.pendingEnd = false
@@ -715,7 +723,8 @@ method draw*(v: MarkdownView, d: Drawing, t: Theme) =
     of opDot: d.fillCircle(ox + op.x, oy + op.y, op.w, op.color)
     of opRing: d.strokeCircle(ox + op.x, oy + op.y, op.w + 0.5, op.color, 1.2)
   d.popClip()
-  v.drawScrollBar(d, t, v.barTrack, v.contentH, v.viewH, v.scrollY)
+  if not v.autoHeight or (v.autoMaxH > 0 and v.overflows):
+    v.drawScrollBar(d, t, v.barTrack, v.contentH, v.viewH, v.scrollY)
 
 method scrollTrackTo*(v: MarkdownView, vertical: bool, pos: float) =
   if vertical:

@@ -1,9 +1,10 @@
 # CC BY-NC-SA 4.0 - jean-marc "jihem" quere 2026
-#   wdlexis+ - paquet firebird : bases Firebird (serveur ou fichier local)
+#   wdlexis+ - paquet firebird : bases Firebird (serveur 3, 4 ou 5)
 #
-# Liaison directe à la bibliothèque cliente Firebird (libfbclient.so /
-# libfbclient.dylib / fbclient.dll), chargée à l'exécution, sans dépendance
-# Nimble ni ODBC. API C native (interface ISC / DSQL), Firebird 2.5 à 5.
+# Pilote natif écrit en Nim (firebird/fbwire.nim), sur le modèle du pilote
+# « pure Java » de Jaybird : le protocole réseau de Firebird est parlé
+# directement, sans bibliothèque cliente (fbclient) ni autre dépendance.
+# Authentification SRP (Srp256 / Srp), chiffrement du flux Arc4.
 #
 #   fb = paquet("firebird")
 #   db = fb.connecter("localhost:/data/test.fdb", "SYSDBA", "masterkey")
@@ -18,80 +19,16 @@
 # (« autocommit »). db:debut() ... db:valider() / db:annuler() ou
 # db:transaction(@proc) regroupent plusieurs instructions.
 #
-# La bibliothèque est cherchée : variable WDLEXIS_FIREBIRD (chemin complet),
-# dossier linOS / macOS / winOS à côté de l'exécutable, du dossier courant
-# ou du programme, puis bibliothèques du système.
+# Une base désignée sans hôte (« /data/test.fdb », « C:\base.fdb », alias)
+# est ouverte par le serveur local (localhost, port 3050).
 
-import std/[dynlib, os, strutils, times, math]
+import std/[os, strutils, times, math]
 import ../lexis/api
 from std/unicode import toUpper
-from ../lexis/duck import osDir
-
-when defined(windows):
-  {.pragma: fbcall, stdcall, gcsafe.}
-  const FbNames = ["fbclient.dll", "gds32.dll"]
-elif defined(macosx):
-  {.pragma: fbcall, cdecl, gcsafe.}
-  const FbNames = ["libfbclient.dylib", "/Library/Frameworks/Firebird.framework/Libraries/libfbclient.dylib",
-                   "/Library/Frameworks/Firebird.framework/Firebird",
-                   "/opt/homebrew/lib/libfbclient.dylib", "/usr/local/lib/libfbclient.dylib"]
-else:
-  {.pragma: fbcall, cdecl, gcsafe.}
-  const FbNames = ["libfbclient.so.2", "libfbclient.so", "/opt/firebird/lib/libfbclient.so",
-                   "/usr/lib/x86_64-linux-gnu/libfbclient.so.2"]
+import firebird/fbwire
 
 const
-  LibFile = when defined(windows): "fbclient.dll" elif defined(macosx): "libfbclient.dylib" else: "libfbclient.so"
-
-  SQL_DIALECT_V6 = 3'u16
-  SQLDA_VERSION1 = 1'i16
-  DSQL_drop = 2'u16
-
-  SQL_TEXT = 452
-  SQL_VARYING = 448
-  SQL_SHORT = 500
-  SQL_LONG = 496
-  SQL_FLOAT = 482
-  SQL_DOUBLE = 480
-  SQL_D_FLOAT = 530
-  SQL_TIMESTAMP = 510
-  SQL_BLOB = 520
-  SQL_ARRAY = 540
-  SQL_QUAD = 550
-  SQL_TYPE_TIME = 560
-  SQL_TYPE_DATE = 570
-  SQL_INT64 = 580
-  SQL_TIMESTAMP_TZ_EX = 32748
-  SQL_TIME_TZ_EX = 32750
-  SQL_INT128 = 32752
-  SQL_TIMESTAMP_TZ = 32754
-  SQL_TIME_TZ = 32756
-  SQL_DEC16 = 32760
-  SQL_DEC34 = 32762
-  SQL_BOOLEAN = 32764
-  SQL_NULL = 32766
-
   CS_OCTETS = 1
-
-  isc_info_end = 1'u8
-  isc_info_truncated = 2'u8
-  isc_info_sql_stmt_type = 21'u8
-  isc_info_sql_records = 23'u8
-  isc_info_req_select_count = 13'u8
-  isc_info_req_insert_count = 14'u8
-  isc_info_req_update_count = 15'u8
-  isc_info_req_delete_count = 16'u8
-  isc_info_sql_stmt_select = 1
-  isc_info_sql_stmt_select_for_upd = 12
-
-  isc_segment = 335544366
-  isc_segstr_eof = 335544367
-
-  isc_dpb_version1 = 1'u8
-  isc_dpb_user_name = 28'u8
-  isc_dpb_password = 29'u8
-  isc_dpb_lc_ctype = 48'u8
-  isc_dpb_sql_role_name = 60'u8
 
   isc_tpb_version3 = 3'u8
   isc_tpb_consistency = 1'u8
@@ -104,177 +41,15 @@ const
   isc_tpb_rec_version = 17'u8
   isc_tpb_lock_timeout = 21'u8
 
-type
-  IscStatus = int                         # intptr_t
-  StatusVector = array[20, IscStatus]
-  # Les handles sont des entiers 32 bits (Firebird >= 2.5) ; un entier de la
-  # taille d'un pointeur, initialisé à zéro, convient aussi (petit-boutiste).
-  FbHandle = uint
-
-  IscQuad {.pure.} = object
-    high: int32
-    low: uint32
-
-  XSqlVar {.pure.} = object
-    sqltype: int16
-    sqlscale: int16
-    sqlsubtype: int16
-    sqllen: int16
-    sqldata: ptr UncheckedArray[uint8]
-    sqlind: ptr int16
-    sqlname_length: int16
-    sqlname: array[32, char]
-    relname_length: int16
-    relname: array[32, char]
-    ownname_length: int16
-    ownname: array[32, char]
-    aliasname_length: int16
-    aliasname: array[32, char]
-
-  XSqlDA {.pure.} = object
-    version: int16
-    sqldaid: array[8, char]
-    sqldabc: int32
-    sqln: int16
-    sqld: int16
-    sqlvar: array[1, XSqlVar]
-
-  PXSqlDA = ptr XSqlDA
-
-  Teb {.pure.} = object
-    db: ptr FbHandle
-    tpbLen: int
-    tpb: ptr uint8
-
-  Api = object
-    attach_database: proc (st: ptr IscStatus, n: int16, name: cstring, db: ptr FbHandle,
-                           dpbLen: int16, dpb: pointer): IscStatus {.fbcall.}
-    detach_database: proc (st: ptr IscStatus, db: ptr FbHandle): IscStatus {.fbcall.}
-    start_multiple: proc (st: ptr IscStatus, tr: ptr FbHandle, n: int16, teb: pointer): IscStatus {.fbcall.}
-    commit_transaction: proc (st: ptr IscStatus, tr: ptr FbHandle): IscStatus {.fbcall.}
-    rollback_transaction: proc (st: ptr IscStatus, tr: ptr FbHandle): IscStatus {.fbcall.}
-    dsql_allocate_statement: proc (st: ptr IscStatus, db: ptr FbHandle, stmt: ptr FbHandle): IscStatus {.fbcall.}
-    dsql_prepare: proc (st: ptr IscStatus, tr: ptr FbHandle, stmt: ptr FbHandle, n: uint16, sql: cstring,
-                        dialect: uint16, da: PXSqlDA): IscStatus {.fbcall.}
-    dsql_describe: proc (st: ptr IscStatus, stmt: ptr FbHandle, v: uint16, da: PXSqlDA): IscStatus {.fbcall.}
-    dsql_describe_bind: proc (st: ptr IscStatus, stmt: ptr FbHandle, v: uint16, da: PXSqlDA): IscStatus {.fbcall.}
-    dsql_execute: proc (st: ptr IscStatus, tr: ptr FbHandle, stmt: ptr FbHandle, v: uint16, da: PXSqlDA): IscStatus {.fbcall.}
-    dsql_execute2: proc (st: ptr IscStatus, tr: ptr FbHandle, stmt: ptr FbHandle, v: uint16,
-                         inDa, outDa: PXSqlDA): IscStatus {.fbcall.}
-    dsql_execute_immediate: proc (st: ptr IscStatus, db: ptr FbHandle, tr: ptr FbHandle, n: uint16,
-                                  sql: cstring, dialect: uint16, da: PXSqlDA): IscStatus {.fbcall.}
-    dsql_fetch: proc (st: ptr IscStatus, stmt: ptr FbHandle, v: uint16, da: PXSqlDA): IscStatus {.fbcall.}
-    dsql_free_statement: proc (st: ptr IscStatus, stmt: ptr FbHandle, opt: uint16): IscStatus {.fbcall.}
-    dsql_sql_info: proc (st: ptr IscStatus, stmt: ptr FbHandle, itemsLen: int16, items: pointer,
-                         bufLen: int16, buf: pointer): IscStatus {.fbcall.}
-    open_blob2: proc (st: ptr IscStatus, db: ptr FbHandle, tr: ptr FbHandle, blob: ptr FbHandle,
-                      id: ptr IscQuad, bpbLen: uint16, bpb: pointer): IscStatus {.fbcall.}
-    create_blob2: proc (st: ptr IscStatus, db: ptr FbHandle, tr: ptr FbHandle, blob: ptr FbHandle,
-                        id: ptr IscQuad, bpbLen: int16, bpb: pointer): IscStatus {.fbcall.}
-    get_segment: proc (st: ptr IscStatus, blob: ptr FbHandle, actual: ptr uint16, bufLen: uint16,
-                       buf: pointer): IscStatus {.fbcall.}
-    put_segment: proc (st: ptr IscStatus, blob: ptr FbHandle, n: uint16, buf: pointer): IscStatus {.fbcall.}
-    close_blob: proc (st: ptr IscStatus, blob: ptr FbHandle): IscStatus {.fbcall.}
-    interpret: proc (buf: cstring, n: cuint, st: ptr ptr IscStatus): int32 {.fbcall.}        # fb_interpret
-    interprete: proc (buf: cstring, st: ptr ptr IscStatus): int32 {.fbcall.}               # isc_interprete (ancien)
-    sqlcode: proc (st: ptr IscStatus): int32 {.fbcall.}
-    client_version: proc (buf: cstring) {.fbcall.}
-
-var fb: Api
-var loaded = false
-var loadError = ""
-
-proc candidates(extra: openArray[string]): seq[string] =
-  let env = getEnv("WDLEXIS_FIREBIRD")
-  if env.len > 0: result.add env
-  let exe = getAppDir()
-  result.add exe / osDir / LibFile
-  result.add exe / LibFile
-  when defined(macosx):
-    result.add exe / ".." / "Frameworks" / LibFile
-    result.add exe / ".." / "Resources" / osDir / LibFile
-  result.add getCurrentDir() / osDir / LibFile
-  for d in extra:
-    if d.len > 0:
-      result.add d / osDir / LibFile
-      result.add d / LibFile
-  for n in FbNames: result.add n
-
-proc loadFirebird(extra: openArray[string]): bool =
-  if loaded: return true
-  var lib: LibHandle = nil
-  for n in candidates(extra):
-    lib = loadLib(n)
-    if not lib.isNil: break
-  if lib.isNil:
-    loadError = "bibliothèque cliente Firebird (" & LibFile & ") introuvable ; installez le client " &
-                "Firebird, placez la bibliothèque dans le dossier « " & osDir & " » à côté de " &
-                "l'exécutable ou du programme, ou indiquez son chemin dans la variable WDLEXIS_FIREBIRD"
-    return false
-  template sym(field: untyped, name: string) =
-    let p = lib.symAddr(name)
-    if p.isNil:
-      loadError = "symbole Firebird manquant : " & name
-      return false
-    fb.field = cast[typeof(fb.field)](p)
-  template symOpt(field: untyped, name: string) =
-    fb.field = cast[typeof(fb.field)](lib.symAddr(name))
-  sym(attach_database, "isc_attach_database")
-  sym(detach_database, "isc_detach_database")
-  sym(start_multiple, "isc_start_multiple")
-  sym(commit_transaction, "isc_commit_transaction")
-  sym(rollback_transaction, "isc_rollback_transaction")
-  sym(dsql_allocate_statement, "isc_dsql_allocate_statement")
-  sym(dsql_prepare, "isc_dsql_prepare")
-  sym(dsql_describe, "isc_dsql_describe")
-  sym(dsql_describe_bind, "isc_dsql_describe_bind")
-  sym(dsql_execute, "isc_dsql_execute")
-  sym(dsql_execute2, "isc_dsql_execute2")
-  sym(dsql_execute_immediate, "isc_dsql_execute_immediate")
-  sym(dsql_fetch, "isc_dsql_fetch")
-  sym(dsql_free_statement, "isc_dsql_free_statement")
-  sym(dsql_sql_info, "isc_dsql_sql_info")
-  sym(open_blob2, "isc_open_blob2")
-  sym(create_blob2, "isc_create_blob2")
-  sym(get_segment, "isc_get_segment")
-  sym(put_segment, "isc_put_segment")
-  sym(close_blob, "isc_close_blob")
-  symOpt(interpret, "fb_interpret")
-  symOpt(interprete, "isc_interprete")
-  symOpt(sqlcode, "isc_sqlcode")
-  symOpt(client_version, "isc_get_client_version")
-  loaded = true
-  true
-
 #
 # Erreurs
 #
 
-proc failed(st: StatusVector): bool {.inline.} = st[0] == 1 and st[1] > 0
-
-proc statusText(st: var StatusVector): string =
-  var p = addr st[0]
-  var buf: array[1024, char]
-  var lines: seq[string]
-  for _ in 0 ..< 20:
-    var n: int32
-    if not fb.interpret.isNil: n = fb.interpret(cast[cstring](addr buf[0]), cuint(buf.len), addr p)
-    elif not fb.interprete.isNil: n = fb.interprete(cast[cstring](addr buf[0]), addr p)
-    else: break
-    if n <= 0: break
-    lines.add $cast[cstring](addr buf[0])
-  result = lines.join(" ; ")
-  if result.len == 0: result = "erreur " & $st[1]
-  if not fb.sqlcode.isNil:
-    let code = fb.sqlcode(addr st[0])
-    if code != 0 and code != -999: result.add " (SQLCODE " & $code & ")"
-
-proc fbError(st: var StatusVector, what: string) {.noreturn.} =
-  rtError("firebird : " & what & " : " & statusText(st))
-
-template check(st: var StatusVector, what: string, call: untyped) =
-  discard call
-  if failed(st): fbError(st, what)
+template fbTry(what: string, body: untyped) =
+  try:
+    body
+  except FbError as e:
+    rtError("firebird : " & what & " : " & e.msg)
 
 #
 # Connexion
@@ -282,19 +57,13 @@ template check(st: var StatusVector, what: string, call: untyped) =
 
 type
   LFbDb = ref object of LUser
-    db: FbHandle
-    tr: FbHandle                  # transaction explicite en cours (0 = aucune).
+    conn: FbConn
+    tr: int32                     # transaction explicite en cours (0 = aucune).
     tpb: seq[uint8]               # options des transactions automatiques.
     closed: bool
     changes: int
 
 var dbMethods {.threadvar.}: LTable
-
-proc addItem(b: var seq[uint8], code: uint8, s: string) =
-  if s.len > 255: rtError("firebird : paramètre de connexion trop long")
-  b.add code
-  b.add uint8(s.len)
-  for c in s: b.add uint8(c)
 
 proc buildTpb(o: LTable): seq[uint8] =
   ## Options : isolation ("lecturevalidee" par défaut, "instantane", "serialisable"),
@@ -321,80 +90,26 @@ proc buildTpb(o: LTable): seq[uint8] =
         result.add 4'u8
         for k in 0 .. 3: result.add uint8((secs shr (8 * k)) and 0xff)
 
-proc startTr(d: LFbDb, tpb: seq[uint8]): FbHandle =
-  var st: StatusVector
-  var t = Teb(db: addr d.db, tpbLen: tpb.len, tpb: unsafeAddr tpb[0])
-  check(st, "début de transaction", fb.start_multiple(addr st[0], addr result, 1, addr t))
+proc startTr(L: Interp, d: LFbDb, tpb: seq[uint8]): int32 =
+  fbTry("début de transaction"):
+    L.blocking: result = d.conn.startTransaction(tpb)
 
-proc commitTr(tr: var FbHandle) =
-  var st: StatusVector
-  check(st, "validation", fb.commit_transaction(addr st[0], addr tr))
+proc ouvrirConnexion(L: Interp, quoi, base, user, pw, role, jeu: string, create: bool,
+                     page, crypt: int): FbConn =
+  ## Connexion au serveur (interpréteur libéré pendant l'attente réseau).
+  fbTry(quoi):
+    L.blocking: result = fbConnect(base, user, pw, role, jeu, create, page, crypt)
+
+proc commitTr(L: Interp, d: LFbDb, tr: var int32) =
+  fbTry("validation"):
+    L.blocking: d.conn.commit(tr)
   tr = 0
 
-proc rollbackTr(tr: var FbHandle) =
-  var st: StatusVector
-  discard fb.rollback_transaction(addr st[0], addr tr)
+proc rollbackTr(L: Interp, d: LFbDb, tr: var int32) =
+  try:
+    L.blocking: d.conn.rollback(tr)
+  except FbError: discard
   tr = 0
-
-#
-# Descripteurs (XSQLDA)
-#
-
-type
-  Da = object
-    p: PXSqlDA
-    bufs: seq[pointer]
-    orig: seq[int]                # type d'origine de chaque colonne de sortie.
-
-proc newDa(n: int): Da =
-  let size = sizeof(XSqlDA) + max(0, n - 1) * sizeof(XSqlVar)
-  result.p = cast[PXSqlDA](alloc0(size))
-  result.p.version = SQLDA_VERSION1
-  result.p.sqln = int16(max(n, 1))
-
-proc vars(d: Da): ptr UncheckedArray[XSqlVar] =
-  cast[ptr UncheckedArray[XSqlVar]](addr d.p.sqlvar[0])
-
-proc count(d: Da): int = (if d.p.isNil: 0 else: int(d.p.sqld))
-
-proc keep(d: var Da, n: int): pointer =
-  result = alloc0(max(n, 1))
-  d.bufs.add result
-
-proc free(d: var Da) =
-  for b in d.bufs: dealloc(b)
-  d.bufs.setLen(0)
-  if not d.p.isNil:
-    dealloc(d.p)
-    d.p = nil
-
-proc baseType(v: XSqlVar): int = int(v.sqltype) and not 1
-
-proc colName(v: XSqlVar): string =
-  let n = if v.aliasname_length > 0: int(v.aliasname_length) else: int(v.sqlname_length)
-  let src = if v.aliasname_length > 0: v.aliasname else: v.sqlname
-  result = newString(min(n, 32))
-  for i in 0 ..< result.len: result[i] = src[i]
-  result = toUpper(result.strip())
-
-proc allocOutput(d: var Da) =
-  ## Tampons de sortie ; les types que l'on ne décode pas directement
-  ## (INT128, DECFLOAT, fuseaux horaires, tableaux) sont convertis en texte
-  ## par le serveur.
-  let v = d.vars
-  d.orig.setLen(0)
-  for i in 0 ..< d.count:
-    d.orig.add v[i].baseType
-    case v[i].baseType
-    of SQL_INT128, SQL_DEC16, SQL_DEC34, SQL_TIME_TZ, SQL_TIMESTAMP_TZ, SQL_TIME_TZ_EX,
-       SQL_TIMESTAMP_TZ_EX, SQL_ARRAY, SQL_NULL:
-      v[i].sqltype = int16(SQL_VARYING + 1)
-      v[i].sqllen = 64
-      v[i].sqlsubtype = 0
-    else: discard
-    let n = if v[i].baseType == SQL_VARYING: int(v[i].sqllen) + 2 else: int(v[i].sqllen)
-    v[i].sqldata = cast[ptr UncheckedArray[uint8]](d.keep(n))
-    v[i].sqlind = cast[ptr int16](d.keep(sizeof(int16)))
 
 #
 # Conversion des valeurs
@@ -433,160 +148,73 @@ proc parseDate(s: string, ok: var bool): int32 =
   result = int32((d - dateOrigine).inDays)
   ok = true
 
-proc readBlob(d: LFbDb, tr: var FbHandle, id: IscQuad): string =
-  var st: StatusVector
-  var bh: FbHandle = 0
-  var q = id
-  check(st, "ouverture du blob", fb.open_blob2(addr st[0], addr d.db, addr tr, addr bh, addr q, 0, nil))
-  var buf: array[32768, uint8]
-  while true:
-    var actual: uint16 = 0
-    discard fb.get_segment(addr st[0], addr bh, addr actual, uint16(buf.len), addr buf[0])
-    if actual > 0:
-      let start = result.len
-      result.setLen(start + int(actual))
-      copyMem(addr result[start], addr buf[0], int(actual))
-    if st[0] == 1 and st[1] == isc_segment: continue
-    if st[0] == 1 and st[1] == isc_segstr_eof: break
-    if failed(st):
-      var st2: StatusVector
-      discard fb.close_blob(addr st2[0], addr bh)
-      fbError(st, "lecture du blob")
-    if actual == 0: break
-  discard fb.close_blob(addr st[0], addr bh)
+proc colName(v: FbVar): string =
+  toUpper((if v.alias.len > 0: v.alias else: v.field).strip())
 
-proc writeBlob(d: LFbDb, tr: var FbHandle, data: string): IscQuad =
-  var st: StatusVector
-  var bh: FbHandle = 0
-  check(st, "création du blob", fb.create_blob2(addr st[0], addr d.db, addr tr, addr bh, addr result, 0, nil))
-  var pos = 0
-  while pos < data.len:
-    let n = min(16384, data.len - pos)
-    discard fb.put_segment(addr st[0], addr bh, uint16(n), unsafeAddr data[pos])
-    if failed(st):
-      var st2: StatusVector
-      discard fb.close_blob(addr st2[0], addr bh)
-      fbError(st, "écriture du blob")
-    pos += n
-  check(st, "fermeture du blob", fb.close_blob(addr st[0], addr bh))
-
-proc decode(d: LFbDb, tr: var FbHandle, v: XSqlVar): Value =
-  if (v.sqltype and 1) != 0 and v.sqlind[] < 0: return nilV
-  let p = v.sqldata
-  case v.baseType
-  of SQL_TEXT:
-    var s = newString(int(v.sqllen))
-    if s.len > 0: copyMem(addr s[0], p, s.len)
-    if (int(v.sqlsubtype) and 0xff) != CS_OCTETS: s = s.strip(leading = false)
-    strV(s)
-  of SQL_VARYING:
-    let n = int(cast[ptr uint16](p)[])
-    var s = newString(n)
-    if n > 0: copyMem(addr s[0], addr p[2], n)
-    strV(s)
-  of SQL_SHORT: scaled(int64(cast[ptr int16](p)[]), v.sqlscale)
-  of SQL_LONG: scaled(int64(cast[ptr int32](p)[]), v.sqlscale)
-  of SQL_INT64: scaled(cast[ptr int64](p)[], v.sqlscale)
-  of SQL_FLOAT: numV(float(cast[ptr float32](p)[]))
-  of SQL_DOUBLE, SQL_D_FLOAT: numV(cast[ptr float64](p)[])
-  of SQL_BOOLEAN: boolV(p[0] != 0)
-  of SQL_TYPE_DATE: strV(dateTexte(cast[ptr int32](p)[]))
-  of SQL_TYPE_TIME: strV(heureTexte(cast[ptr uint32](p)[]))
-  of SQL_TIMESTAMP:
-    strV(dateTexte(cast[ptr int32](p)[]) & " " & heureTexte(cast[ptr uint32](addr p[4])[]))
-  of SQL_BLOB, SQL_QUAD:
-    strV(d.readBlob(tr, cast[ptr IscQuad](p)[]))
-  else: nilV
-
-proc rowTable(d: LFbDb, tr: var FbHandle, o: Da): LTable =
-  result = newLTable()
-  let v = o.vars
-  for i in 0 ..< o.count:
-    var x = d.decode(tr, v[i])
+proc decode(L: Interp, d: LFbDb, tr: int32, v: FbVar, x: FbVal): Value =
+  case x.kind
+  of fvNull: nilV
+  of fvText:
+    var s = x.s
+    if v.sqltype == SQL_TEXT and (x.sub and 0xff) != CS_OCTETS: s = s.strip(leading = false)
+    var r = strV(s)
     # INT128 / DECFLOAT (convertis en texte par le serveur) : rendus comme nombres.
-    if x.kind == vkStr and i < o.orig.len and o.orig[i] in [SQL_INT128, SQL_DEC16, SQL_DEC34]:
-      let t = x.s.strip
+    if v.sqltype in [SQL_INT128, SQL_DEC16, SQL_DEC34]:
+      let t = s.strip
       try:
-        if t.contains({'.', 'E', 'e'}): x = numV(parseFloat(t))
-        else: x = intV(parseBiggestInt(t))
+        if t.contains({'.', 'E', 'e'}): r = numV(parseFloat(t))
+        else: r = intV(parseBiggestInt(t))
       except ValueError:
-        try: x = numV(parseFloat(t))
+        try: r = numV(parseFloat(t))
         except ValueError: discard
-    if x.kind != vkNil: result.rawSet(colName(v[i]), x)
+    r
+  of fvInt: scaled(x.i, x.scale)
+  of fvFloat: numV(x.f)
+  of fvBool: boolV(x.b)
+  of fvDate: strV(dateTexte(int32(x.i)))
+  of fvTime: strV(heureTexte(uint32(x.i)))
+  of fvStamp: strV(dateTexte(x.days) & " " & heureTexte(uint32(x.i)))
+  of fvBlob:
+    var data: string
+    fbTry("lecture du blob"):
+      L.blocking: data = d.conn.readBlob(tr, x.s)
+    strV(data)
 
-proc bindParams(L: Interp, d: LFbDb, tr: var FbHandle, inp: var Da, params: seq[Value]) =
-  let v = inp.vars
-  for i in 0 ..< inp.count:
+proc rowTable(L: Interp, d: LFbDb, tr: int32, s: FbStmt, row: seq[FbVal]): LTable =
+  result = newLTable()
+  for i in 0 ..< min(row.len, s.outs.len):
+    let x = L.decode(d, tr, s.outs[i], row[i])
+    if x.kind != vkNil: result.rawSet(colName(s.outs[i]), x)
+
+proc bindParams(L: Interp, d: LFbDb, tr: int32, s: FbStmt, params: seq[Value]): seq[FbVal] =
+  for i in 0 ..< s.ins.len:
     let x = params[i]
-    let orig = v[i].baseType
-    var ind = cast[ptr int16](inp.keep(sizeof(int16)))
-    v[i].sqlind = ind
+    let v = s.ins[i]
+    let orig = v.sqltype
     case x.kind
-    of vkNil:
-      v[i].sqltype = int16(SQL_TEXT + 1)
-      v[i].sqllen = 1
-      v[i].sqlsubtype = 0
-      v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(1))
-      ind[] = -1
-      continue
+    of vkNil: result.add newVal(fvNull)
     of vkBool:
-      if orig == SQL_BOOLEAN:
-        v[i].sqltype = int16(SQL_BOOLEAN + 1)
-        v[i].sqllen = 1
-        v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(1))
-        v[i].sqldata[0] = (if x.b: 1'u8 else: 0'u8)
-      else:
-        v[i].sqltype = int16(SQL_INT64 + 1)
-        v[i].sqllen = 8
-        v[i].sqlscale = 0
-        v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(8))
-        cast[ptr int64](v[i].sqldata)[] = (if x.b: 1 else: 0)
-    of vkInt:
-      v[i].sqltype = int16(SQL_INT64 + 1)
-      v[i].sqllen = 8
-      v[i].sqlscale = 0
-      v[i].sqlsubtype = 0
-      v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(8))
-      cast[ptr int64](v[i].sqldata)[] = x.i
-    of vkNum:
-      v[i].sqltype = int16(SQL_DOUBLE + 1)
-      v[i].sqllen = 8
-      v[i].sqlscale = 0
-      v[i].sqlsubtype = 0
-      v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(8))
-      cast[ptr float64](v[i].sqldata)[] = x.n
+      if orig == SQL_BOOLEAN: result.add FbVal(kind: fvBool, b: x.b)
+      else: result.add FbVal(kind: fvInt, i: (if x.b: 1 else: 0))
+    of vkInt: result.add FbVal(kind: fvInt, i: x.i)
+    of vkNum: result.add FbVal(kind: fvFloat, f: x.n)
     of vkStr:
       if orig == SQL_BLOB:
-        v[i].sqltype = int16(SQL_BLOB + 1)
-        v[i].sqllen = 8
-        v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(8))
-        cast[ptr IscQuad](v[i].sqldata)[] = d.writeBlob(tr, x.s)
-      elif orig == SQL_TYPE_DATE:
+        var id: string
+        fbTry("écriture du blob"):
+          L.blocking: id = d.conn.writeBlob(tr, x.s)
+        result.add FbVal(kind: fvBlob, s: id)
+      elif orig == SQL_TYPE_DATE and x.s.len == 10:
         var ok: bool
         let days = parseDate(x.s, ok)
-        if ok and x.s.len == 10:
-          v[i].sqltype = int16(SQL_TYPE_DATE + 1)
-          v[i].sqllen = 4
-          v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(4))
-          cast[ptr int32](v[i].sqldata)[] = days
-        else:
-          if x.s.len > 32767: rtError("firebird : paramètre " & $(i + 1) & " trop long")
-          v[i].sqltype = int16(SQL_TEXT + 1)
-          v[i].sqllen = int16(x.s.len)
-          v[i].sqlsubtype = 0
-          v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(x.s.len))
-          if x.s.len > 0: copyMem(v[i].sqldata, unsafeAddr x.s[0], x.s.len)
+        if ok: result.add FbVal(kind: fvDate, i: days)
+        else: result.add FbVal(kind: fvText, s: x.s)
       else:
         if x.s.len > 32767:
           rtError("firebird : paramètre " & $(i + 1) & " trop long (" & $x.s.len & " octets) ; utilisez une colonne BLOB")
-        if orig notin [SQL_TEXT, SQL_VARYING]: v[i].sqlsubtype = 0
-        v[i].sqltype = int16(SQL_TEXT + 1)
-        v[i].sqllen = int16(x.s.len)
-        v[i].sqldata = cast[ptr UncheckedArray[uint8]](inp.keep(x.s.len))
-        if x.s.len > 0: copyMem(v[i].sqldata, unsafeAddr x.s[0], x.s.len)
+        result.add FbVal(kind: fvText, s: x.s, sub: (if orig in [SQL_TEXT, SQL_VARYING]: v.subtype else: 0))
     else:
       rtError("firebird : type de paramètre non pris en charge (" & typeName(x) & ")")
-    ind[] = 0
 
 #
 # Instructions
@@ -594,115 +222,58 @@ proc bindParams(L: Interp, d: LFbDb, tr: var FbHandle, inp: var Da, params: seq[
 
 type
   Stmt = object
-    h: FbHandle
-    inp, outp: Da
-    kind: int
+    s: FbStmt
+    d: LFbDb
+    args: seq[FbVal]
 
-proc close(s: var Stmt) =
-  if s.h != 0:
-    var st: StatusVector
-    discard fb.dsql_free_statement(addr st[0], addr s.h, DSQL_drop)
-    s.h = 0
-  s.inp.free()
-  s.outp.free()
+proc close(L: Interp, s: var Stmt) =
+  if not s.s.isNil and not s.d.isNil and not s.d.conn.closed:
+    try:
+      L.blocking: s.d.conn.free(s.s)
+    except FbError: discard
+  s.s = nil
 
-proc infoInt(buf: openArray[uint8], pos, len: int): int =
-  for k in 0 ..< len: result = result or (int(buf[pos + k]) shl (8 * k))
+proc isSelect(s: Stmt): bool = s.s.isSelect
+proc outCount(s: Stmt): int = s.s.outs.len
 
-proc stmtType(s: var Stmt): int =
-  var st: StatusVector
-  var items = [isc_info_sql_stmt_type]
-  var buf: array[16, uint8]
-  check(st, "information", fb.dsql_sql_info(addr st[0], addr s.h, 1, addr items[0], int16(buf.len), addr buf[0]))
-  if buf[0] == isc_info_sql_stmt_type:
-    let n = infoInt(buf, 1, 2)
-    return infoInt(buf, 3, n)
-  0
-
-proc affectedRows(s: var Stmt): int =
-  var st: StatusVector
-  var items = [isc_info_sql_records]
-  var buf: array[64, uint8]
-  discard fb.dsql_sql_info(addr st[0], addr s.h, 1, addr items[0], int16(buf.len), addr buf[0])
-  if failed(st) or buf[0] != isc_info_sql_records: return 0
-  var pos = 3
-  while pos < buf.len and buf[pos] != isc_info_end and buf[pos] != isc_info_truncated:
-    let code = buf[pos]
-    let n = infoInt(buf, pos + 1, 2)
-    if pos + 3 + n > buf.len: break
-    let val = infoInt(buf, pos + 3, n)
-    if code in [isc_info_req_insert_count, isc_info_req_update_count, isc_info_req_delete_count]:
-      result += val
-    pos += 3 + n
-
-proc prepare(L: Interp, d: LFbDb, tr: var FbHandle, sql: string, params: seq[Value]): Stmt =
-  var st: StatusVector
-  if sql.len > 65535: rtError("firebird : requête trop longue")
-  check(st, "allocation", fb.dsql_allocate_statement(addr st[0], addr d.db, addr result.h))
+proc prepare(L: Interp, d: LFbDb, tr: int32, sql: string, params: seq[Value]): Stmt =
+  result.d = d
+  fbTry("requête invalide"):
+    L.blocking: result.s = d.conn.prepare(tr, sql)
   try:
-    check(st, "requête invalide", fb.dsql_prepare(addr st[0], addr tr, addr result.h, uint16(sql.len),
-                                                    sql.cstring, SQL_DIALECT_V6, nil))
-    result.kind = result.stmtType()
-    # colonnes de sortie
-    result.outp = newDa(1)
-    check(st, "description", fb.dsql_describe(addr st[0], addr result.h, 1, result.outp.p))
-    if result.outp.p.sqld > result.outp.p.sqln:
-      let n = int(result.outp.p.sqld)
-      result.outp.free()
-      result.outp = newDa(n)
-      check(st, "description", fb.dsql_describe(addr st[0], addr result.h, 1, result.outp.p))
-    result.outp.allocOutput()
-    # paramètres
-    result.inp = newDa(1)
-    check(st, "description des paramètres", fb.dsql_describe_bind(addr st[0], addr result.h, 1, result.inp.p))
-    if result.inp.p.sqld > result.inp.p.sqln:
-      let n = int(result.inp.p.sqld)
-      result.inp.free()
-      result.inp = newDa(n)
-      check(st, "description des paramètres", fb.dsql_describe_bind(addr st[0], addr result.h, 1, result.inp.p))
     var vals = params
     if vals.len == 1 and vals[0].kind == vkTable:        # paramètres dans une table.
       let t = vals[0].t
       vals = @[]
       for i in 1 .. t.rawLen: vals.add t.rawGet(intV(i))
-    let n = result.inp.count
+    let n = result.s.ins.len
     if vals.len < n:
       rtError("firebird : " & $n & " paramètre(s) attendu(s), " & $vals.len & " fourni(s)")
-    L.bindParams(d, tr, result.inp, vals)
+    result.args = L.bindParams(d, tr, result.s, vals)
   except CatchableError as e:
-    result.close()
+    L.close(result)
     raise e
 
-proc isSelect(s: Stmt): bool =
-  s.kind in [isc_info_sql_stmt_select, isc_info_sql_stmt_select_for_upd]
-
-proc inPtr(s: Stmt): PXSqlDA = (if s.inp.count > 0: s.inp.p else: nil)
-
-proc execute(L: Interp, d: LFbDb, tr: var FbHandle, s: var Stmt): seq[LTable] =
+proc execute(L: Interp, d: LFbDb, tr: int32, s: var Stmt): seq[LTable] =
   ## Exécute ; pour une instruction qui renvoie une seule ligne (EXECUTE
   ## PROCEDURE, INSERT ... RETURNING), renvoie cette ligne.
-  var st: StatusVector
-  if s.isSelect:
-    L.blocking: discard fb.dsql_execute(addr st[0], addr tr, addr s.h, 1, s.inPtr)
-    if failed(st): fbError(st, "exécution")
-  elif s.outp.count > 0:
-    L.blocking: discard fb.dsql_execute2(addr st[0], addr tr, addr s.h, 1, s.inPtr, s.outp.p)
-    if failed(st): fbError(st, "exécution")
-    result.add d.rowTable(tr, s.outp)
-    d.changes = s.affectedRows()
-  else:
-    L.blocking: discard fb.dsql_execute(addr st[0], addr tr, addr s.h, 1, s.inPtr)
-    if failed(st): fbError(st, "exécution")
-    d.changes = s.affectedRows()
+  var direct: seq[seq[FbVal]]
+  fbTry("exécution"):
+    L.blocking: direct = d.conn.execute(tr, s.s, s.args)
+  for r in direct: result.add L.rowTable(d, tr, s.s, r)
+  if not s.isSelect:
+    try:
+      L.blocking: d.changes = d.conn.affectedRows(s.s)
+    except FbError: d.changes = 0
 
-proc fetch(L: Interp, d: LFbDb, tr: var FbHandle, s: var Stmt): LTable =
+proc fetch(L: Interp, d: LFbDb, tr: int32, s: var Stmt): LTable =
   ## Ligne suivante d'un SELECT, nil à la fin.
-  var st: StatusVector
-  var rc: IscStatus
-  L.blocking: rc = fb.dsql_fetch(addr st[0], addr s.h, 1, s.outp.p)
-  if rc == 100: return nil
-  if failed(st): fbError(st, "lecture")
-  d.rowTable(tr, s.outp)
+  var row: seq[FbVal]
+  var ok: bool
+  fbTry("lecture"):
+    L.blocking: ok = d.conn.fetch(s.s, row)
+  if not ok: return nil
+  L.rowTable(d, tr, s.s, row)
 
 proc checkDb(L: Interp, a: seq[Value], fname: string): LFbDb =
   result = checkUser[LFbDb](L, a, 1, fname, "base firebird")
@@ -712,12 +283,12 @@ template withTr(d: LFbDb, tr: untyped, body: untyped) =
   ## Transaction explicite en cours, ou transaction automatique validée à la
   ## fin (annulée en cas d'erreur).
   let auto = d.tr == 0
-  var tr = if auto: startTr(d, d.tpb) else: d.tr
+  var tr = if auto: L.startTr(d, d.tpb) else: d.tr
   try:
     body
-    if auto: commitTr(tr)
+    if auto: L.commitTr(d, tr)
   except CatchableError as e:
-    if auto: rollbackTr(tr)
+    if auto: L.rollbackTr(d, tr)
     raise e
 
 proc paramsOf(a: seq[Value]): seq[Value] = (if a.len > 2: a[2 .. ^1] else: @[])
@@ -735,7 +306,7 @@ proc runAll(L: Interp, d: LFbDb, sql: string, params: seq[Value], limit = -1): s
           if r.isNil: break
           result.add tableV(r)
     finally:
-      s.close()
+      L.close(s)
 
 proc splitScript(sql: string): seq[string] =
   ## Découpe un script en instructions (« ; » hors chaînes et commentaires).
@@ -765,8 +336,6 @@ proc splitScript(sql: string): seq[string] =
     inc i
   if cur.strip.len > 0: result.add cur.strip
 
-proc quoteLit(s: string): string = "'" & s.replace("'", "''") & "'"
-
 proc openFirebirdLib(L: Interp): Value =
   dbMethods = newLib()
   let dm = dbMethods
@@ -786,7 +355,7 @@ proc openFirebirdLib(L: Interp): Value =
           discard L.execute(d, tr, s)
           total += d.changes
         finally:
-          s.close()
+          L.close(s)
     d.changes = total
     @[intV(total)]
   dm.fn "requete", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -794,6 +363,48 @@ proc openFirebirdLib(L: Interp): Value =
     let rows = newLTable()
     for r in L.runAll(d, L.checkStr(a, 2, "requete"), paramsOf(a)): rows.arr.add r
     @[tableV(rows)]
+  dm.fn "resultat", proc (L: Interp, a: seq[Value]): seq[Value] =
+    ## Résultat complet d'une instruction : {colonnes = {noms dans l'ordre}, lignes = {tables},
+    ## modifications = n, genre = "selection" | "procedure" | "modification" | "definition" | "autre",
+    ## tronque = vrai si plus de 100 000 lignes (les suivantes ne sont pas lues).
+    let d = L.checkDb(a, "resultat")
+    let sql = L.checkStr(a, 2, "resultat")
+    let cols = newLTable()
+    let rows = newLTable()
+    var kind = 0
+    var truncated = false
+    var changes = 0
+    withTr(d, tr):
+      var s = L.prepare(d, tr, sql, paramsOf(a))
+      try:
+        kind = s.s.kind
+        for v in s.s.outs: cols.arr.add strV(colName(v))
+        let direct = L.execute(d, tr, s)
+        for r in direct: rows.arr.add tableV(r)
+        if s.isSelect:
+          while true:
+            if rows.arr.len >= 100_000:
+              truncated = true
+              break
+            let r = L.fetch(d, tr, s)
+            if r.isNil: break
+            rows.arr.add tableV(r)
+        else:
+          changes = d.changes
+      finally:
+        L.close(s)
+    let res = newLTable()
+    res.rawSet("COLONNES", tableV(cols))
+    res.rawSet("LIGNES", tableV(rows))
+    res.rawSet("MODIFICATIONS", intV(changes))
+    res.rawSet("GENRE", strV(case kind
+      of StmtSelect, StmtSelectForUpdate: "selection"
+      of StmtExecProcedure: "procedure"
+      of 2, 3, 4: "modification"
+      of 5: "definition"
+      else: "autre"))
+    res.rawSet("TRONQUE", boolV(truncated))
+    @[tableV(res)]
   dm.fn "premier", proc (L: Interp, a: seq[Value]): seq[Value] =
     let d = L.checkDb(a, "premier")
     let rows = L.runAll(d, L.checkStr(a, 2, "premier"), paramsOf(a), 1)
@@ -810,17 +421,17 @@ proc openFirebirdLib(L: Interp): Value =
         let direct = L.execute(d, tr, s)
         if direct.len > 0: row = direct[0]
         elif s.isSelect: row = L.fetch(d, tr, s)
-        if not row.isNil and s.outp.count > 0:
-          res = row.rawGet(colName(s.outp.vars[0]))
+        if not row.isNil and s.outCount > 0:
+          res = row.rawGet(colName(s.s.outs[0]))
       finally:
-        s.close()
+        L.close(s)
     @[res]
   dm.fn "lignes", proc (L: Interp, a: seq[Value]): seq[Value] =
     ## Itérateur : les lignes sont lues au fur et à mesure.
     let d = L.checkDb(a, "lignes")
     let sql = L.checkStr(a, 2, "lignes")
     let auto = d.tr == 0
-    var tr = if auto: startTr(d, d.tpb) else: d.tr
+    var tr = if auto: L.startTr(d, d.tpb) else: d.tr
     var s: Stmt
     var done = false
     var pending: seq[LTable]
@@ -828,15 +439,15 @@ proc openFirebirdLib(L: Interp): Value =
       s = L.prepare(d, tr, sql, paramsOf(a))
       pending = L.execute(d, tr, s)
     except CatchableError as e:
-      s.close()
-      if auto: rollbackTr(tr)
+      L.close(s)
+      if auto: L.rollbackTr(d, tr)
       raise e
     let finish = proc (ok: bool) =
       if not done:
         done = true
-        s.close()
+        L.close(s)
         if auto:
-          if ok: commitTr(tr) else: rollbackTr(tr)
+          if ok: L.commitTr(d, tr) else: L.rollbackTr(d, tr)
     L.closers.add proc () =
       try: finish(false)
       except CatchableError: discard
@@ -873,17 +484,17 @@ proc openFirebirdLib(L: Interp): Value =
   dm.fn "debut", proc (L: Interp, a: seq[Value]): seq[Value] =
     let d = L.checkDb(a, "debut")
     if d.tr != 0: rtError("firebird : une transaction est déjà en cours")
-    d.tr = startTr(d, (if arg(a, 2).kind == vkTable: buildTpb(a[1].t) else: d.tpb))
+    d.tr = L.startTr(d, (if arg(a, 2).kind == vkTable: buildTpb(a[1].t) else: d.tpb))
     @[boolV(true)]
   dm.fn "valider", proc (L: Interp, a: seq[Value]): seq[Value] =
     let d = L.checkDb(a, "valider")
     if d.tr == 0: rtError("firebird : aucune transaction en cours")
-    commitTr(d.tr)
+    L.commitTr(d, d.tr)
     @[boolV(true)]
   dm.fn "annuler", proc (L: Interp, a: seq[Value]): seq[Value] =
     let d = L.checkDb(a, "annuler")
     if d.tr == 0: rtError("firebird : aucune transaction en cours")
-    rollbackTr(d.tr)
+    L.rollbackTr(d, d.tr)
     @[boolV(true)]
   dm.fn "entransaction", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[boolV(L.checkDb(a, "entransaction").tr != 0)]
@@ -891,12 +502,12 @@ proc openFirebirdLib(L: Interp): Value =
     let d = L.checkDb(a, "transaction")
     let f = L.checkFunc(a, 2, "transaction")
     if d.tr != 0: rtError("firebird : une transaction est déjà en cours")
-    d.tr = startTr(d, (if arg(a, 3).kind == vkTable: buildTpb(a[2].t) else: d.tpb))
+    d.tr = L.startTr(d, (if arg(a, 3).kind == vkTable: buildTpb(a[2].t) else: d.tpb))
     try:
       result = L.call(f, @[a[0]])
-      if d.tr != 0: commitTr(d.tr)
+      if d.tr != 0: L.commitTr(d, d.tr)
     except CatchableError as e:
-      if d.tr != 0: rollbackTr(d.tr)
+      if d.tr != 0: L.rollbackTr(d, d.tr)
       raise e
   dm.fn "tables", proc (L: Interp, a: seq[Value]): seq[Value] =
     let d = L.checkDb(a, "tables")
@@ -925,10 +536,9 @@ proc openFirebirdLib(L: Interp): Value =
   dm.fn "fermer", proc (L: Interp, a: seq[Value]): seq[Value] =
     let d = checkUser[LFbDb](L, a, 1, "fermer", "base firebird")
     if not d.closed:
-      if d.tr != 0: rollbackTr(d.tr)
+      if d.tr != 0: L.rollbackTr(d, d.tr)
       d.closed = true
-      var st: StatusVector
-      discard fb.detach_database(addr st[0], addr d.db)
+      L.blocking: d.conn.close()
     @[boolV(true)]
 
   proc connectArgs(L: Interp, a: seq[Value], fname: string): (string, string, string, LTable) =
@@ -945,27 +555,29 @@ proc openFirebirdLib(L: Interp): Value =
     (L.checkStr(a, 1, fname), L.optStr(a, 2, fname, getEnv("ISC_USER")),
      L.optStr(a, 3, fname, getEnv("ISC_PASSWORD")), (if arg(a, 4).kind == vkTable: a[3].t else: nil))
 
-  proc attach(L: Interp, base, user, pw: string, o: LTable): Value =
-    var dpb = @[isc_dpb_version1]
-    if user.len > 0: dpb.addItem(isc_dpb_user_name, user)
-    if pw.len > 0: dpb.addItem(isc_dpb_password, pw)
-    dpb.addItem(isc_dpb_lc_ctype, o.optField("jeu", "UTF8"))
-    let role = o.optField("role", "")
-    if role.len > 0: dpb.addItem(isc_dpb_sql_role_name, role)
-    var st: StatusVector
-    var db: FbHandle = 0
+  proc cryptMode(o: LTable): int =
+    ## chiffrement = vrai (si le serveur le propose, par défaut), faux, ou "exige".
+    let v = if o.isNil: nilV else: o.field("chiffrement")
+    if v.kind == vkBool: return (if v.b: 1 else: 0)
+    if v.kind == vkStr and v.s.toLowerAscii.replace("é", "e") in ["exige", "requis", "required"]: return 2
+    1
+
+  proc attach(L: Interp, base, user, pw: string, o: LTable, create: bool): Value =
     if base.len > 32767: rtError("firebird : nom de base trop long")
-    L.blocking:
-      discard fb.attach_database(addr st[0], int16(base.len), base.cstring, addr db,
-                                 int16(dpb.len), addr dpb[0])
-    if failed(st): rtError("firebird : connexion à " & base & " : " & statusText(st))
-    let d = LFbDb(db: db, tpb: buildTpb(o))
+    let role = o.optField("role", "")
+    let jeu = o.optField("jeu", "UTF8")
+    let page = o.optField("taillepage", 8192)
+    let crypt = cryptMode(o)
+    let quoi = (if create: "création de " else: "connexion à ") & base
+    let conn = L.ouvrirConnexion(quoi, base, user, pw, role, jeu, create, page, crypt)
+    let d = LFbDb(conn: conn, tpb: buildTpb(o))
     L.closers.add proc () =
       if not d.closed:
         d.closed = true
-        var st2: StatusVector
-        if d.tr != 0: discard fb.rollback_transaction(addr st2[0], addr d.tr)
-        discard fb.detach_database(addr st2[0], addr d.db)
+        if d.tr != 0:
+          try: d.conn.rollback(d.tr)
+          except FbError: discard
+        d.conn.close()
     L.wrap(d, "firebird", dbMethods)
 
   # Métatables inscrites dès l'ouverture : les tables de méthodes sont propres au
@@ -973,50 +585,32 @@ proc openFirebirdLib(L: Interp): Value =
   discard L.userMeta("firebird", dbMethods)
   let m = newLib()
   m.fn "connecter", proc (L: Interp, a: seq[Value]): seq[Value] =
-    if not loadFirebird(L.searchDirs): return fail(loadError)
     let (base, user, pw, o) = L.connectArgs(a, "connecter")
     if base.len == 0: rtError("connecter : nom de la base attendu")
-    @[L.attach(base, user, pw, o)]
+    @[L.attach(base, user, pw, o, false)]
   m.fn "creer", proc (L: Interp, a: seq[Value]): seq[Value] =
     ## Crée une base (fichier .fdb) puis s'y connecte.
-    if not loadFirebird(L.searchDirs): return fail(loadError)
     let (base, user, pw, o) = L.connectArgs(a, "creer")
     if base.len == 0: rtError("creer : nom de la base attendu")
-    var sql = "CREATE DATABASE " & quoteLit(base)
-    if user.len > 0: sql.add " USER " & quoteLit(user)
-    if pw.len > 0: sql.add " PASSWORD " & quoteLit(pw)
-    sql.add " PAGE_SIZE " & $o.optField("taillepage", 8192)
-    sql.add " DEFAULT CHARACTER SET " & o.optField("jeu", "UTF8")
-    var st: StatusVector
-    var db: FbHandle = 0
-    var tr: FbHandle = 0
-    L.blocking:
-      discard fb.dsql_execute_immediate(addr st[0], addr db, addr tr, uint16(sql.len), sql.cstring,
-                                        SQL_DIALECT_V6, nil)
-    if failed(st): rtError("firebird : création de " & base & " : " & statusText(st))
-    discard fb.detach_database(addr st[0], addr db)
-    @[L.attach(base, user, pw, o)]
+    @[L.attach(base, user, pw, o, true)]
   m.fn "version", proc (L: Interp, a: seq[Value]): seq[Value] =
-    if not loadFirebird(L.searchDirs): return fail(loadError)
-    if fb.client_version.isNil: return @[nilV]
-    var buf: array[256, char]
-    fb.client_version(cast[cstring](addr buf[0]))
-    @[strV($cast[cstring](addr buf[0]))]
+    @[strV(DriverVersion)]
   m.fn "disponible", proc (L: Interp, a: seq[Value]): seq[Value] =
-    @[boolV(loadFirebird(L.searchDirs))]
+    @[boolV(true)]
   tableV(m)
 
 registerPackage PackageDef(name: "firebird", open: openFirebirdLib,
-  description: "Bases Firebird (client natif fbclient)",
+  description: "Bases Firebird 3 à 5 (pilote réseau natif, sans fbclient)",
   docs: docs("firebird", [
-    "firebird.connecter(base, utilisateur, motdepasse[, options])", "Connexion : \"serveur:/chemin/base.fdb\", \"serveur/3050:alias\" ou fichier local. Accepte aussi une table {base=, hote=, port=, utilisateur=, motdepasse=, role=, jeu=\"UTF8\", isolation=, attente=}.",
+    "firebird.connecter(base, utilisateur, motdepasse[, options])", "Connexion : \"serveur:/chemin/base.fdb\", \"serveur/3050:alias\" ou fichier local. Accepte aussi une table {base=, hote=, port=, utilisateur=, motdepasse=, role=, jeu=\"UTF8\", isolation=, attente=, chiffrement=vrai|faux|\"exige\"}. Sans hôte, le serveur local (localhost:3050) est utilisé.",
     "firebird.creer(base, utilisateur, motdepasse[, {taillepage=8192, jeu=\"UTF8\"}])", "Crée une base puis s'y connecte.",
-    "firebird.version()", "Version de la bibliothèque cliente.",
-    "firebird.disponible()", "Vrai si la bibliothèque cliente est trouvée.",
+    "firebird.version()", "Version du pilote natif.",
+    "firebird.disponible()", "Toujours vrai : le pilote est intégré (aucune bibliothèque cliente requise).",
     "db:executer(sql, ...)", "Exécute une instruction avec paramètres « ? » ; renvoie le nombre de lignes modifiées. Sans paramètre, accepte un script d'instructions séparées par « ; » (hors blocs PSQL).",
     "db:requete(sql, ...)", "Liste des lignes ; chaque ligne est une table colonne (majuscules) -> valeur. Accepte INSERT ... RETURNING et EXECUTE PROCEDURE.",
     "db:premier(sql, ...)", "Première ligne ou nul.",
     "db:valeur(sql, ...)", "Première colonne de la première ligne ou nul.",
+    "db:resultat(sql, ...)", "Résultat complet d'une instruction : {colonnes = noms dans l'ordre, lignes, modifications, genre = \"selection\", \"procedure\", \"modification\", \"definition\" ou \"autre\", tronque}.",
     "db:lignes(sql, ...)", "Itérateur sur les lignes : pour chaque r dans db:lignes(sql) ... suivant.",
     "db:modifications()", "Lignes modifiées par le dernier executer().",
     "db:sequence(nom[, pas=1])", "Valeur suivante d'une séquence (générateur).",

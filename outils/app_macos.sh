@@ -41,12 +41,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>wdlexis+</string>
   <key>CFBundleIdentifier</key><string>fr.sonaliwan.wdlexis</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.9.8/string>
+  <key>CFBundleShortVersionString</key><string>1.8.8</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   $ICON
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>wdlexis+ se connecte à des serveurs de votre réseau local (bases de données, services).</string>
 </dict>
 </plist>
 PLIST
