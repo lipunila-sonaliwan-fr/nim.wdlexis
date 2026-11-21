@@ -27,3 +27,6 @@ wdlexisrt
 exemples/atlassql/.wdlexis/atelier.json
 exemples/veille/.wdlexis/atelier.json
 tests/t_webview
+atelier-macos-arm64-complet.zip
+DISTRIBUER_MACOS.md
+/zig

@@ -8,7 +8,7 @@ Les utilisations commerciales ne sont pas couvertes par cette licence.<br/>
 Pour obtenir une autorisation d'utilisation commerciale,<br/>
 contactez l'auteur : metalab (at) sonaliwan.fr.<br/>
 
-[![](wdlexis.png)]()
+[![](LICENCES/wdlexis.png)]()
 
 # Lexis+ et l'atelier wdlexis+
 
@@ -414,6 +414,17 @@ retourner
 ```
 
 `s:fermer()` ferme la session (elle l'est aussi à la fin du programme).
+
+**Types des valeurs lues.** Booléens, entiers et réels DuckDB deviennent des
+logiques et des nombres ; `DECIMAL`, `HUGEINT` et `UBIGINT` des nombres, ou du
+texte exact s'ils dépassent la précision d'un nombre Lexis+ (entier au-delà de
+64 bits, plus de 15 chiffres significatifs). Les autres types sont lus en texte,
+au format de DuckDB : `DATE`, `TIME`, `TIMESTAMP` (toutes précisions),
+`TIMESTAMP WITH TIME ZONE` (heure locale du poste, `2026-11-19 14:31:00+01`),
+`TIME WITH TIME ZONE`, `INTERVAL`, `UUID` (`6f1c2b1e-…`), `ENUM`, `BIT`, `LIST`
+(`[1, 2]`), `ARRAY`, `STRUCT` (`{'a': 1}`), `MAP` (`{k=v}`), `UNION` ; un `BLOB`
+garde ses octets. C'est vrai aussi des colonnes fournies par les extensions
+(`mssql`, `postgres`, `sqlite`…), par exemple un `uniqueidentifier` de SQL Server.
 
 ### 4.2 Enregistrement par enregistrement (zones, à la manière de dBase)
 

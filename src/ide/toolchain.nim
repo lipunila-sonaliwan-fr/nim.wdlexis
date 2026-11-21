@@ -45,6 +45,9 @@ type
     bundleLibs*: bool
     iconPath*: string            # image source de l'icône ("" = aucune).
     crop*: Crop                  # cadrage retenu dans l'image.
+    embedChain*: bool            # embarque la chaîne de génération (Zig, rtc, bibliothèques,
+                                 # wdlexisgen) : l'application générée peut générer à son tour.
+    signId*: string              # macOS : identité « Developer ID Application: … » ("" : ad hoc).
 
   ProjectInfo* = object
     root*: string                # dossier du projet (absolu).
@@ -220,6 +223,8 @@ proc loadSettings*(info: ProjectInfo): BuildSettings =
           if $t == c.strip: targets.incl t
     of "distribution": result.dist = (if v == "archive": dmArchive else: dmFolder)
     of "bibliotheques": result.bundleLibs = v in ["1", "oui", "vrai"]
+    of "chaine": result.embedChain = v in ["1", "oui", "vrai"]
+    of "signature": result.signId = v
     of "icone":
       result.iconPath = if v.len == 0 or isAbsolute(v): v else: info.root / v
     of "cadrage":
@@ -242,6 +247,8 @@ proc saveSettings*(info: ProjectInfo, s: BuildSettings) =
     "cibles=" & cibles.join(",") & "\n" &
     "distribution=" & $s.dist & "\n" &
     "bibliotheques=" & (if s.bundleLibs: "1" else: "0") & "\n" &
+    "chaine=" & (if s.embedChain: "1" else: "0") & "\n" &
+    "signature=" & s.signId & "\n" &
     "icone=" & icon & "\n" &
     "cadrage=" & formatFloat(s.crop.left, ffDecimal, 5) & "," & formatFloat(s.crop.top, ffDecimal, 5) &
       "," & formatFloat(s.crop.side, ffDecimal, 5) & "\n"
@@ -251,6 +258,22 @@ proc saveSettings*(info: ProjectInfo, s: BuildSettings) =
 #
 # Emplacements de la toolchain
 #
+
+proc chainRoot*(appDir: string): string =
+  # Dossier de la chaîne de génération (zig/, rtc/, linOS/ macOS/ winOS/, ttf/, LICENCES/, gen/).
+  # Dans un paquet macOS, les données sont dans Contents/Resources et les exécutables
+  # dans Contents/MacOS (règle de signature d'Apple) ; ailleurs : à côté de l'exécutable.
+  let a = appDir.normalizedPath
+  if a.endsWith("Contents" / "MacOS"):
+    let res = a.parentDir / "Resources"
+    if dirExists(res / "rtc") or dirExists(res / "zig"): return res
+  a
+
+proc hostTarget*(): Target =
+  ## cible correspondant au système qui exécute la chaîne
+  when defined(windows): (when defined(arm64): tgWinArm64 else: tgWinX64)
+  elif defined(macosx): (when defined(arm64): tgMacArm64 else: tgMacX64)
+  else: (when defined(arm64): tgLinuxArm64 else: tgLinuxX64)
 
 proc hostZigDir*(appDir: string): string =
   when defined(windows): appDir / "winZG"
@@ -265,12 +288,25 @@ proc findZig*(appDir: string): tuple[exe, libDir, err: string] =
   when defined(arm64): archs = @["aarch64", "x86_64"]   # x86_64 : émulation (Rosetta, Windows on Arm)
   else: archs = @["x86_64"]
   var cands: seq[string]
+  # organisation actuelle : zig/<système>-<arch>/zig[.exe] et zig/lib partagé par tous les hôtes
+  let h = hostTarget()
+  cands.add appDir / "zig" / $h / exeName
+  when defined(arm64):
+    let hx = (when defined(windows): tgWinX64 elif defined(macosx): tgMacX64 else: tgLinuxX64)
+    cands.add appDir / "zig" / $hx / exeName
+  # organisation précédente : <OS>ZG/<arch>/zig[.exe] et <OS>ZG/lib
   for a in archs: cands.add base / a / exeName
   cands.add base / exeName
   let env = getEnv("WDLEXIS_ZIG")
   if env.len > 0: cands.insert(env, 0)
   for c in cands:
     if fileExists(c):
+      when not defined(windows):
+        # copie sans les droits (archive zip…) : rendre Zig exécutable
+        try:
+          let p = getFilePermissions(c)
+          if fpUserExec notin p: setFilePermissions(c, p + {fpUserExec, fpGroupExec, fpOthersExec})
+        except OSError: discard
       var lib = ""
       for l in [c.parentDir / "lib", c.parentDir.parentDir / "lib"]:
         if fileExists(l / "std" / "std.zig"):
@@ -279,8 +315,8 @@ proc findZig*(appDir: string): tuple[exe, libDir, err: string] =
       if lib.len == 0:
         return (c, "", "bibliothèque de Zig introuvable (dossier lib/ à côté de " & c & ")")
       return (c, lib, "")
-  ("", "", "Zig introuvable : " & base & DirSep & archs[0] & DirSep & exeName &
-           " (dossier " & extractFilename(base) & " de wdlexis+)")
+  ("", "", "Zig introuvable : " & appDir / "zig" / $h / exeName & " (ou " & base & DirSep & archs[0] &
+           DirSep & exeName & ")")
 
 proc findRtc*(appDir: string): string =
   for d in [appDir / "rtc", appDir.parentDir / "rtc", getEnv("WDLEXIS_RTC")]:
@@ -688,6 +724,72 @@ proc binaryArch*(path: string): string =
       return (if m == 0x8664: "x64" elif m == 0xAA64: "arm64" else: "?")
   ""
 
+proc isMachO*(path: string): bool =
+  ## exécutable ou bibliothèque Mach-O (simple ou universel)
+  var f: File
+  if not open(f, path): return false
+  defer: f.close()
+  var h: array[4, uint8]
+  if f.readBytes(h, 0, 4) != 4: return false
+  let m = uint32(h[0]) or (uint32(h[1]) shl 8) or (uint32(h[2]) shl 16) or (uint32(h[3]) shl 24)
+  m in [0xFEEDFACE'u32, 0xFEEDFACF'u32, 0xCEFAEDFE'u32, 0xCFFAEDFE'u32, 0xBEBAFECA'u32]
+
+proc copyTree*(src, dst: string): int =
+  # copie récursive avec les droits (exécutables), sans .DS_Store ni __MACOSX ; nombre de fichiers
+  for rel in walkDirRec(src, relative = true):
+    let n = extractFilename(rel)
+    if n == ".DS_Store" or rel.startsWith("__MACOSX") or ("__MACOSX" & DirSep) in rel: continue
+    let d = dst / rel
+    createDir(d.parentDir)
+    copyFileWithPermissions(src / rel, d)
+    inc result
+
+const EntitlementsLexis* = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- bibliothèques chargées à l'exécution (extensions DuckDB, ffi…) d'autres éditeurs -->
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>
+"""
+
+proc signMac*(target, ident, workDir: string, log: proc (k: LogKind, t: string) {.gcsafe.}): bool =
+  # Signature macOS. ident "" : ad hoc. Sinon Developer ID, de l'intérieur vers l'extérieur :
+  # chaque Mach-O imbriqué, puis le paquet (hardened runtime, horodatage, droits Lexis+).
+  if findExe("codesign").len == 0: return false
+  if ident.len == 0:
+    let (o, c) = execCmdEx("codesign --force --deep -s - " & quoteShell(target))
+    if c != 0: log(lgWarning, "signature ad hoc impossible : " & o.strip)
+    return c == 0
+  discard execCmdEx("xattr -cr " & quoteShell(target))
+  var nested: seq[string]
+  if dirExists(target):
+    let mainExe = target / "Contents" / "MacOS" / target.extractFilename.changeFileExt("")
+    for f in walkDirRec(target):
+      if f != mainExe and isMachO(f): nested.add f
+  # les plus profonds d'abord
+  nested.sort(proc (a, b: string): int = cmp(b.count(DirSep), a.count(DirSep)))
+  let base = "codesign --force --options runtime --timestamp --sign " & quoteShell(ident) & " "
+  var ko = 0
+  for f in nested:
+    let (o, c) = execCmdEx(base & quoteShell(f))
+    if c != 0:
+      inc ko
+      log(lgWarning, "signature de " & f.relativePath(target) & " : " & o.strip)
+  createDir(workDir)
+  let ent = workDir / "lexis.entitlements"
+  writeFile(ent, EntitlementsLexis)
+  let (o, c) = execCmdEx(base & "--entitlements " & quoteShell(ent) & " " & quoteShell(target))
+  if c != 0:
+    log(lgError, "signature Developer ID impossible : " & o.strip)
+    return false
+  let (vo, vc) = execCmdEx("codesign --verify --deep --strict " & quoteShell(target))
+  if vc != 0: log(lgWarning, "vérification de la signature : " & vo.strip)
+  log(lgOutput, extractFilename(target) & " signé « " & ident & " » (" & $nested.len & " binaire(s) imbriqué(s)" &
+               (if ko > 0: ", " & $ko & " échec(s)" else: "") & ") ; à notariser : outils/signer_macos.sh")
+  vc == 0 and ko == 0
+
 proc isLibFor(name: string, t: Target): bool =
   let l = name.toLowerAscii
   if t.isWindows: l.endsWith(".dll")
@@ -856,7 +958,8 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
     var names: seq[string]
     for t in targets: names.add t.label
     hooks.log(lgOutput, "Cibles : " & names.join(", "))
-    let (zig, zigLib, zigErr) = findZig(appDir)
+    let croot = chainRoot(appDir)
+    let (zig, zigLib, zigErr) = findZig(croot)
     if zigErr.len > 0: fail(zigErr)
     putEnv("ZIG_LIB_DIR", zigLib)
     var (zv, zc) = execCmdEx(quoteShellCommand([zig, "version"]))
@@ -871,7 +974,7 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
                      (when defined(macosx): "\n(macOS : xattr -dr com.apple.quarantine sur le dossier macZG)" else: ""))
     let zigVersion = zv.strip
     hooks.log(lgOutput, "Zig " & zigVersion & " : " & zig)
-    let rtc = findRtc(appDir)
+    let rtc = findRtc(croot)
     if rtc.len == 0: fail("runtime C introuvable (dossier rtc/ de wdlexis+ ; voir « nimble rtc »)")
     hooks.log(lgOutput, "Runtime C : " & rtc)
     if info.usesUi and s.appType != atGraphique:
@@ -1061,13 +1164,14 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
       # bibliothèques.
       if s.bundleLibs:
         let osDir = osLibDir(t)
-        var src = appDir / osDir
+        var src = croot / osDir
         if dirExists(src / archDir(t)): src = src / archDir(t)
         var nlibs = 0
         if dirExists(src):
           for f in walkDirRec(src, relative = true):
             let rel = f
-            if src == appDir / osDir and (rel.startsWith("x64") or rel.startsWith("arm64")): continue
+            if src == croot / osDir and (rel.startsWith("x64") or rel.startsWith("arm64")): continue
+            if extractFilename(rel) == ".DS_Store": continue
             let dst = base / osDir / rel
             createDir(dst.parentDir)
             copyFile(src / rel, dst)
@@ -1076,36 +1180,64 @@ proc build*(info: ProjectInfo, s: BuildSettings, appDir: string, hooks: BuildHoo
             if a in ["x64", "arm64"] and a != archDir(t):
               hooks.log(lgWarning, "bibliothèque " & osDir & "/" & rel.replace('\\', '/') & " : architecture " &
                                    a & ", la cible est " & archDir(t))
-        for f in walkDir(appDir):
+        for f in walkDir(croot):
           if f.kind in {pcFile, pcLinkToFile} and isLibFor(extractFilename(f.path), t):
             copyFile(f.path, base / extractFilename(f.path))
             inc nlibs
-        if dirExists(appDir / "ttf"):
-          copyDir(appDir / "ttf", base / "ttf")
+        if dirExists(croot / "ttf"):
+          discard copyTree(croot / "ttf", base / "ttf")
           hooks.log(lgOutput, "polices : ttf/")
         if nlibs > 0: hooks.log(lgOutput, $nlibs & " bibliothèque(s) : " & osDir & "/")
-        else: hooks.log(lgWarning, "aucune bibliothèque trouvée dans " & appDir / osDir)
+        else: hooks.log(lgWarning, "aucune bibliothèque trouvée dans " & croot / osDir)
       elif info.usesUi:
         hooks.log(lgWarning, "bibliothèques non intégrées : SDL3 et SDL3_ttf devront être fournies (" &
                              osLibDir(t) & "/ à côté de l'application)")
       # modèles (paquets d'IA).
       if info.usesIa:
         createDir(base / "models")
-        writeFile(base / "models" / "models.txt", modelsText(appDir))
+        writeFile(base / "models" / "models.txt", modelsText(croot))
         hooks.log(lgOutput, "models/models.txt (paquets d'IA)")
-      # signature locale du paquet macOS : scelle Info.plist (autorisation « Réseau local »
-      # gardée par macOS, pas de refus « application endommagée »). Seulement sur un Mac.
+      # chaîne de génération embarquée (atelier…) : l'application générée génère à son tour,
+      # pour tous les systèmes. Données dans base (Contents/Resources sur macOS), outil
+      # wdlexisgen de la cible à côté de son exécutable.
+      if s.embedChain:
+        var nf = 0
+        for d in ["zig", "rtc", "gen", "linOS", "macOS", "winOS", "ttf", "LICENCES", "linZG", "macZG", "winZG"]:
+          if dirExists(croot / d): nf += copyTree(croot / d, base / d)
+        for f in walkDir(croot):
+          let n = extractFilename(f.path)
+          if f.kind in {pcFile, pcLinkToFile} and (n == "LICENCE.md" or isLibFor(n, tgLinuxX64) or
+              isLibFor(n, tgMacArm64) or isLibFor(n, tgWinX64)):
+            copyFileWithPermissions(f.path, base / n)
+            inc nf
+        let genName = (if t.isWindows: "wdlexisgen.exe" else: "wdlexisgen")
+        var genSrc = croot / "gen" / $t / genName
+        if not fileExists(genSrc) and t == hostTarget():
+          genSrc = getAppDir() / genName          # l'outil qui génère, s'il est de la même cible
+        let genDst = (if s.appType == atGraphique and t.isMac: stage / (info.name & ".app") / "Contents" / "MacOS" / genName
+                      else: stage / genName)
+        if fileExists(genSrc) and extractFilename(genSrc) == genName and binaryArch(genSrc) != "":
+          copyFileWithPermissions(genSrc, genDst)
+          execs.incl genDst.relativePath(stage).replace('\\', '/')
+          hooks.log(lgOutput, "chaîne de génération embarquée (" & $nf & " fichiers) + " & genName & " pour " & t.label)
+        else:
+          hooks.log(lgWarning, "chaîne embarquée (" & $nf & " fichiers) mais pas de " & genName & " pour " & t.label &
+                               " (gen/" & $t & "/) : l'application ne pourra pas générer")
+        if not dirExists(croot / "zig" / $t) and not dirExists(croot / (if t.isWindows: "winZG" elif t.isMac: "macZG" else: "linZG")):
+          hooks.log(lgWarning, "pas de Zig pour " & t.label & " dans la chaîne (zig/" & $t & "/)")
+      # signature du paquet macOS : ad hoc, ou Developer ID si une identité est donnée
+      # (paramètre signature=, ou variable WDLEXIS_SIGN_ID). Seulement sur un Mac.
       when defined(macosx):
-        if s.appType == atGraphique and t.isMac and findExe("codesign").len > 0:
-          let app = stage / (info.name & ".app")
-          let (outp, code) = execCmdEx("codesign --force --deep -s - " & quoteShell(app))
-          if code == 0: hooks.log(lgOutput, info.name & ".app signé (signature locale)")
-          else: hooks.log(lgWarning, "signature du paquet impossible : " & outp.strip)
+        if t.isMac:
+          let ident = (if s.signId.len > 0: s.signId else: getEnv("WDLEXIS_SIGN_ID"))
+          let cible = (if s.appType == atGraphique: stage / (info.name & ".app") else: stage / exeRel)
+          if signMac(cible, ident, work / "signature", hooks.log) and ident.len == 0:
+            hooks.log(lgOutput, extractFilename(cible) & " signé (signature locale ad hoc)")
       # licences (à embarquer).
-      if dirExists(appDir / "LICENCES"):
-        copyDir(appDir / "LICENCES", stage / "LICENCES")
-      if fileExists(appDir / "LICENCE.md"):
-        copyFile(appDir / "LICENCE.md", stage / "LICENCES" / "wdlexis-LICENCE.md")
+      if dirExists(croot / "LICENCES"):
+        discard copyTree(croot / "LICENCES", stage / "LICENCES")
+      if fileExists(croot / "LICENCE.md"):
+        copyFile(croot / "LICENCE.md", stage / "LICENCES" / "wdlexis-LICENCE.md")
       # selon le type...
       case s.appType
       of atGraphique:

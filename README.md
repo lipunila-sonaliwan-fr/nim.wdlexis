@@ -1,4 +1,4 @@
-[![](wdlexis.png)]()
+[![](LICENCES/wdlexis+.png)]()
 
 # wdlexis+ - l'atelier du langage Lexis+
 
@@ -72,8 +72,7 @@ wdlexis/
     api.nim              API pour écrire des paquets en Nim
   nimllm/, nimllm.nim    bibliothèque LLM (inférence GGUF, dialogue, entraînement)
   paquets/               paquets fournis (tous.nim les enregistre tous)
-    pkg_firebird.nim     client Firebird (pilote réseau natif, sans fbclient)
-    firebird/            fbwire.nim : protocole réseau Firebird 3-5 ; fbcrypto.nim : SRP, SHA, Arc4
+    pkg_firebird.nim     client Firebird (bibliothèque fbclient chargée à l'exécution)
     pkg_lucene.nim       recherche plein texte Lucene++ (bibliothèque wdlexis_lucene)
     pkg_archive.nim      archives zip, tar, tar.gz, gzip (Nim pur ; compression.nim)
     pkg_mqtt.nim         MQTT 3.1.1 : client et serveur intégré (Nim pur)
@@ -99,7 +98,7 @@ wdlexis/
     duckdbstudio/        atelier DuckDB : SQL, profil, recommandations, schéma, pipelines,
                          planification, BI, assistant IA, extensions
   tests/                 tests du langage (sans interface graphique) ;
-                         tests/firebird : pilote Firebird testé avec un serveur simulé ;
+                         tests/firebird : liaison Firebird testée avec un client simulé ;
                          tests/webview : pont webview testé avec une bibliothèque simulée
   linOS/, macOS/, winOS/ bibliothèques webview (webview.so, .dylib, .dll)
   wdlexisapp.nim         runtime des applications générées (projet embarqué)
@@ -206,7 +205,7 @@ Bibliothèques chargées à l'exécution, seulement si le programme s'en sert :
 | Client Firebird (`libfbclient.so`, `.dylib`, `fbclient.dll`) | paquet `firebird` | client Firebird installé, dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme, ou chemin dans `WDLEXIS_FIREBIRD` |
 | webview (`webview.so`, `webview.dylib`, `webview.dll`) | paquet `webview` | dossier `linOS/` (`macOS/`, `winOS/`) à côté de l'exécutable ou du programme (fournies), ou chemin dans `WDLEXIS_WEBVIEW` ; moteur web du système : WebView2 (Windows 10/11), WKWebView (macOS), WebKitGTK 4.1 (Linux : `libwebkit2gtk-4.1-0`) |
 
-Les paquets `archive`, `mqtt`, `document`, `wdreka`, `trame` et `firebird` sont écrits en Nim pur, sans
+Les paquets `archive`, `mqtt`, `document`, `wdreka` et `trame` sont écrits en Nim pur, sans
 bibliothèque externe (TLS de `mqtt` : OpenSSL, comme HTTPS).
 
 Les paquets d'IA (`llm`, `gguf`, `dessin`, `audio`, `tenseur`, `entrainement`)
@@ -223,4 +222,4 @@ instructions de base de données signalent l'absence de la bibliothèque.
 ### Encore une chose !
 Un p'tit geste qui peut - grandement - nous aider... \[La caféïne c'est important pour une équipe de neuro-atypiques : TSA, TDAH, TAG, HPI et/ou THPI (membres de **mensa.fr** et de **triplenine.org**).\]
 
-[![Buy Me a Coffee](buymeacoffe-fre.png)](https://buymeacoffee.com/sonaliwan.fr)
+[![Buy Me a Coffee](LICENCES/buymeacoffe-fre.png)](https://buymeacoffee.com/sonaliwan.fr)

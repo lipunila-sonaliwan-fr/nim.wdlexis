@@ -8,6 +8,11 @@
 #     --sans-bibliotheques      ne pas intégrer linOS / macOS / winOS et ttf
 #     --icone=image.png         icône (type graphique) ; --cadrage=gauche,haut,cote (fractions)
 #     --principal=fichier.prg   fichier principal (défaut : principal.prg)
+#     --chaine                  embarque la chaîne de génération (Zig, rtc, bibliothèques, wdlexisgen) :
+#                               l'application générée (atelier…) peut générer pour tous les systèmes
+#     --sans-chaine             n'embarque pas la chaîne
+#     --signature="Developer ID Application: Nom (EQUIPE)"   macOS : signature Developer ID
+#                               (sur un Mac ; sinon signature ad hoc). Notarisation : outils/signer_macos.sh
 #     --sauver                  enregistre ces paramètres dans le projet (.wdlexis/application.ini)
 #
 # Sans option, les paramètres enregistrés par l'atelier (bouton [Sauver]) sont utilisés.
@@ -18,7 +23,7 @@ import ide/[toolchain, imagetools]
 
 proc usage() =
   echo "wdlexisgen <dossier_du_projet> [--type=...] [--cibles=...] [--archive] [--sans-bibliotheques]"
-  echo "           [--icone=image] [--cadrage=g,h,c] [--principal=fichier.prg] [--sauver]"
+  echo "           [--icone=image] [--cadrage=g,h,c] [--principal=fichier.prg] [--chaine] [--signature=ID] [--sauver]"
 
 proc main(): int =
   var root, mainRel = ""
@@ -56,6 +61,9 @@ proc main(): int =
     of "cadrage":
       let n = v.split(',')
       if n.len == 3: s.crop = Crop(left: parseFloat(n[0]), top: parseFloat(n[1]), side: parseFloat(n[2]))
+    of "chaine": s.embedChain = true
+    of "sans-chaine": s.embedChain = false
+    of "signature": s.signId = v
     of "sauver": save = true
     of "principal": discard
     of "aide", "help":
