@@ -64,15 +64,29 @@ done
 find "$APP" -name .DS_Store -delete
 xattr -cr "$APP"
 
+echo "  signature actuelle : $(codesign -d --verbose=2 "$APP" 2>&1 | grep -E '^(Authority|Signature)=' | head -1)"
+
 echo "== Binaires Mach-O imbriqués"
+# seuls les exécutables, bibliothèques et bundles se signent ; les fichiers objet (.o),
+# compagnons dSYM, etc. sont des données couvertes par le sceau du paquet
 find "$APP/Contents" -type f ! -path "$APP/Contents/MacOS/$MAIN" -print0 |
-  xargs -0 file -N -F '|' | grep "Mach-O" | cut -d'|' -f1 |
-  awk -F/ '{ print NF "\t" $0 }' | sort -rn | cut -f2- > "$TMP/macho.txt"
-echo "  $(wc -l < "$TMP/macho.txt" | tr -d ' ') fichier(s)"
+  xargs -0 file -N -F '|' > "$TMP/types.txt" || true
+grep "|.*Mach-O" "$TMP/types.txt" | grep -E "executable|shared library|bundle" | cut -d'|' -f1 |
+  awk -F/ '{ print NF "\t" $0 }' | sort -rn | cut -f2- > "$TMP/macho.txt" || true
+echo "  $(wc -l < "$TMP/macho.txt" | tr -d ' ') fichier(s) à signer"
+: > "$TMP/echecs.txt"
 while IFS= read -r f; do
-  codesign --force --options runtime --timestamp --sign "$ID" "$f" >/dev/null
-  echo "  signé : ${f#$APP/}"
+  if codesign --force --options runtime --timestamp --sign "$ID" "$f" > "$TMP/cs.txt" 2>&1; then
+    echo "  signé : ${f#$APP/}"
+  else
+    echo "  ✗ ÉCHEC : ${f#$APP/}" >&2; sed 's/^/      /' "$TMP/cs.txt" >&2
+    echo "${f#$APP/}" >> "$TMP/echecs.txt"
+  fi
 done < "$TMP/macho.txt"
+if [ -s "$TMP/echecs.txt" ]; then
+  echo "$(wc -l < "$TMP/echecs.txt" | tr -d ' ') fichier(s) non signé(s) : le paquet N'EST PAS signé (il garde sa signature précédente)." >&2
+  exit 1
+fi
 
 echo "== Paquet"
 cat > "$TMP/lexis.entitlements" <<'EOF'
@@ -86,6 +100,12 @@ cat > "$TMP/lexis.entitlements" <<'EOF'
 EOF
 codesign --force --options runtime --timestamp --entitlements "$TMP/lexis.entitlements" --sign "$ID" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+SIGNE=$(codesign -d --verbose=2 "$APP" 2>&1 | sed -n 's/^Authority=//p' | head -1)
+echo "  signé par : ${SIGNE:-?}"
+case "$SIGNE" in
+  "$ID"|"Developer ID Application:"*) ;;
+  *) echo "Le paquet n'a pas la signature attendue ($ID)." >&2; exit 1 ;;
+esac
 
 [ "${SANS_NOTARISATION:-0}" = 1 ] && { echo "Signé (notarisation non demandée)."; exit 0; }
 
