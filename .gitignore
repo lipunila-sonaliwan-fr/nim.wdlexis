@@ -30,3 +30,4 @@ tests/t_webview
 atelier-macos-arm64-complet.zip
 DISTRIBUER_MACOS.md
 /zig
+signer_notariser_macos_nim_lexis.pdf
