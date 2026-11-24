@@ -576,7 +576,9 @@ retourner
   `surfinfocus`, `surentree`, `sursortie`, `surdeplacement`, `surmolette`,
   `surdeploiement`, `surrepli`, `survalidation`, `surouverture`, `surfermeture`,
   `surredimension`, `suractivation`, `surdesactivation`, et `surevenement` pour
-  tous. L'événement `ev` a les champs `genre`, `id`, `courant`, `x`, `y`, `dx`,
+  tous. `surdeplacement` n'est émis que si la fenêtre a `suivisouris = vrai` (coûteux : à
+  activer le temps d'un glisser) ; le contrôle saisi par un clic reçoit alors les mouvements
+  jusqu'au relâchement (`surboutonbas` / `surboutonhaut`). L'événement `ev` a les champs `genre`, `id`, `courant`, `x`, `y`, `dx`,
   `dy`, `touche`, `modificateurs`, `index`, `colonne`, `bouton`, `texte`,
   `chemin` ; `ev:arreter()` arrête sa propagation aux conteneurs.
 - `ui.executer()` attend la fermeture des fenêtres ; dans le runtime, si le
@@ -2699,6 +2701,9 @@ Interface graphique wdgui - disponible par son nom (`interface.…`) ou par `paq
 | `grille:versjson()` | Export JSON. |
 | `grille:chargerjson(chemin)` | Import JSON. |
 | `panneau:defilera(x, y)` | Fait défiler. |
+| `panneau:defilerde(dx, dy)` | Fait défiler d'un décalage. |
+| `panneau:position()` | `{x, y}` : défilement ; `{largeur, hauteur}` : taille du contenu ; `{vuelargeur, vuehauteur}` : zone visible. |
+| `panneau:volet(controle, [largeur])` | Volet latéral : `controle`, déjà ajouté au panneau, est placé à droite de la zone visible, juste avant l'ascenseur vertical, sur toute la hauteur ; il ne défile pas et ne compte pas dans le contenu (`largeur` par défaut : sa `largeurfixe`, sinon 120). `panneau:volet(nul)` l'enlève ; `controle.visible = faux` le cache et rend la place. |
 | `pdf:ouvrir(chemin)` | Ouvre un PDF. |
 | `pdf:enregistrer([chemin])` | Enregistre. |
 | `editeur:ouvrir(chemin, [creer])` | Ouvre (ou active) un fichier dans un onglet ; renvoie l'uid du document. `creer = vrai` : fichier absent accepté. |

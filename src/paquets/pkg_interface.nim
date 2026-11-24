@@ -356,6 +356,11 @@ proc setProp(L: Interp, c: UiCtl, key: string, v: Value) =
         if c.ctl.isNil: unsupported(key)
         withControl(c.id, Control, obj): obj.setValueText(txt)
         requestRedraw(c.id)
+  of "suivisouris":
+    # fenêtre : émettre « deplacement » à chaque mouvement de la souris (coûteux : le temps
+    # d'un glisser, par exemple) ; le contrôle saisi par un clic reçoit les mouvements
+    if c.family != "fenetre" or c.win == nil: unsupported(key)
+    c.win.mouseMoveEvents = truthy(v)
   of "etatfenetre":
     if c.family != "fenetre": unsupported(key)
     setWindowState(c.id, windowStateOf(L.tostr(v)))
@@ -1133,6 +1138,32 @@ proc defineMethods() =
     panelScrollBy(c.id, x, y)
   mfn "panneau", "rendrevisible", proc (L: Interp, a: seq[Value]): seq[Value] =
     panelEnsureVisible(L.self(a, "rendrevisible").id, ctlOf(arg(a, 2)).id)
+  mfn "panneau", "volet", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # panneau:volet(contrôle [, largeur]) : un enfant du panneau placé à droite de la zone
+    # visible, juste avant l'ascenseur vertical, qui ne défile pas ; panneau:volet(nul) l'enlève.
+    let c = L.self(a, "volet")
+    if arg(a, 2).kind == vkNil:
+      panelSetSide(c.id, NoControl, 0)
+    else:
+      let v = ctlOf(arg(a, 2), "volet : contrôle")
+      var w = if arg(a, 3).kind == vkNil: 0.0 else: L.checkNum(a, 3, "volet")
+      if w <= 0 and not v.ctl.isNil: w = v.ctl.fixedWidth
+      if w <= 0: w = 120
+      panelSetSide(c.id, v.id, w)
+  mfn "panneau", "position", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # {x, y} : défilement ; {largeur, hauteur} : taille du contenu ; {vuelargeur, vuehauteur} : zone visible
+    let id = L.self(a, "position").id
+    let sp = panelScrollPosition(id)
+    let cs = panelContentSize(id)
+    let vs = panelViewportSize(id)
+    let t = newLTable()
+    t.set "x", numV(sp.x)
+    t.set "y", numV(sp.y)
+    t.set "largeur", numV(cs.w)
+    t.set "hauteur", numV(cs.h)
+    t.set "vuelargeur", numV(vs.w)
+    t.set "vuehauteur", numV(vs.h)
+    @[tableV(t)]
 
   # grille
   mfn "grille", "ajoutercolonne", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -2720,7 +2751,7 @@ const uiDocs = [
   "grille:fixermodifiable([b])", "Mode saisie.", "grille:verscsv([sep])", "Export CSV.",
   "grille:chargercsv(chemin, [sep])", "Import CSV.",
   "grille:versjson()", "Export JSON.", "grille:chargerjson(chemin)", "Import JSON.",
-  "panneau:defilera(x, y)", "Fait défiler.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre.",
+  "panneau:defilera(x, y)", "Fait défiler.", "panneau:volet(contrôle, [largeur])", "Volet fixe à droite, avant l'ascenseur (nul : l'enlève).", "panneau:position()", "Défilement, taille du contenu et de la zone visible.", "pdf:ouvrir(chemin)", "Ouvre un PDF.", "pdf:enregistrer([chemin])", "Enregistre.",
   "editeur:ouvrir(chemin, [creer])", "Ouvre (ou active) un fichier dans un onglet ; renvoie l'uid du document. creer = vrai : fichier absent accepté.",
   "editeur:nouveau([titre])", "Nouveau document vide ; renvoie son uid.",
   "editeur:texte([uid])", "Texte d'un document (par défaut : l'actif, ou le code représenté par la vue blueprint active, comme toutes les méthodes à uid facultatif).",

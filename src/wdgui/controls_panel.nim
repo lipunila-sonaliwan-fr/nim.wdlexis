@@ -26,6 +26,8 @@ type
   Panel* = ref object of Container
     scrollbars*: ScrollbarMode
     verticalOnly*: bool           # vertical scrolling only: the content takes the panel's width.
+    side*: Control                # volet latéral (un enfant du panneau) : à droite de la zone
+    sideWidth*: float             # visible, juste avant l'ascenseur vertical ; il ne défile pas.
     scrollX*, scrollY*: float     # current offset of the content (pixels).
     lineStep*: float              # pixels per wheel notch.
     contentW*, contentH*: float   # natural size of the content (computed at layout).
@@ -57,17 +59,22 @@ method typeName*(p: Panel): string = "Panel"
 proc thickness(p: Panel): float =
   if p.scrollbars == smAlways: barSpace else: overlaySpace
 
-proc computeBars(p: Panel) =
+proc sideSpace(p: Panel): float =
+  # Largeur réservée au volet latéral (0 s'il n'y en a pas ou s'il est caché).
+  if p.side != nil and p.side.visible and p.side.parent == Container(p): max(0.0, p.sideWidth)
+  else: 0.0
+
+proc computeBars(p: Panel, side = 0.0) =
   # Decides which bars are needed and computes the viewport.
   let r = p.rect
   let space = if p.scrollbars == smAlways: barSpace else: 0.0
   var needV = p.contentH > r.h + 0.5
-  let needH = p.contentW > r.w - (if needV: space else: 0.0) + 0.5
+  let needH = p.contentW > r.w - side - (if needV: space else: 0.0) + 0.5
   if needH and not needV: needV = p.contentH > r.h - space + 0.5
   p.showV = (needV or p.scrollbars == smAlways) and p.scrollbars != smHidden   # vertical : toujours affiché en mode smAlways
   p.showH = needH and p.scrollbars != smHidden
   p.viewport = rect(r.x, r.y,
-                    max(0.0, r.w - (if p.showV: space else: 0.0)),
+                    max(0.0, r.w - side - (if p.showV: space else: 0.0)),
                     max(0.0, r.h - (if p.showH: space else: 0.0)))
   p.maxX = max(0.0, p.contentW - p.viewport.w)
   p.maxY = max(0.0, p.contentH - p.viewport.h)
@@ -120,11 +127,15 @@ method preferredSize*(p: Panel, d: Drawing, t: Theme): tuple[w, h: float] =
   (min(c.w, 400.0), min(c.h, 300.0))
 
 method layoutChildren*(p: Panel, d: Drawing, t: Theme) =
+  # le volet latéral ne fait pas partie du contenu : caché le temps de mesurer et de placer
+  # le contenu, puis placé à droite de la zone visible, sur toute sa hauteur
+  let sw = p.sideSpace
+  if sw > 0: p.side.visible = false
   # natural size of the content, laid out with the panel's own layout
   let c = procCall preferredSize(Container(p), d, t)
   p.contentW = if p.verticalOnly: 0.0 else: c.w
   p.contentH = c.h
-  p.computeBars()
+  p.computeBars(sw)
   p.clampScroll()
   # lay the children out in a virtual rectangle of the content's natural size (at least the
   # viewport: content smaller than the panel fills it, weighted children take the extra
@@ -134,6 +145,9 @@ method layoutChildren*(p: Panel, d: Drawing, t: Theme) =
   p.rect = rect(p.viewport.x - p.scrollX, p.viewport.y - p.scrollY, cw, max(c.h, p.viewport.h))
   procCall layoutChildren(Container(p), d, t)
   p.rect = saved
+  if sw > 0:
+    p.side.visible = true
+    layoutControl(p.side, rect(p.viewport.x + p.viewport.w, p.viewport.y, sw, p.viewport.h), d, t)
 
 method hitChildren*(p: Panel, x, y: float): bool =
   not ((p.showV and p.vTrack.containsPoint(x, y)) or (p.showH and p.hTrack.containsPoint(x, y)))
@@ -268,6 +282,11 @@ proc ensureVisible*(p: Panel, c: Control, margin = 8.0) =
   p.touch()
 
 method onDescendantFocus*(p: Panel, c: Control) =
+  if c.win != nil and c.win.focusByMouse: return   # cliqué : déjà visible, rien ne bouge
+  var a = c
+  while a != nil:
+    if a == p.side: return                       # volet latéral : il ne défile pas
+    a = a.parent
   p.ensureVisible(c)                             # Tab into a hidden child scrolls to it
 
 # id-based API (thread-safe)
@@ -306,3 +325,15 @@ proc panelEnsureVisible*(id: ControlId, child: ControlId) =
   withControl(id, Panel, p):
     let c = control(child)
     if c != nil: p.ensureVisible(c)
+
+proc panelSetSide*(id: ControlId, side: ControlId, width: float) =
+  # Volet latéral : `side` (un enfant du panneau, ou NoControl pour l'enlever) est placé à
+  # droite de la zone visible, avant l'ascenseur vertical, sur `width` pixels ; il ne défile pas.
+  withControl(id, Panel, p):
+    let c = if side == NoControl: nil else: control(side)
+    if c != nil and c.parent == Container(p):
+      p.side = c
+      p.sideWidth = width
+    else:
+      p.side = nil
+      p.sideWidth = 0

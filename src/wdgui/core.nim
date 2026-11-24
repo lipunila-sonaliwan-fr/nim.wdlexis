@@ -131,6 +131,7 @@ type
     opened*, closed*, closeRequested*, dirty*: bool
     manualClose*: bool        # if true, the close box emits the event without closing (call closeWindow).
     mouseMoveEvents*: bool    # emit evMouseMove on every move (costly: disabled by default).
+    focusByMouse*: bool       # vrai pendant le changement de focus causé par un clic.
     sdlTextInputActive*: bool
     mouseX*, mouseY*: float
     barDrag*: Control         # contrôle dont l'ascenseur est saisi (glissement du curseur).

@@ -414,7 +414,12 @@ proc handleEvent(e: var SDL_Event) =
     if b == mbLeft and barPress(f, c, x, y): return
     var fc = c
     while fc != nil and not fc.focusable: fc = fc.parent
-    if b == mbLeft and fc != nil: setFocusInternal(f, fc)
+    if b == mbLeft and fc != nil:
+      # le contrôle cliqué est sous le pointeur, donc déjà visible : les panneaux ne défilent
+      # pas pour le montrer en entier (sinon le contenu glisse sous la souris)
+      f.focusByMouse = true
+      setFocusInternal(f, fc)
+      f.focusByMouse = false
     f.capturedControl = c
     f.pressedOn[b] = c
     if b == mbLeft: c.pressed = true
