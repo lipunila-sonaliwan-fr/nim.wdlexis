@@ -14,6 +14,7 @@
 &&   generation.prg  boîte « Générer l'application » (outil wdlexisgen)
 &&   concepteur.prg  concepteur de formulaires (form_<nom>.prg)
 &&   etats.prg       éditeur d'états PDF (etat_<nom>.prg, paquet rapport)
+&&   outils.prg      usages, formateur, tests, profileur, git
 &&   menus.prg       menus, raccourcis, aide
 &&   panneaux.prg    ensembles de pages : masquer / afficher, fenêtre dédiée
 &&
@@ -56,6 +57,14 @@ ensembles = {}          && ensembles de pages (panneaux.prg) : GAUCHE, BAS, PALE
 lignesvars = {}         && page Variables : variables affichées (pour la modification en pause)
 cadrevars = 1           && cadre de pile affiché
 varchoisie = nul        && rang de la variable choisie
+chemintable = {}        && page Variables : table consultée ({{libelle, clef}…}, vide : variables)
+racinetable = nul       && sa variable de départ
+usagesliste = {}        && page Usages : emplacements affichés
+testsliste = {}         && page Tests : résultats affichés
+testchoisi = 0          && page Tests : dernière ligne choisie (double-clic)
+profilfonctions = {}    && page Profil : procédures affichées
+profillignes = {}       && page Profil : lignes affichées
+profilchoix = {0, 0}    && page Profil : dernières lignes choisies (procédures, lignes)
 
 && Une fenêtre compacte : menu et barre de symboles collés en haut, état collé en bas ;
 && à gauche Projet / Structure / Référence, en bas Problèmes / Console / Variables /
@@ -72,9 +81,9 @@ haut = fen:ajouter(ui.colonne())
 haut.ancrage = "haut"
 haut.marge = 0
 haut.espacement = 0
-menu = haut:ajouter(ui.barremenu())
-CONSTRUIRE_MENUS(menu)
-menu.surselection = @MENU
+barremenus = haut:ajouter(ui.barremenu())
+CONSTRUIRE_MENUS(barremenus)
+barremenus.surselection = @MENU
 
 barre = haut:ajouter(ui.rangee())
 barre.marge = 2
@@ -83,21 +92,21 @@ boutons = {}
 BOUTON("ouvrir", "ouvrir", "Ouvrir…", "ouvrir un fichier", @OUVRIR_FICHIER)
 BOUTON("nouveau", "nouveau", "Nouveau", "nouveau fichier dans le projet", @NOUVEAU_FICHIER)
 BOUTON("enregistrer", "enregistrer", "Enregistrer", "Ctrl+S", @ENREGISTRER)
-ESPACE(barre, 8)
+ESPACE_BARRE(barre, 8)
 BOUTON("verifier", "verifier", "Vérifier", "analyser les fichiers ouverts", @VERIFIER_TOUT)
 BOUTON("executer", "executer", "Exécuter", "Ctrl+R : exécution directe", @EXECUTER)
 BOUTON("deboguer", "deboguer", "Déboguer", "F5 : jusqu'au prochain point d'arrêt", @DEBOGUER)
-ESPACE(barre, 8)
+ESPACE_BARRE(barre, 8)
 BOUTON("continuer", "continuer", "Continuer", "F5 (en pause)", @CONTINUER)
 BOUTON("pas", "pasapas", "Pas à pas", "F11 : entrer dans les procédures", @PAS)
 BOUTON("passer", "pasprincipal", "Pas principal", "F10 : passer par-dessus les appels", @PASSER)
 BOUTON("sortir", "sortir", "Sortir", "Maj+F11 : terminer la procédure en cours", @SORTIR)
 BOUTON("pause", "pause", "Pause", "interrompre à la prochaine instruction", @PAUSE_DEMANDEE)
 BOUTON("arreter", "arreter", "Arrêter", "Maj+F5", @ARRETER)
-ESPACE(barre, nul)
+ESPACE_BARRE(barre, nul)
 bgauche = OUTIL_SYMBOLE(barre, "masquer", "Projet / Structure / Référence", "", @GAUCHE_BASCULER)
 bfengauche = OUTIL_SYMBOLE(barre, "fenetre", "Projet / Structure / Référence", "", @GAUCHE_FENETRE)
-ESPACE(barre, 8)
+ESPACE_BARRE(barre, 8)
 bbas = OUTIL_SYMBOLE(barre, "descendre", "Problèmes / Console / Variables / Pile d'appels", "", @BAS_BASCULER)
 bfenbas = OUTIL_SYMBOLE(barre, "fenetre", "Problèmes / Console / Variables / Pile d'appels", "", @BAS_FENETRE)
 
@@ -148,7 +157,7 @@ rangcons.ancrage = "haut"
 rangcons.marge = 1
 OUTIL_SYMBOLE(rangcons, "copier", "Copier", "copier tout le contenu de la console", @COPIER_CONSOLE)
 OUTIL_SYMBOLE(rangcons, "effacer", "Effacer", "vider la console", @EFFACER_CONSOLE)
-ESPACE(rangcons, nul)
+ESPACE_BARRE(rangcons, nul)
 rangsaisie = pcons:ajouter(ui.rangee())
 rangsaisie.ancrage = "bas"
 rangsaisie.marge = 1
@@ -168,8 +177,16 @@ saisievar = rangvar:ajouter(ui.saisie{indication = "nouvelle valeur (Entrée pou
 saisievar.poids = 1
 saisievar.actif = faux
 saisievar.surtouchebas = @VARIABLE_TOUCHE
-bvar = OUTIL_SYMBOLE(rangvar, "verifier", "Appliquer", "affecte la nouvelle valeur à la variable (Entrée)", @VARIABLE_APPLIQUER)
+bvar = OUTIL_SYMBOLE(rangvar, "verifier", "Appliquer", ;
+                     "affecte la nouvelle valeur (Entrée) : même type, ou 12, 1.5, \"texte\", vrai, faux, nul, {}", ;
+                     @VARIABLE_APPLIQUER)
 bvar.actif = faux
+bvarhaut = OUTIL_SYMBOLE(rangvar, "monter", "Remonter", "revenir à la table parente, puis aux variables", @TABLE_REMONTER)
+bvarhaut.actif = faux
+bvarplus = OUTIL_SYMBOLE(rangvar, "plus", "Ajouter", "ajouter une entrée à la table ouverte", @TABLE_AJOUTER)
+bvarplus.actif = faux
+bvarmoins = OUTIL_SYMBOLE(rangvar, "supprimer", "Supprimer", "supprimer l'entrée choisie de la table ouverte", @TABLE_SUPPRIMER)
+bvarmoins.actif = faux
 tvars = pvars:ajouter(ui.tableau())
 tvars.ancrage = "centre"
 tvars:ajoutercolonne("Nom", 160)
@@ -177,12 +194,62 @@ tvars:ajoutercolonne("Valeur", 520)
 tvars:ajoutercolonne("Type", 90)
 tvars:ajoutercolonne("Portée", 90)
 tvars.surselection = @VARIABLE_CHOISIE
-tvars.surdoubleclic = @VARIABLE_CHOISIE
+tvars.surdoubleclic = @VARIABLE_OUVRIR
 
 ppile = bas:ajouterpage("Pile d'appels")
 lpile = ppile:ajouter(ui.liste())
 lpile.poids = 1
 lpile.surselection = @CADRE
+
+&& Usages (Maj+F12), Tests (Ctrl+T), Profil (Exécuter > Profiler), Git (menu Git) : outils.prg
+pusages = bas:ajouterpage("Usages")
+tusages = pusages:ajouter(ui.tableau())
+tusages.poids = 1
+tusages:ajoutercolonne("Fichier", 160)
+tusages:ajoutercolonne("Ligne", 60, "droite")
+tusages:ajoutercolonne("Col", 50, "droite")
+tusages:ajoutercolonne("Genre", 120)
+tusages:ajoutercolonne("Code", 620)
+tusages.surselection = @USAGE
+
+ptests = bas:ajouterpage("Tests")
+lbltests = ptests:ajouter(ui.etiquette("Exécuter > Lancer les tests (Ctrl+T) : fichiers test_*.prg, *_test.prg ou dossier tests/"))
+ttests = ptests:ajouter(ui.tableau())
+ttests.poids = 1
+ttests:ajoutercolonne("Résultat", 90)
+ttests:ajoutercolonne("Test", 200)
+ttests:ajoutercolonne("Fichier", 160)
+ttests:ajoutercolonne("ms", 70, "droite")
+ttests:ajoutercolonne("Assertions", 80, "droite")
+ttests:ajoutercolonne("Message", 560)
+ttests.surselection = @TEST_CHOISI
+ttests.surdoubleclic = @TEST_ALLER
+
+pprofil = bas:ajouterpage("Profil")
+lblprofil = pprofil:ajouter(ui.etiquette("Exécuter > Profiler le programme : temps par procédure et par ligne, mémoire"))
+sepprofil = pprofil:ajouter(ui.separateur{vertical = vrai, position = 0.55})
+sepprofil.poids = 1
+tprofil = sepprofil:ajouter(ui.tableau())
+tprofil:ajoutercolonne("Procédure", 200)
+tprofil:ajoutercolonne("Appels", 70, "droite")
+tprofil:ajoutercolonne("Total ms", 90, "droite")
+tprofil:ajoutercolonne("Propre ms", 90, "droite")
+tprofil:ajoutercolonne("% propre", 70, "droite")
+tprofil:ajoutercolonne("Tables", 70, "droite")
+tprofil:ajoutercolonne("Source", 260)
+tprofil.surselection = @PROFIL_CHOIX_FONCTION
+tprofil.surdoubleclic = @PROFIL_ALLER_FONCTION
+tprofillignes = sepprofil:ajouter(ui.tableau())
+tprofillignes:ajoutercolonne("ms", 90, "droite")
+tprofillignes:ajoutercolonne("Passages", 80, "droite")
+tprofillignes:ajoutercolonne("Ligne", 180)
+tprofillignes:ajoutercolonne("Code", 560)
+tprofillignes.surselection = @PROFIL_CHOIX_LIGNE
+tprofillignes.surdoubleclic = @PROFIL_ALLER_LIGNE
+
+pgit = bas:ajouterpage("Git", "bordure")
+sgit = pgit:ajouter(ui.saisie{multiligne = vrai, indication = "Menu Git : statut, comparaison, annotations, historique, fusion, validation"})
+sgit.ancrage = "centre"
 
 && ensembles de pages : masquer / afficher (<< >>) et fenêtre dédiée, comme Atlas SQL
 ENSEMBLE("gauche", "Projet / Structure / Référence", hotegauche, pagesoutils, bgauche, bfengauche, ;
@@ -197,6 +264,7 @@ si reglages.basmasque
 finsi
 
 ETAT_BOUTONS("repos")
+ed:infobulles(vrai)     && survol d'un nom : définition, type, documentation (le projet suit CHARGER_PROJET)
 && dossier reste vide jusqu'au chargement : CHARGER_PROJET n'enregistre la session
 && du projet précédent que s'il y en a un.
 depart = systeme.args[1]
@@ -217,7 +285,8 @@ fonction FICHIER_REGLAGES()
 retourner fichier.joindre(fichier.dossierperso(), ".wdlexis-atelier.json")
 
 fonction LIRE_REGLAGES()
-  locale r = {sombre = vrai, minicarte = vrai, police = 14, globales = vrai, appelsinconnus = vrai, projet = "", gauchemasque = faux, basmasque = faux}
+  locale r = {sombre = vrai, minicarte = vrai, police = 14, globales = vrai, appelsinconnus = vrai, ;
+              collisions = vrai, types = vrai, projet = "", gauchemasque = faux, basmasque = faux}
   locale p = FICHIER_REGLAGES()
   si fichier.existe(p)
     essayer
@@ -261,7 +330,7 @@ retourner
 &&
 
 procedure CONSTRUIRE_OUTILS
-  globale outils, pagesoutils, arbre, arbrestruct, aref, fiche, rechref
+  globale outils, pagesoutils, arbreprojet, arbrestruct, aref, ficheref, rechref
   outils = fen            && compatibilité : « outils = nul » signifiait « fenêtre fermée »
   pagesoutils = hotegauche:ajouter(ui.onglets())
   pagesoutils.ancrage = "centre"
@@ -275,11 +344,11 @@ procedure CONSTRUIRE_OUTILS
                 @FICHIER_DUPLIQUER)
   OUTIL_SYMBOLE(bproj, "renommer", "Renommer", "donner un nouveau nom au fichier choisi", @FICHIER_RENOMMER)
   OUTIL_SYMBOLE(bproj, "supprimer", "Supprimer", "supprimer le fichier choisi (après confirmation)", @FICHIER_SUPPRIMER)
-  ESPACE(bproj, nul)
-  arbre = pprojet:ajouter(ui.arbre())
-  arbre.ancrage = "centre"
-  arbre.surselection = @ARBRE
-  arbre.surdoubleclic = @ARBRE_DOUBLE     && form_<nom>.prg, etat_<nom>.prg : leur concepteur
+  ESPACE_BARRE(bproj, nul)
+  arbreprojet = pprojet:ajouter(ui.arbre())
+  arbreprojet.ancrage = "centre"
+  arbreprojet.surselection = @ARBRE
+  arbreprojet.surdoubleclic = @ARBRE_DOUBLE     && form_<nom>.prg, etat_<nom>.prg : leur concepteur
   && Structure : fichier > Procédures / Fonctions (variables locales) > Variables globales
   locale pstruct = pagesoutils:ajouterpage("Structure")
   arbrestruct = pstruct:ajouter(ui.arbre())
@@ -295,7 +364,7 @@ procedure CONSTRUIRE_OUTILS
   aref = sref:ajouter(ui.arbre())
   aref.surselection = @REFERENCE
   aref.surdoubleclic = @INSERER_REFERENCE
-  fiche = sref:ajouter(ui.markdown(BIENVENUE_REFERENCE()))
+  ficheref = sref:ajouter(ui.markdown(BIENVENUE_REFERENCE()))
   CHARGER_REFERENCE()
 retourner
 

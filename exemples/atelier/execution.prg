@@ -13,6 +13,11 @@ procedure EXECUTER
   LANCER(faux, faux)
 retourner
 
+procedure PROFILER
+  && Exécuter > Profiler le programme : résultats dans la page Profil (outils.prg)
+  LANCER(faux, faux, vrai)
+retourner
+
 procedure DEBOGUER
   LANCER(vrai, faux)
 retourner
@@ -27,7 +32,7 @@ procedure DEBOGUER_OU_CONTINUER
   finsi
 retourner
 
-procedure LANCER(deboguer, pasapas)
+procedure LANCER(avecdebogueur, pasapas, profil)
   globale execution, pausecourante
   si execution <> nul et execution:actif()
     etat.libelle = "Un programme est déjà en cours."
@@ -39,35 +44,41 @@ procedure LANCER(deboguer, pasapas)
       ed:enregistrer(nul, d.uid)
     finsi
   suivant
-  locale cible = CIBLE()
-  si cible = ""
+  locale fichiercible = CIBLE()
+  si fichiercible = ""
     ui.alerte("Enregistrez le document avant de l'exécuter.", "attention")
     retourner
   finsi
   locale s = LIRE_SESSION()
   locale o = {arguments = s.arguments, sursortie = @SORTIE, surdemande = @DEMANDE, surfin = @FIN}
-  si deboguer
+  si profil = vrai
+    o.surprofil = @PROFIL_RESULTAT
+  finsi
+  si avecdebogueur
     o.deboguer = vrai
     o.pasapas = pasapas
     o.pointsarret = TOUS_POINTS_ARRET()
     o.surpause = @PAUSE
   finsi
   console.valeur = ""
+  si profil = vrai
+    console.valeur = "[profileur actif : résultats dans la page Profil à la fin]" + car(10)
+  finsi
   tvars:vider()
   lpile:vider()
   pausecourante = nul
   bas.valeur = 2
   ETAT_BOUTONS("execution")
-  etat.libelle = sisinon(deboguer, "Débogage de ", "Exécution de ") + fichier.nom(cible) + "…"
-  execution = lexis.executer(cible, o)
+  etat.libelle = sisinon(avecdebogueur, "Débogage de ", "Exécution de ") + fichier.nom(fichiercible) + "…"
+  execution = lexis.executer(fichiercible, o)
 retourner
 
 fonction TOUS_POINTS_ARRET()
   locale l = {}
   pour chaque d dans ed:documents()
-    locale lignes = ed:pointsarret(d.uid)
-    si #lignes > 0 et d.chemin <> ""
-      inserer(l, {source = d.chemin, lignes = lignes})
+    locale lignesarret = ed:pointsarret(d.uid)
+    si #lignesarret > 0 et d.chemin <> ""
+      inserer(l, {source = d.chemin, lignes = lignesarret})
     finsi
   suivant
 retourner l
@@ -159,30 +170,154 @@ procedure MONTRER_CADRE(i)
   si f = nul
     retourner
   finsi
-  globale lignesvars, cadrevars, varchoisie
-  tvars:vider()
-  lignesvars = {}
+  globale cadrevars, chemintable
   cadrevars = i
-  varchoisie = nul
+  chemintable = {}
+  locale lignesvar = {}
   pour chaque v dans f.variables
-    tvars:ajouterligne(v.nom, v.valeur, v.genre, v.portee)
-    inserer(lignesvars, v)
+    inserer(lignesvar, v)
   suivant
   pour chaque v dans pausecourante.globales
-    tvars:ajouterligne(v.nom, v.valeur, v.genre, v.portee)
-    inserer(lignesvars, v)
+    inserer(lignesvar, v)
   suivant
-  lblvar.libelle = "Choisir une variable (chaîne, entier, décimal, logique) pour modifier sa valeur :"
-  saisievar.valeur = ""
-  saisievar.actif = faux
-  bvar.actif = faux
+  AFFICHER_VARIABLES(lignesvar)
   si f.source <> "" et fichier.estfichier(f.source)
     ed:ouvrir(f.source)
     ed:lignexecution(f.ligne)
   finsi
 retourner
 
-&& Modification d'une variable pendant une pause (chaîne, entier, décimal, logique)
+procedure AFFICHER_VARIABLES(lignesvar)
+  && variables du cadre (chemintable vide) ou entrées de la table consultée ; ▸ : table
+  globale lignesvars, varchoisie
+  tvars:vider()
+  lignesvars = lignesvar
+  varchoisie = nul
+  pour chaque v dans lignesvar
+    tvars:ajouterligne(sisinon(v.table = vrai, "▸ ", "  ") + v.nom, v.valeur, v.genre, ;
+                       sisinon(v.portee = nul, "clef", v.portee))
+  suivant
+  si #chemintable > 0
+    locale noms = {}
+    pour chaque p dans chemintable
+      inserer(noms, p.libelle)
+    suivant
+    lblvar.libelle = "Table " + joindre(noms, " › ") + " : choisir une entrée pour la modifier (double-clic sur ▸ : ouvrir)"
+  sinon
+    lblvar.libelle = "Choisir une variable pour la modifier ; double-clic sur une table (▸) : voir son contenu"
+  finsi
+  bvarhaut.actif = #chemintable > 0
+  bvarplus.actif = #chemintable > 0 et pausecourante <> nul
+  bvarmoins.actif = faux
+  saisievar.valeur = ""
+  saisievar.actif = faux
+  bvar.actif = faux
+retourner
+
+fonction CLEFS_CHEMIN()
+  && clefs codées du chemin consulté, sans la variable de départ
+  locale l = {}
+  pour i = 2 a #chemintable
+    inserer(l, chemintable[i].clef)
+  suivant
+retourner l
+
+fonction PORTEE_RACINE()
+retourner sisinon(racinetable.portee = "globale", "globale", "")
+
+procedure TABLE_RAFRAICHIR
+  && relit la table consultée dans le programme en pause
+  si #chemintable = 0 ou execution = nul
+    retourner
+  finsi
+  locale entrees = nul
+  essayer
+    entrees = execution:table(racinetable.nom, cadrevars, PORTEE_RACINE(), CLEFS_CHEMIN())
+  capturer e
+    etat.libelle = "Table : " + e
+    TABLE_REMONTER(nul)
+    retourner
+  finessayer
+  pour chaque x dans entrees
+    x.portee = "clef"
+  suivant
+  AFFICHER_VARIABLES(entrees)
+retourner
+
+procedure VARIABLE_OUVRIR(ev)
+  && double-clic : une table (▸) s'ouvre, sinon le champ de modification prend la main
+  globale racinetable
+  si varchoisie = nul
+    retourner
+  finsi
+  locale v = lignesvars[varchoisie]
+  si v.table <> vrai
+    si saisievar.actif
+      saisievar:focus()
+    finsi
+    retourner
+  finsi
+  si pausecourante = nul
+    etat.libelle = "Le contenu des tables se consulte en pause (point d'arrêt, pas à pas)"
+    retourner
+  finsi
+  si #chemintable = 0
+    racinetable = v
+    inserer(chemintable, {libelle = v.nom, clef = ""})
+  sinon
+    inserer(chemintable, {libelle = v.nom, clef = v.clef})
+  finsi
+  TABLE_RAFRAICHIR()
+retourner
+
+procedure TABLE_REMONTER(ev)
+  si #chemintable > 0
+    retirer(chemintable, #chemintable)
+  finsi
+  si #chemintable = 0
+    MONTRER_CADRE(cadrevars)
+  sinon
+    TABLE_RAFRAICHIR()
+  finsi
+retourner
+
+procedure TABLE_AJOUTER(ev)
+  si #chemintable = 0 ou execution = nul
+    retourner
+  finsi
+  locale k = ui.demander("Clef de la nouvelle entrée (nombre, nom, ou \"texte exact\") :", "")
+  si k = nul ou rogner(k) = ""
+    retourner
+  finsi
+  locale v = ui.demander("Valeur (12, 1.5, \"texte\", vrai, faux, {}) :", "")
+  si v = nul
+    retourner
+  finsi
+  essayer
+    locale montre = execution:modifiertable(racinetable.nom, cadrevars, PORTEE_RACINE(), CLEFS_CHEMIN(), rogner(k), v)
+    etat.libelle = "Entrée ajoutée : " + k + " = " + montre
+  capturer e
+    etat.libelle = "Ajout refusé : " + e
+  finessayer
+  TABLE_RAFRAICHIR()
+retourner
+
+procedure TABLE_SUPPRIMER(ev)
+  si #chemintable = 0 ou varchoisie = nul ou execution = nul
+    retourner
+  finsi
+  locale v = lignesvars[varchoisie]
+  essayer
+    execution:supprimerentree(racinetable.nom, cadrevars, PORTEE_RACINE(), CLEFS_CHEMIN(), v.clef)
+    etat.libelle = "Entrée supprimée : " + v.nom
+  capturer e
+    etat.libelle = "Suppression refusée : " + e
+  finessayer
+  TABLE_RAFRAICHIR()
+retourner
+
+&& Modification d'une variable ou d'une entrée de table pendant une pause : même type,
+&& ou littéral pour en changer (12, 1.5, "texte", vrai, faux, nul, {})
 procedure VARIABLE_CHOISIE(ev)
   globale varchoisie
   locale i = ev.index
@@ -191,19 +326,20 @@ procedure VARIABLE_CHOISIE(ev)
   finsi
   locale v = lignesvars[i]
   varchoisie = i
-  locale modifiable = v.genre = "chaine" ou v.genre = "entier" ou v.genre = "décimal" ou v.genre = "logique"
-  si pausecourante = nul ou non modifiable
-    lblvar.libelle = v.nom + " (" + v.genre + ") : modifiable seulement en pause, pour les chaînes, " + ;
-                     "entiers, décimaux et logiques"
+  bvarmoins.actif = pausecourante <> nul et #chemintable > 0
+  si pausecourante = nul ou v.genre = "zone"
+    lblvar.libelle = v.nom + " (" + v.genre + ") : modifiable seulement en pause"
     saisievar.actif = faux
     bvar.actif = faux
     retourner
   finsi
-  locale val = v.valeur
+  locale simple = v.genre = "chaine" ou v.genre = "entier" ou v.genre = "décimal" ou v.genre = "logique" ou v.genre = "nul"
+  locale val = sisinon(simple, v.valeur, "")
   si v.genre = "chaine" et #val >= 2 et commencepar(val, car(34)) et finitpar(val, car(34))
     val = souschaine(val, 2, #val - 1)
   finsi
-  lblvar.libelle = v.nom + " (" + v.genre + ", " + v.portee + ") ="
+  lblvar.libelle = v.nom + " (" + v.genre + ", " + sisinon(v.portee = nul, "clef", v.portee) + ") =" + ;
+                   sisinon(v.table = vrai, "  [table : double-clic pour l'ouvrir, ou nouvelle valeur]", "")
   saisievar.actif = vrai
   bvar.actif = vrai
   saisievar.valeur = val
@@ -220,8 +356,19 @@ procedure VARIABLE_APPLIQUER(ev)
     retourner
   finsi
   locale v = lignesvars[varchoisie]
-  locale portee = sisinon(v.portee = "globale", "globale", "")
   locale montre = nul
+  si #chemintable > 0
+    essayer
+      montre = execution:modifiertable(racinetable.nom, cadrevars, PORTEE_RACINE(), CLEFS_CHEMIN(), v.clef, saisievar.valeur)
+    capturer e
+      etat.libelle = "Modification refusée : " + e
+      retourner
+    finessayer
+    TABLE_RAFRAICHIR()
+    etat.libelle = v.nom + " = " + montre + " (valeur modifiée ; F5 continuer, F10 / F11 pas à pas)"
+    retourner
+  finsi
+  locale portee = sisinon(v.portee = "globale", "globale", "")
   essayer
     montre = execution:modifier(v.nom, saisievar.valeur, cadrevars, portee)
   capturer e

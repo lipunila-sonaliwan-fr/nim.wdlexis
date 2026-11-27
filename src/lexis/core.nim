@@ -57,6 +57,17 @@ type
     opConcat = "..", opEq = "=", opNe = "<>", opLt = "<", opLe = "<=", opGt = ">",
     opGe = ">=", opIn = "$"
 
+  # Types déclarés (facultatifs) : locale x : nombre, procedure F(a : chaine) : logique
+  TypeKind* = enum
+    tyAny = "quelconque", tyNumber = "nombre", tyInt = "entier", tyDecimal = "decimal",
+    tyString = "chaine", tyBool = "logique", tyTable = "table", tyList = "liste",
+    tyFunc = "procedure", tyObject = "objet", tyTask = "tache", tyNamed
+
+  TypeSpec* = object
+    kind*: TypeKind
+    nullable*: bool              # nombre? : nul accepté
+    name*: string                # nom écrit (types nommés : fenetre, execution...)
+
   ExprKind* = enum
     ekNil, ekTrue, ekFalse, ekInt, ekNum, ekStr,
     ekLocal,      # variable locale (case du cadre)
@@ -158,6 +169,8 @@ type
     op*: BinOp
     body*: seq[Stmt]
     blocks*: seq[seq[Stmt]]
+    ty*: TypeSpec                 # globale g : type
+    typed*: bool
 
   Proto* = ref object
     name*, source*: string
@@ -167,6 +180,10 @@ type
     slotNames*: seq[string]
     usesArgs*: bool               # « parametres » : le cadre garde tous les arguments.
     body*: seq[Stmt]
+    paramTypes*: seq[TypeSpec]    # types déclarés des paramètres (vide : aucun)
+    retType*: TypeSpec            # type déclaré du résultat (si hasRet)
+    hasRet*: bool
+    slotTypes*: seq[TypeSpec]     # types déclarés des variables locales (par case ; tyAny sinon)
 
   # exécution
 
@@ -242,6 +259,10 @@ type
     args*: seq[string]
     startTime*: float
     hosted*: bool                                 # exécuté dans l'IDE (et non par le runtime).
+    globalTypes*: Table[string, TypeSpec]         # globale g : type (majuscules)
+    prof*: RootRef                                # profileur actif (paquet profileur), nil sinon
+    profCall*: proc (L: Interp, fr: Frame, enter: bool) {.closure.}
+    profLine*: proc (L: Interp, fr: Frame, line: int) {.closure.}
 
   LexisError* = object of CatchableError
     value*: Value          # message sans position (ce que reçoit « capturer »)
@@ -319,6 +340,44 @@ proc typeName*(v: Value): string =
     if v.u of Coroutine: "tache" else: "objet"
 
 #
+# Types déclarés
+#
+
+proc typeKindOf*(name: string): TypeKind =
+  ## Type désigné par un nom (insensible à la casse, accents ignorés) ; tyNamed si inconnu.
+  case name.toUpperAscii
+  of "NOMBRE": tyNumber
+  of "ENTIER": tyInt
+  of "DECIMAL", "DÉCIMAL", "REEL", "RÉEL": tyDecimal
+  of "CHAINE", "CHAÎNE", "TEXTE": tyString
+  of "LOGIQUE", "BOOLEEN", "BOOLÉEN": tyBool
+  of "TABLE": tyTable
+  of "LISTE": tyList
+  of "PROCEDURE", "FONCTION", "PROCÉDURE": tyFunc
+  of "OBJET": tyObject
+  of "TACHE", "TÂCHE": tyTask
+  of "QUELCONQUE", "TOUT": tyAny
+  else: tyNamed
+
+proc `$`*(t: TypeSpec): string =
+  (if t.kind == tyNamed: t.name.toLowerAscii else: $t.kind) & (if t.nullable: "?" else: "")
+
+proc typeMatches*(v: Value, t: TypeSpec): bool =
+  if v.kind == vkNil: return t.nullable or t.kind == tyAny
+  case t.kind
+  of tyAny: true
+  of tyNumber, tyDecimal: v.kind in {vkInt, vkNum}
+  of tyInt: v.kind == vkInt or (v.kind == vkNum and v.n == float64(int64(v.n)) and abs(v.n) < 9.0e18)
+  of tyString: v.kind == vkStr
+  of tyBool: v.kind == vkBool
+  of tyTable, tyList: v.kind == vkTable
+  of tyFunc: v.kind == vkFunc or (v.kind == vkTable and not v.t.meta.isNil) or v.kind == vkUser
+  of tyObject: v.kind in {vkTable, vkUser}
+  of tyTask: v.kind == vkUser and v.u of Coroutine
+  of tyNamed:
+    v.kind == vkUser and cmpIgnoreCase(v.u.tname, t.name) == 0
+
+#
 # Égalité brute et hachage (clés de table)
 #
 
@@ -354,7 +413,11 @@ proc hash*(v: Value): Hash =
 # Tables
 #
 
+var tablesCreated*: int
+  ## Tables créées depuis le démarrage (compteur approximatif, lu par le profileur).
+
 proc newLTable*(narr = 0): LTable =
+  {.cast(gcsafe).}: inc tablesCreated
   result = LTable(hindex: initTable[Value, int]())
   if narr > 0: result.arr = newSeqOfCap[Value](narr)
 

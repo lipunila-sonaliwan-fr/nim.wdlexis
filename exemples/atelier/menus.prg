@@ -9,23 +9,34 @@ retourner { ;
                "Supprimer le fichier…", "-", "Exporter le projet (archive)…", ;
                "Importer un projet (archive)…", "-", "Quitter"}}, ;
   {"Édition", {"Annuler", "Rétablir", "Couper", "Copier", "Coller", "Tout sélectionner", ;
-               "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter"}}, ;
+               "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter", "-", ;
+               "Formater le document (Ctrl+Maj+F)", "Conventions de formatage du projet…"}}, ;
   {"Recherche", {"Rechercher…", "Remplacer…", "Occurrence suivante", "Aller à la ligne…", ;
-                 "Aller à la définition"}}, ;
+                 "Aller à la définition (F12)", "Lister les usages (Maj+F12)"}}, ;
   {"Exécuter", {"Exécuter (Ctrl+R)", "Déboguer / Continuer (F5)", "Pas à pas (F11)", ;
                 "Pas principal (F10)", "Sortir de la procédure (Maj+F11)", "Pause", ;
                 "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)", ;
                 "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts", ;
-                "Arguments et fichier principal…", "Générer l'application…"}}, ;
+                "Arguments et fichier principal…", "-", "Lancer les tests (Ctrl+T)", ;
+                "Lancer les tests du fichier courant", "Profiler le programme", "-", ;
+                "Générer l'application…"}}, ;
+  {"Git", {"Statut du dépôt", "Comparer le fichier avec la dernière validation", ;
+           "Comparer le projet avec la dernière validation", "Annotations du fichier (blame)", ;
+           "Historique du fichier", "-", "Fusionner une branche…", "Conflits : garder la version locale", ;
+           "Conflits : garder la version fusionnée", "Conflits : garder les deux", "Abandonner la fusion", ;
+           "-", "Valider (commit)…"}}, ;
   {"Conception", {"Vue projet…", "Vue blueprint du fichier courant", "-", "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…", ;
                   "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"}}, ;
-  {"Affichage", {"Projet / Structure / Référence : afficher ou masquer", ;
-                 "Projet / Structure / Référence : fenêtre dédiée", ;
-                 "Problèmes / Console / Variables / Pile : afficher ou masquer", ;
-                 "Problèmes / Console / Variables / Pile : fenêtre dédiée", "-", "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)", ;
-                 "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)", ;
-                 "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites", ;
-                 "Signaler les procédures inconnues"}}, ;
+  {"Affichage", {"Agrandir la police (Ctrl++)", "Réduire la police (Ctrl+-)", ;
+                 "Taille de police par défaut (Ctrl+0)", "Minicarte afficher / masquer", ;
+                 "Thème sombre / clair", "-", ;
+                 "Signaler les variables globales implicites", "Signaler les procédures inconnues", ;
+                 "Signaler les collisions de noms", "Contrôler les types déclarés", "-", ;
+                 "Copier la console", "Effacer la console", "-", ;
+                 "Problèmes - Console - ... : afficher / masquer", ;
+                 "Problèmes - Console - ... : fenêtre dédiée", ;
+                 "Projet - Structure - ... : afficher / masquer", ;
+                 "Projet - Structure - ... : fenêtre dédiée"}}, ;
   {"Aide", {"Raccourcis clavier", "Référence des fonctions et paquets", "À propos"}}}
 
 procedure CONSTRUIRE_MENUS(m)
@@ -84,6 +95,10 @@ procedure MENU(ev)
     ed:commande("indenter")
   cas choix = "Désindenter"
     ed:commande("desindenter")
+  cas commencepar(choix, "Formater le document")
+    FORMATER_DOCUMENT()
+  cas choix = "Conventions de formatage du projet…"
+    CONVENTIONS_FORMATAGE()
   && Recherche
   cas choix = "Rechercher…"
     RECHERCHER(faux)
@@ -93,8 +108,10 @@ procedure MENU(ev)
     SUIVANT_TROUVE(faux)
   cas choix = "Aller à la ligne…"
     ALLER_LIGNE()
-  cas choix = "Aller à la définition"
+  cas commencepar(choix, "Aller à la définition")
     ALLER_DEFINITION(ed:motcourant())
+  cas commencepar(choix, "Lister les usages")
+    LISTER_USAGES()
   && Exécuter
   cas commencepar(choix, "Exécuter")
     EXECUTER()
@@ -118,8 +135,37 @@ procedure MENU(ev)
     VERIFIER_TOUT()
   cas choix = "Arguments et fichier principal…"
     ARGUMENTS()
+  cas commencepar(choix, "Lancer les tests (")
+    LANCER_TESTS(faux)
+  cas choix = "Lancer les tests du fichier courant"
+    LANCER_TESTS(vrai)
+  cas choix = "Profiler le programme"
+    PROFILER()
   cas choix = "Générer l'application…"
     GENERER_DIALOGUE()
+  && Git
+  cas choix = "Statut du dépôt"
+    GIT_STATUT()
+  cas choix = "Comparer le fichier avec la dernière validation"
+    GIT_COMPARER(faux)
+  cas choix = "Comparer le projet avec la dernière validation"
+    GIT_COMPARER(vrai)
+  cas choix = "Annotations du fichier (blame)"
+    GIT_ANNOTATIONS()
+  cas choix = "Historique du fichier"
+    GIT_HISTORIQUE()
+  cas choix = "Fusionner une branche…"
+    GIT_FUSIONNER()
+  cas choix = "Conflits : garder la version locale"
+    GIT_RESOUDRE("local")
+  cas choix = "Conflits : garder la version fusionnée"
+    GIT_RESOUDRE("fusion")
+  cas choix = "Conflits : garder les deux"
+    GIT_RESOUDRE("deux")
+  cas choix = "Abandonner la fusion"
+    GIT_ABANDONNER()
+  cas choix = "Valider (commit)…"
+    GIT_VALIDER()
   && Conception
   cas choix = "Vue projet…"
     VUE_PROJET()
@@ -136,13 +182,13 @@ procedure MENU(ev)
   cas choix = "Ouvrir un état…"
     ETAT_CHOISIR()
   && Affichage
-  cas choix = "Projet / Structure / Référence : afficher ou masquer"
+  cas choix = "Projet - Structure - ... : afficher / masquer"
     GAUCHE_BASCULER(nul)
-  cas choix = "Projet / Structure / Référence : fenêtre dédiée"
+  cas choix = "Projet - Structure - ... : fenêtre dédiée"
     GAUCHE_FENETRE(nul)
-  cas choix = "Problèmes / Console / Variables / Pile : afficher ou masquer"
+  cas choix = "Problèmes - Console - ... : afficher / masquer"
     BAS_BASCULER(nul)
-  cas choix = "Problèmes / Console / Variables / Pile : fenêtre dédiée"
+  cas choix = "Problèmes - Console - ... : fenêtre dédiée"
     BAS_FENETRE(nul)
   cas choix = "Dupliquer le fichier…"
     FICHIER_DUPLIQUER(nul)
@@ -164,7 +210,7 @@ procedure MENU(ev)
     POLICE(-1)
   cas commencepar(choix, "Taille de police")
     POLICE(0)
-  cas choix = "Minicarte"
+  cas choix = "Minicarte afficher / masquer"
     BASCULER_MINICARTE()
   cas choix = "Thème sombre / clair"
     BASCULER_THEME()
@@ -172,6 +218,10 @@ procedure MENU(ev)
     BASCULER_GLOBALES()
   cas choix = "Signaler les procédures inconnues"
     BASCULER_INCONNUES()
+  cas choix = "Signaler les collisions de noms"
+    BASCULER_COLLISIONS()
+  cas choix = "Contrôler les types déclarés"
+    BASCULER_TYPES()
   && Aide
   cas choix = "Raccourcis clavier"
     ui.alerte(RACCOURCIS(), "information", "Raccourcis clavier")
@@ -194,13 +244,16 @@ fonction RACCOURCIS()
     "Ctrl+W/E début / fin de ligne            Ctrl+D dupliquer la ligne", ;
     "Tab / Maj+Tab indenter, désindenter      Ctrl+B commenter / décommenter (&&)", ;
     "Ctrl+Espace complétion                   Ctrl+ + / - / 0 taille de la police", ;
-    "F12 ou Ctrl+clic aller à la définition   Ctrl+Tab document suivant", ;
+    "F12 ou Ctrl+clic aller à la définition   Maj+F12 lister les usages", ;
+    "Ctrl+Maj+F formater le document          Ctrl+Tab document suivant", ;
+    "Survol d'un nom : infobulle (définition, type, documentation)", ;
     "", ;
     "Exécution et débogage", ;
     "Ctrl+R exécuter (sans débogueur)         F5 déboguer / continuer", ;
     "F9 ou clic dans la marge : point d'arrêt F10 pas principal", ;
     "F11 pas à pas                            Maj+F11 sortir de la procédure", ;
-    "Maj+F5 arrêter", ;
+    "Maj+F5 arrêter                           Ctrl+T lancer les tests", ;
+    "En pause, page Variables : double-clic sur une table (▸) pour voir et modifier son contenu", ;
     "", ;
     "Fenêtre Blueprint (clic sur la pastille rouge d'un onglet)", ;
     "Glisser depuis la palette, relier les broches   Suppr supprimer la sélection", ;

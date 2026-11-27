@@ -290,6 +290,54 @@ finessayer
 
   Pour de grandes valeurs, préférez une boucle à la récursion.
 
+#### Types déclarés (facultatifs)
+
+Un type peut être déclaré après `:` pour une variable locale ou globale, un
+paramètre ou le résultat d'une fonction. Rien n'est obligatoire : un programme
+sans type fonctionne comme avant, et les deux styles se mélangent.
+
+```lexis
+fonction MOYENNE(t : table) : nombre
+  locale s : nombre = 0
+  pour chaque v dans t
+    s += v
+  suivant
+retourner s / #t
+
+procedure ETIQUETTE(n : entier, suffixe : chaine?) : chaine
+retourner chaine(n) .. sisinon(suffixe = nul, "", suffixe)
+
+globale CONFIG : table = {}
+```
+
+| Type | Valeurs acceptées |
+| --- | --- |
+| `nombre`, `decimal` | entiers et décimaux |
+| `entier` | entiers (et décimaux sans partie fractionnaire, 2.0) |
+| `chaine` (ou `texte`) | chaînes |
+| `logique` | `vrai`, `faux` |
+| `table`, `liste` | tables |
+| `procedure` (ou `fonction`) | références `@NOM`, tables ou objets appelables |
+| `objet` | tables et objets natifs |
+| `tache` | tâches (coroutines) |
+| `quelconque` | tout (documentation seulement) |
+| autre nom (`fenetre`, `execution`…) | objet natif de ce type |
+
+- `?` après le type accepte `nul` : `suffixe : chaine?`. Sans `?`, `nul` est
+  refusé (un argument omis vaut `nul`).
+- **À l'exécution**, le type est contrôlé à l'entrée de la procédure
+  (paramètres), à chaque affectation d'une variable typée (`=`, `+=`, `stocker`),
+  et au retour (résultat) ; une erreur ordinaire, interceptable par
+  `essayer … capturer`, l'indique : « type incorrect pour le paramètre « t » de
+  moyenne : attendu table, reçu chaine ("x") ». Une variable déclarée sans valeur
+  (`locale x : nombre`) vaut `nul` jusqu'à sa première affectation.
+- **Avant l'exécution**, l'atelier, `lexis.verifier`, `wdlexisrt --verifier` et le
+  serveur LSP signalent les littéraux incompatibles (`locale n : entier = 2.5`,
+  `F("x")` pour un paramètre `nombre`, `retourner "deux"` dans une fonction
+  `: nombre`), les arguments typés manquants et les noms de types inconnus.
+- Coût : aucun pour le code sans type ; un test par affectation pour une
+  variable typée.
+
 ### 3.8 Tables
 
 Une table est à la fois une **liste** (index 1, 2, 3...) et une **fiche** (clefs).
@@ -777,7 +825,10 @@ retourner
 Les fonctions intégrées (chapitre 11) sont toujours disponibles, ainsi que les
 paquets `es` (entrées / sorties) et `systeme`. Les autres paquets s'utilisent
 directement par leur nom - `fichier.lire(chemin)`, `json.encoder(t)` - ou se
-rangent dans une variable : `ui = paquet("interface")`.
+rangent dans une variable : `ui = paquet("interface")`. Les deux formes coûtent
+la même chose : le paquet est ouvert une fois, puis repris dans un cache
+(`binaire.oux(a, b)` dans une boucle n'est plus pénalisé). Une variable ou une
+procédure qui porte le nom d'un paquet le masque (le vérificateur le signale).
 
 ```lexis
 locale chemin = fichier.joindre(fichier.dossiertemp(), "essai.txt")
@@ -1038,7 +1089,7 @@ L'atelier ouvre **deux fenêtres** :
     en haut, la fiche Markdown de l'élément sélectionné en bas, séparés par un
     **séparateur horizontal** que l'on fait glisser ;
 
-  fermée, elle se rouvre par *Affichage > Fenêtre Projet / Structure / Référence* ;
+  fermée, elle se rouvre par *Affichage > Projet - Structure - ... : afficher / masquer* (ou *fenêtre dédiée*) ;
 - la **fenêtre principale** : menus, barre d'outils, **un onglet par document
   ouvert**, puis les panneaux Problèmes, Console, Variables et Pile d'appels.
   L'onglet indique le nom du document et, par une **pastille de couleur**, sa
@@ -1060,7 +1111,10 @@ L'atelier ouvre **deux fenêtres** :
 | Maj+F5 | arrêter |
 | Ctrl+Espace | complétion |
 | Ctrl+B | commenter / décommenter (`&&`) |
-| F12 ou Ctrl+clic | aller à la définition d'une procédure |
+| F12 ou Ctrl+clic | aller à la définition (procédure, variable locale ou globale, paramètre) |
+| Maj+F12 | lister les usages du symbole (page **Usages**) |
+| Ctrl+Maj+F | formater le document (conventions du projet) |
+| Ctrl+T | lancer les tests unitaires (page **Tests**) |
 | Ctrl++ / Ctrl+- / Ctrl+0 | agrandir / réduire la police / taille par défaut (aussi *Affichage*) |
 
 - **Taille de la police** : *Affichage > Agrandir la police*, *Réduire la
@@ -1069,7 +1123,20 @@ L'atelier ouvre **deux fenêtres** :
 
 - **Analyse en continu** : erreurs de syntaxe (le vrai analyseur de
   l'interpréteur), appels de procédures inconnues, variables non déclarées dans
-  les procédures. Onglet **Problèmes** ; double-clic pour aller à la ligne.
+  les procédures, **collisions de noms** et **types déclarés** (voir
+  ci-dessous). Onglet **Problèmes** ; double-clic pour aller à la ligne.
+  *Affichage > Signaler les collisions de noms* et *Contrôler les types
+  déclarés* activent ou coupent ces deux contrôles.
+- **Infobulles** : le survol d'un nom affiche sa définition — signature et
+  commentaires d'une procédure (et son fichier), type et portée d'une variable,
+  documentation d'une fonction intégrée ou d'une fonction de paquet
+  (`binaire.oux`) ; sur un problème signalé, son message.
+- **Aller à la définition** (F12, Ctrl+clic) et **usages** (Maj+F12) : résolution
+  comme l'interpréteur — une variable déclarée dans la procédure est locale, tout
+  autre nom est global (variable, procédure) ; les usages couvrent tous les
+  fichiers du projet et les documents ouverts non enregistrés. Page **Usages** :
+  fichier, ligne, genre (déclaration, appel, lecture, affectation, référence
+  `@NOM`) et code ; clic pour y aller.
 - **Structure** : les procédures, fonctions et variables du fichier.
 - **Référence** : toutes les fonctions intégrées et les paquets ; double-clic pour
   insérer l'appel (dans la fenêtre Blueprint, la palette des entités propose
@@ -1081,12 +1148,130 @@ L'atelier ouvre **deux fenêtres** :
 - En pause : ligne courante surlignée, **Variables** (paramètres, locales,
   globales et zone de base de données courante), **Pile d'appels** (cliquer un
   niveau affiche ses variables).
+- **Contenu des tables en pause** : dans la page Variables, une table est
+  marquée `▸` ; double-clic pour voir ses entrées (partie liste `[1]`, `[2]`…
+  puis clefs), et ainsi de suite dans les tables imbriquées (le chemin
+  `config › valeurs` est rappelé sous la liste). Une entrée choisie se modifie
+  dans le champ du bas (Entrée) : même type que l'ancienne valeur, ou un
+  littéral pour en changer — `12`, `1.5`, `"texte"`, `vrai`, `faux`, `nul`,
+  `{}` (table vide). Boutons : **Remonter** (table parente, puis variables),
+  **Ajouter** une entrée (clef : nombre, nom, ou `"texte exact"`), **Supprimer**
+  l'entrée choisie. Le programme reprend avec les valeurs modifiées.
 - Les documents ouverts sont exécutés tels qu'à l'écran, même non enregistrés.
 - *Fichier > Exporter le projet (archive)…* : le projet en `.zip` ou `.tar.gz`
   (dossier de tête au nom du projet ; sans fichiers cachés, session ni dossier
   `distribution`, mais avec les réglages de génération) ; *Importer un projet
   (archive)…* l'extrait dans le dossier choisi (sans écraser un projet
   existant) puis l'ouvre.
+
+#### Collisions de noms
+
+Lexis+ ne distingue pas les majuscules des minuscules et résout un nom non local
+dans l'ordre : variable globale, procédure, paquet. Le vérificateur signale :
+
+| Cas | Exemple | Gravité |
+| --- | --- | --- |
+| même variable écrite avec des casses différentes | `S = 1` puis `s = s + 1` | avertissement |
+| variable qui porte le nom d'une procédure du projet | `locale calcul` et `procedure CALCUL` | avertissement |
+| variable qui masque un paquet | `ES = ...`, `fichier = 3` (`fichier.lire` ne marche plus) | avertissement |
+| variable qui porte le nom d'une fonction intégrée | `locale code`, `car = ...` | info |
+| locale ou paramètre qui masque une globale du projet | `procedure AIDE(total)` avec `TOTAL` global | info |
+| procédure qui remplace une fonction intégrée ou masque un paquet | `procedure MIN(a, b)` | avertissement |
+| procédure définie deux fois | dans le même fichier (la dernière l'emporte) ; dans deux fichiers (erreur au chargement) | avertissement / erreur |
+
+Ces contrôles s'appliquent aussi à `lexis.verifier` (options `collisions` et
+`types`), à `wdlexisrt --verifier` et au serveur LSP.
+
+#### Formateur de code
+
+*Édition > Formater le document* (Ctrl+Maj+F) réindente les blocs, normalise
+les espaces (`a = b`, `x += 1`, `a + b`, `f(a, b)`, `? x`) et retire les espaces
+de fin de ligne ; Ctrl+Z annule. Les chaînes longues `[[ … ]]` ne sont jamais
+modifiées, les lignes de suite (`;` en fin de ligne, parenthèses ouvertes)
+gardent leur alignement, et le résultat est refusé s'il n'était plus
+syntaxiquement correct. Les **conventions** du projet sont dans son fichier
+`.lexisformat` (*Édition > Conventions de formatage du projet…* le crée) :
+
+```
+indentation = 2                  espaces par niveau
+tabulations = non
+corps_procedure = indente        indente | colonne0
+retour_final = conserver         « retourner » final en colonne 0 gardé
+espaces_operateurs = oui
+espace_apres_virgule = oui
+lignes_vides_max = 1
+ligne_vide_avant_procedure = oui
+noms_procedures = conserver      conserver | majuscules | minuscules
+casse_variables = conserver      conserver | declaration (orthographe de la déclaration)
+cas_indentes = oui               « cas » indentés sous « faire cas »
+fin_de_fichier = oui
+```
+
+En ligne de commande : `wdlexisrt --formater [--ecrire] fichier.prg|dossier…`
+(sans `--ecrire`, le résultat est écrit sur la sortie standard).
+
+#### Tests unitaires
+
+Les fichiers `test_*.prg`, `*_test.prg` ou placés dans un dossier `tests/`
+contiennent des procédures `TEST_…` qui utilisent les assertions du paquet
+`test` (chapitre 11) :
+
+```lexis
+&& tests/test_calcul.prg
+procedure TEST_ADDITION()
+  test.egal(ADDITIONNER(2, 3), 5)
+
+procedure TEST_DIVISION_PAR_ZERO()
+  locale m = test.erreur(@DIVISER, 1, 0)
+  test.contient(m, "zéro")
+```
+
+*Exécuter > Lancer les tests* (Ctrl+T), ou *Lancer les tests du fichier
+courant* : chaque fichier de test s'exécute dans un interpréteur neuf, avec
+les procédures des autres fichiers du projet (sans leur programme principal) ;
+ses instructions en tête servent de préparation, `AVANT_TEST` et `APRES_TEST`
+encadrent chaque test. Page **Tests** : résultat (réussi, échec, erreur,
+ignoré), durée, nombre d'assertions et message ; double-clic : va à l'échec
+(ou au test). Les fichiers de test ne sont pas chargés quand on exécute le
+programme. En ligne de commande : `wdlexisrt --tests [dossier|fichier]
+[--filtre nom] [--json]` (code de retour 1 si un test échoue).
+
+#### Profileur
+
+*Exécuter > Profiler le programme* exécute le programme en mesurant : page
+**Profil**, à gauche les procédures (appels, temps total — procédures
+appelées comprises —, temps propre, part du temps, tables créées), à droite
+les lignes les plus coûteuses (temps propre, passages, code) ; en tête, la
+durée et la mémoire résidente du processus (départ, fin, pic) ; double-clic
+pour aller au code. Sans l'atelier : `wdlexisrt --profil programme.prg`
+(rapport sur la sortie d'erreur), ou le paquet `profileur` dans le programme.
+
+#### Git
+
+Menu **Git** (le dossier du projet doit être un dépôt ; `git` installé) :
+*Statut du dépôt* (page **Git**), *Comparer le fichier / le projet avec la
+dernière validation* (document en lecture seule), *Annotations du fichier
+(blame)*, *Historique du fichier*, *Fusionner une branche…* (les fichiers en
+conflit sont listés et le premier est ouvert), *Conflits : garder la version
+locale / la version fusionnée / les deux* (traite les marques `<<<<<<<`,
+`=======`, `>>>>>>>` du document actif), *Abandonner la fusion*, *Valider
+(commit)…*.
+
+#### Serveur LSP (VS Code, Neovim, JetBrains, Zed, Helix…)
+
+`wdlexisrt --lsp` est un serveur Language Server Protocol (entrée et sortie
+standard) : diagnostics (syntaxe, appels inconnus, collisions, types),
+infobulles, complétion (`.` et `:` proposent les fonctions du paquet et les
+méthodes), aide à la signature, aller à la définition, usages, renommage
+(procédures, variables globales et locales du projet), symboles du document et
+de l'espace de travail, formatage (`.lexisformat`). Déclarer dans l'éditeur la
+commande `wdlexisrt --lsp` pour les fichiers `*.prg` ; exemple pour Neovim :
+
+```lua
+vim.filetype.add({ extension = { prg = "lexis" } })
+vim.lsp.start({ name = "lexis", cmd = { "wdlexisrt", "--lsp" },
+                root_dir = vim.fs.root(0, { "principal.prg", ".git" }) })
+```
 
 ### 8.1 Générer une application (Zig embarqué)
 
@@ -1192,10 +1377,13 @@ disposition en deux fenêtres : à gauche la fenêtre d'outils (**Projet**,
 **Structure** en arbre, **Référence** avec recherche, arbre des paquets par ordre
 alphabétique et fiche sous un séparateur horizontal), à droite la fenêtre des
 documents (onglets à pastille de couleur, fenêtre Blueprint, vue projet) avec **Problèmes**,
-**Console**, **Variables** et **Pile d'appels** en bas. Mêmes menus et barre
-d'outils ; débogueur (points d'arrêt, pas à pas, pas principal, sortie de
-procédure, pause), recherche et remplacement, aller à la ligne et à la
-définition, réglages et session conservés, boîte « Générer l'application ».
+**Console**, **Variables**, **Pile d'appels**, **Usages**, **Tests**, **Profil** et
+**Git** en bas. Mêmes menus (Git compris) et barre d'outils ; débogueur (points
+d'arrêt, pas à pas, pas principal, sortie de procédure, pause, tables
+consultables et modifiables en pause), recherche et remplacement, aller à la
+ligne et à la définition, usages, infobulles, formateur, tests unitaires,
+profileur, collisions de noms et types déclarés, réglages et session conservés,
+boîte « Générer l'application ».
 
 ```
 wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
@@ -1212,6 +1400,7 @@ wdlexisrt exemples/atelier/principal.prg [dossier_du_projet]
 | `generation.prg` | boîte « Générer l'application » (outil `wdlexisgen`) ; icône avec aperçu et cadrage (`ui.cadrage`) |
 | `concepteur.prg` | concepteur de formulaires (menu *Conception*, chapitre 8.3) |
 | `etats.prg` | éditeur d'états PDF (menu *Conception*, chapitre 8.4) |
+| `outils.prg` | usages, formateur et conventions, tests unitaires, profileur, git |
 | `menus.prg` | menus, raccourcis, à propos |
 
 Il s'appuie sur des briques natives : le contrôle `ui.editeur` (chapitre 5), sa
@@ -1242,6 +1431,13 @@ vb:fermer(uid)                              && retire la vue de ce code ; vb:fer
 Sans uid, `ed:texte()`, `ed:chemin()`, `ed:enregistrer()`… s'appliquent au
 document actif. Une seule `ui.blueprint` par programme (elle est réservée à
 l'atelier natif dans les programmes qu'il exécute).
+
+Le service de langage de l'atelier natif est accessible de la même façon :
+`ed:infobulles(vrai, dossier)` (infobulles au survol), `lexis.definition`,
+`lexis.usages`, `lexis.infobulle` (source, ligne, colonne, {nom, projet}),
+`lexis.formater` et `lexis.conventions` ; `lexis.executer{surprofil = @P}`
+transmet le rapport du profileur, et en pause `x:table`, `x:modifiertable`,
+`x:supprimerentree` parcourent et modifient les tables du programme.
 
 `lexis.graphe(dossier)` donne la vue projet : les fichiers `.prg` triés, leurs
 procédures et fonctions (ligne, paramètres) et, pour chacune, les procédures du
@@ -1759,11 +1955,18 @@ Le détail est dans `exemples/ardoise/LISEZMOI.md`.
 ## 9. Le runtime
 
 ```
-wdlexisrt programme.prg [arguments...]   exécute (avec les .prg du dossier)
-wdlexisrt --verifier programme.prg       vérifie la syntaxe
+wdlexisrt programme.prg [arguments...]   exécute (avec les .prg du dossier, sauf les tests)
+wdlexisrt --verifier fichier.prg|dossier  syntaxe, appels inconnus, collisions, types
+wdlexisrt --formater [--ecrire] fichiers  formate (conventions : .lexisformat)
+wdlexisrt --tests [dossier|fichier] [--filtre nom] [--json]   tests unitaires
+wdlexisrt --profil programme.prg [args]  exécute et affiche le profil (temps, mémoire)
+wdlexisrt --lsp                          serveur LSP (entrée / sortie standard)
 wdlexisrt -e "? 1 + 1"                   exécute du code
 wdlexisrt --paquets                      liste les paquets
 ```
+
+`--verifier` affiche `fichier:ligne:colonne: genre : message` (format reconnu
+par les éditeurs) et rend 2 s'il y a une erreur.
 
 Les arguments sont dans `systeme.args` (`systeme.args[0]` est le chemin du
 programme). `systeme.quitter(code)` termine le programme avec un code de retour.
@@ -2792,14 +2995,19 @@ Voir le chapitre 8.2.
 | --- | --- |
 | `lexis.charger(chemin)` | Charge les procédures et fonctions d'un fichier `.prg` dans le programme en cours (extensions, greffons) ; renvoie la liste de leurs noms. Le fichier ne doit contenir que des procédures ; recharger le même fichier remplace ses procédures, un nom déjà défini ailleurs est refusé. |
 | `lexis.procedure(nom)` | Référence d'une procédure ou d'une fonction par son nom (nul si elle n'existe pas), à passer à `appeler(ref, ...)`. |
-| `lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])` | Analyse un texte comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste `{ligne, colonne, longueur, genre, message}` ; `genre` : erreur, avertissement, info ; `projet` : dossier dont les procédures sont connues. |
+| `lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=, collisions=, types=}])` | Analyse un texte comme l'atelier (syntaxe, variables non déclarées, appels inconnus, collisions de noms, types déclarés — chapitre 8) ; renvoie la liste `{ligne, colonne, longueur, genre, message}` ; `genre` : erreur, avertissement, info ; `projet` : dossier dont les procédures et les globales sont connues ; `collisions = faux`, `types = faux` coupent ces contrôles. |
 | `lexis.graphe(dossier)` | Graphe du projet (vue projet de l'atelier) : {dossier, fichiers}, fichiers .prg triés par chemin (dossiers cachés exclus), chacun {chemin, relatif, lignes, appels, entites} ; entites : {nom, affichage, genre (procedure ou fonction), ligne, derniere, appels}. |
 | `lexis.structure(source)` | Procédures, fonctions et globales définies : liste de `{nom, genre, ligne, colonne}`. |
 | `lexis.documentation([paquet])` | Liste de `{paquet, signature, nom, proprietaire, methode, description}`. |
 | `lexis.paquets()` | Paquets disponibles : liste de `{nom, description, global}`. |
 | `lexis.motscles()` | Mots-clés du langage. |
-| `lexis.executer(chemin, [{arguments=, sursortie=, surdemande=, surfin=, deboguer=, pasapas=, pointsarret=, surpause=}])` | Exécute un `.prg` dans un interpréteur séparé, sans bloquer l'appelant ; renvoie l'exécution. `sursortie(texte)`, `surdemande(invite)`, `surfin(ev)` avec `ev = {ok, message, source, ligne}`. Débogage : `pointsarret = {{source=, lignes={…}}}`, `pasapas` (pause sur la première instruction), `surpause(ev)` avec `ev = {source, ligne, pile, globales}` ; `pile[1]` est le cadre courant `{nom, source, ligne, variables}`, chaque variable `{nom, valeur, genre, portee}`. |
+| `lexis.executer(chemin, [{arguments=, sursortie=, surdemande=, surfin=, deboguer=, pasapas=, pointsarret=, surpause=, profil=, surprofil=}])` | Exécute un `.prg` dans un interpréteur séparé, sans bloquer l'appelant ; renvoie l'exécution. `sursortie(texte)`, `surdemande(invite)`, `surfin(ev)` avec `ev = {ok, message, source, ligne}`. Débogage : `pointsarret = {{source=, lignes={…}}}`, `pasapas` (pause sur la première instruction), `surpause(ev)` avec `ev = {source, ligne, pile, globales}` ; `pile[1]` est le cadre courant `{nom, source, ligne, variables}`, chaque variable `{nom, valeur, genre, portee, table}`. Profil : `profil = vrai` ou `surprofil(rapport)` (rapport du paquet `profileur`, reçu avant `surfin`). |
 | `lexis.outil(nom)` | Chemin d'un outil livré à côté du runtime (`wdlexisgen`…) ; nul s'il est absent. |
+| `lexis.definition(source, ligne, colonne, [{nom=, projet=}])` | Définition du symbole à cette position (procédure, locale, globale, paramètre) dans le texte et le projet : liste de `{chemin, ligne, colonne, longueur, genre, declaration, code}`. |
+| `lexis.usages(source, ligne, colonne, [{nom=, projet=}])` | Usages du symbole (déclarations, appels, lectures, affectations, `@NOM`), même forme. |
+| `lexis.infobulle(source, ligne, colonne, [{nom=, projet=}])` | Texte d'infobulle du nom à cette position ; nul sinon. |
+| `lexis.formater(source, [dossier])` | Formate selon le `.lexisformat` du dossier : `{texte, modifie, ok, message}`. |
+| `lexis.conventions([dossier])` | `{fichier, texte}` des conventions en vigueur (fichier vide : par défaut). |
 | `x:envoyer(texte)` | Fournit une ligne à la saisie en attente. |
 | `x:lire()` | Sortie accumulée depuis la dernière lecture (sans `sursortie`). |
 | `x:actif()`, `x:attentesaisie()` | En cours d'exécution ; en attente d'une saisie. |
@@ -2808,6 +3016,55 @@ Voir le chapitre 8.2.
 | `x:continuer()`, `x:pas()`, `x:passer()`, `x:sortir()` | En pause : reprend ; pas à pas (entre dans les procédures) ; pas principal ; termine la procédure en cours. |
 | `x:pause()`, `x:enpause()` | Interrompt à la prochaine instruction ; vrai si le programme est en pause. |
 | `x:pointsarret(source, lignes)` | Remplace les points d'arrêt d'un fichier pendant l'exécution. |
+| `x:modifier(nom, valeur, [cadre], [portee])` | En pause : change une variable (même type, ou littéral `12`, `1.5`, `"texte"`, `vrai`, `faux`, `nul`, `{}`). |
+| `x:table(nom, [cadre], [portee], [chemin])` | En pause : entrées de la table `{nom, valeur, genre, clef, table}` (chemin : clefs codées successives). |
+| `x:modifiertable(nom, cadre, portee, chemin, clef, valeur)`, `x:supprimerentree(nom, cadre, portee, chemin, clef)` | En pause : modifie, ajoute ou supprime une entrée de table. |
+
+### Paquet `test`
+
+Tests unitaires (chapitre 8, *Tests unitaires*) - disponible par son nom
+(`test.…`). Une assertion qui échoue arrête le test (« échec ») ; les messages
+optionnels précèdent l'explication.
+
+| Fonction | Description |
+| --- | --- |
+| `test.egal(obtenu, attendu, [message])` | Égalité (tables comparées en profondeur, `2 = 2.0`). |
+| `test.different(a, b, [message])` | Les valeurs diffèrent. |
+| `test.vrai(v, [message])`, `test.faux(v, [message])`, `test.verifier(condition, [message])` | Valeur vraie / fausse ; condition. |
+| `test.proche(obtenu, attendu, [ecart], [message])` | Nombres égaux à l'écart près (`1e-9`). |
+| `test.nul(v, [message])`, `test.nonnul(v, [message])` | Valeur nulle / non nulle. |
+| `test.contient(chaine_ou_table, element, [message])` | Sous-chaîne ou élément d'une table. |
+| `test.type(v, type, [message])` | Type déclaré attendu (`nombre`, `entier`, `chaine`, `table`…). |
+| `test.erreur(@PROC, arguments...)` | L'appel doit échouer ; renvoie le message d'erreur. |
+| `test.echec(message)`, `test.ignorer(raison)` | Fait échouer le test ; l'arrête en « ignoré ». |
+| `test.executer([filtre])` | Lance les procédures `TEST_…` du programme en cours ; renvoie `{total, reussis, echecs, erreurs, ignores, ok, resultats}`, chaque résultat `{nom, fichier, ligne, statut, message, ligneerreur, sourceerreur, ms, assertions}`. |
+| `test.lancer(dossier_ou_fichier, [filtre])` | Lanceur complet (un interpréteur neuf par fichier de test), même résultat. |
+| `test.rapport(resultats)` | Rapport texte. |
+
+### Paquet `profileur`
+
+Temps et mémoire d'un programme - disponible par son nom (`profileur.…`).
+
+```lexis
+profileur.demarrer()
+CALCUL_LONG()
+locale r = profileur.arreter()
+? profileur.texte(r)
+```
+
+| Fonction | Description |
+| --- | --- |
+| `profileur.demarrer()`, `profileur.arreter()` | Démarre ; arrête et renvoie le rapport `{duree_ms, fonctions, lignes, memoire, courbe, texte}`. |
+| `profileur.mesurer(@PROC, arguments...)` | Profil d'un seul appel. |
+| `profileur.rapport()`, `profileur.actif()` | Rapport intermédiaire ; vrai si la mesure est en cours. |
+| `profileur.texte([rapport])` | Rapport texte (procédures et lignes les plus coûteuses). |
+| `profileur.memoire()` | Mémoire résidente du processus, en Ko. |
+
+`fonctions` : `{nom, source, ligne, appels, total_ms, propre_ms, tables}` triées
+par temps propre ; `lignes` : `{source, ligne, passages, ms}` ; `memoire` :
+`{debut_ko, fin_ko, pic_ko, tables}` ; `courbe` : `{s, ko}` toutes les 20 ms. Le
+profileur arrêté ne coûte rien ; en marche, quelques dizaines de nanosecondes par
+instruction.
 
 ### Paquet `publication`
 

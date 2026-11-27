@@ -1,0 +1,7 @@
+2 7 7e
+erreur : type incorrect pour le paramètre « t » de moyenne : attendu table, reçu chaine ("x")
+erreur : type incorrect pour « k » : attendu entier, reçu décimal (1.5)
+erreur : type incorrect pour la globale « g » : attendu table, reçu chaine ("texte")
+2 1 1 attendu "1b", obtenu "1a"
+1000 vrai table table
+type incorrect pour le paramètre « t » de moyenne : attendu table, reçu entier (5)

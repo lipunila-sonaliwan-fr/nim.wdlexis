@@ -86,12 +86,12 @@ procedure ARBRE_STRUCTURE(nom, uid)
         cheminsstruct[chemin] = r
         arbrestruct:ajouter(chemin)
         && variables locales : entre cette routine et la suivante
-        locale fin = 1000000000
+        locale limite = 1000000000
         si i < #routines
-          fin = routines[i + 1].ligne
+          limite = routines[i + 1].ligne
         finsi
         pour chaque v dans symboles
-          si v.genre = "locale" et v.ligne > r.ligne et v.ligne < fin
+          si v.genre = "locale" et v.ligne > r.ligne et v.ligne < limite
             locale cv = chemin + ui.sep + "· " + ETIQUETTE_SYMBOLE(v)
             cheminsstruct[cv] = v
             arbrestruct:ajouter(cv)
@@ -129,6 +129,8 @@ fonction OPTIONS_ANALYSE(nom)
   locale o = {nom = nom, projet = dossier}
   o.globales = reglages.globales
   o.appelsinconnus = reglages.appelsinconnus
+  o.collisions = reglages.collisions
+  o.types = reglages.types
 retourner o
 
 procedure PROBLEME(ev)
@@ -241,6 +243,12 @@ procedure SIGNAL(ev)
     PASTILLE(nombre(souschaine(cmd, 5)))
   cas commencepar(cmd, "definition:")
     ALLER_DEFINITION(souschaine(cmd, 12))
+  cas commencepar(cmd, "usages:")
+    LISTER_USAGES()
+  cas cmd = "format"
+    FORMATER_DOCUMENT()
+  cas cmd = "tests"
+    LANCER_TESTS(faux)
   fincas
 retourner
 
@@ -424,6 +432,16 @@ procedure ALLER_LIGNE
 retourner
 
 procedure ALLER_DEFINITION(mot)
+  && service de langage : le symbole sous le curseur (procédure, locale, globale, paramètre)
+  locale c = ed:curseur()
+  locale defs = lexis.definition(ed:texte(), c.ligne, c.colonne, OPTIONS_SERVICE())
+  si #defs > 0
+    ALLER_A(defs[1])
+    etat.libelle = "Définition : " + fichier.nom(defs[1].chemin) + " ligne " + defs[1].ligne + ;
+                   sisinon(#defs > 1, " (" + #defs + " définitions)", "")
+    retourner
+  finsi
+  && repli : procédures du projet par leur nom, puis fiche de la référence
   mot = majuscule(remplacertexte(rogner(mot), "@", ""))
   si mot = ""
     retourner
@@ -501,6 +519,18 @@ procedure BASCULER_GLOBALES
   ANALYSER(vrai)
   etat.libelle = sisinon(reglages.globales, "Variables globales implicites signalées", ;
                          "Variables globales implicites non signalées")
+retourner
+
+procedure BASCULER_COLLISIONS
+  reglages.collisions = non reglages.collisions
+  ANALYSER(vrai)
+  etat.libelle = sisinon(reglages.collisions, "Collisions de noms signalées", "Collisions de noms non signalées")
+retourner
+
+procedure BASCULER_TYPES
+  reglages.types = non reglages.types
+  ANALYSER(vrai)
+  etat.libelle = sisinon(reglages.types, "Types déclarés contrôlés", "Types déclarés non contrôlés")
 retourner
 
 procedure BASCULER_INCONNUES

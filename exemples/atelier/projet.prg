@@ -7,9 +7,10 @@ procedure CHARGER_PROJET(d)
     ENREGISTRER_SESSION()
   finsi
   dossier = d
-  fen.titre = "wdlexis+ [S]tudio 2.0.1 - " + fichier.nom(dossier)
+  fen.titre = "wdlexis+ [S]tudio 2.1.1 - " + fichier.nom(dossier)
   ARBRE_PROJET()
   vb:projet(dossier)        && procédures du projet : palette et liens d'appel entre fichiers
+  ed:infobulles(vrai, dossier)   && infobulles : procédures et globales de tout le projet
   VP_SUIVRE()               && la vue projet ouverte suit
   locale s = LIRE_SESSION()
   locale ouverts = 0
@@ -34,16 +35,16 @@ procedure ARBRE_PROJET
   si outils = nul
     retourner
   finsi
-  arbre:vider()
+  arbreprojet:vider()
   pour chaque nom dans fichier.liste(dossier, vrai)
     si finitpar(nom, "/") ou commencepar(nom, ".") ou ("/." $ nom) ou commencepar(nom, "distribution/")
       boucler
     finsi
     si minuscule(fichier.extension(nom)) $ ".prg.md.txt.json.csv.sql.ini.cfg.htm.html.png.jpg.jpeg.gif.bmp.pdf.log"
-      arbre:ajouter(nom)
+      arbreprojet:ajouter(nom)
       locale t = TYPE_FICHIER(nom)
       si t <> nul
-        arbre:icone(nom, t[1], t[2])
+        arbreprojet:icone(nom, t[1], t[2])
       finsi
     finsi
   suivant
@@ -87,9 +88,9 @@ procedure CADENAS
   pour chaque f dans FICHIERS_CONCEPTEURS()
     ouverts[fichier.absolu(f)] = vrai
   suivant
-  pour chaque c dans arbre:feuilles()
+  pour chaque c dans arbreprojet:feuilles()
     locale p = fichier.absolu(fichier.joindre(dossier, joindre(decouper(c, ui.sep), "/")))
-    arbre:cadenas(c, ouverts[p] = vrai)
+    arbreprojet:cadenas(c, ouverts[p] = vrai)
   suivant
 retourner
 
@@ -156,7 +157,7 @@ retourner
 &&
 
 fonction FICHIER_CHOISI()
-  locale v = arbre.valeur
+  locale v = arbreprojet.valeur
   si v = nul ou v = "" ou dossier = ""
     retourner nul
   finsi
@@ -196,12 +197,12 @@ procedure FICHIER_DUPLIQUER(ev)
     retourner
   finsi
   locale x = fichier.extension(p)
-  locale base = souschaine(p, 1, #p - #x)
+  locale prefixe = souschaine(p, 1, #p - #x)
   locale n = 1
-  tantque fichier.existe(base + n + x)
+  tantque fichier.existe(prefixe + n + x)
     n += 1
   fintantque
-  locale dest = base + n + x
+  locale dest = prefixe + n + x
   si non ui.confirmer("Dupliquer « " + fichier.nom(p) + " » en « " + fichier.nom(dest) + " » ?")
     retourner
   finsi
@@ -286,7 +287,7 @@ retourner
 && configuration du projet : arguments, fichier principal, session
 procedure ARBRE_DOUBLE(ev)
   && double-clic sur un formulaire ou un état : son éditeur
-  locale v = arbre.valeur
+  locale v = arbreprojet.valeur
   si v = nul ou v = ""
     retourner
   finsi
@@ -443,15 +444,15 @@ procedure PROJET_IMPORTER
         unique = faux
       finsi
     suivant
-    locale racine = sisinon(unique, fichier.joindre(dest, tete), dest)
-    si unique et fichier.estdossier(racine) et #fichier.liste(racine) > 0
-      ui.alerte("Le dossier existe déjà et n'est pas vide : " + racine, "attention")
+    locale dossierracine = sisinon(unique, fichier.joindre(dest, tete), dest)
+    si unique et fichier.estdossier(dossierracine) et #fichier.liste(dossierracine) > 0
+      ui.alerte("Le dossier existe déjà et n'est pas vide : " + dossierracine, "attention")
       retourner
     finsi
     fichier.creerdossier(dest)
     locale ecrits = archive.extraire(src, dest, {ecraser = faux})
-    CHARGER_PROJET(fichier.absolu(racine))
-    etat.libelle = "Projet importé : " + racine + " (" + #ecrits + " fichier(s))"
+    CHARGER_PROJET(fichier.absolu(dossierracine))
+    etat.libelle = "Projet importé : " + dossierracine + " (" + #ecrits + " fichier(s))"
   capturer e
     ui.alerte("Import impossible : " + e, "stop")
   finessayer

@@ -105,6 +105,22 @@ proc declare(ps: var Parser, name: string): int =
   pr.slotNames.add name
   ps.fs.names[up] = result
 
+proc parseType(ps: var Parser): TypeSpec =
+  ## Type déclaré après « : » : nombre, entier, decimal, chaine, logique, table, liste,
+  ## procedure, objet, tache, quelconque ou nom d'objet natif ; « ? » : nul accepté.
+  let t = ps.cur
+  if t.kind != tkName: ps.err("type attendu après « : » au lieu de " & describe(t))
+  ps.advance()
+  result = TypeSpec(kind: typeKindOf(t.text), name: t.text)
+  if ps.isOp("?"):
+    ps.advance()
+    result.nullable = true
+
+proc setSlotType(ps: var Parser, slot: int, ty: TypeSpec) =
+  let pr = ps.fs.proto
+  while pr.slotTypes.len <= slot: pr.slotTypes.add TypeSpec(kind: tyAny)
+  pr.slotTypes[slot] = ty
+
 proc resolve(ps: Parser, t: Tok): Expr =
   let s = ps.fs.names.getOrDefault(t.up, -1)
   if s >= 0: Expr(kind: ekLocal, slot: s, vname: t.text, line: t.line)
@@ -508,10 +524,17 @@ proc statement(ps: var Parser): Stmt =
       while true:
         let nm = ps.expectName()
         let s = mk(skLocal, nm.line)
+        var ty: TypeSpec
+        if ps.isOp(":"):
+          ps.advance()
+          ty = ps.parseType()
+          s.typed = true
+          s.ty = ty
         if ps.isOp("="):
           ps.advance()
           s.e.add ps.expr()
         s.slots.add ps.declare(nm.text)
+        if s.typed: ps.setSlotType(s.slots[0], ty)
         group.add s
         if ps.isOp(","): ps.advance() else: break
       if group.len == 1: res = group[0]
@@ -526,6 +549,10 @@ proc statement(ps: var Parser): Stmt =
         ps.fs.names.del(nm.up)
         let s = mk(skGlobal, nm.line)
         s.name = nm.up
+        if ps.isOp(":"):
+          ps.advance()
+          s.ty = ps.parseType()
+          s.typed = true
         if ps.isOp("="):
           ps.advance()
           s.e.add ps.expr()
@@ -755,11 +782,25 @@ proc parseChunk*(src, source: string): Program =
       if ps.isOp("("):
         ps.advance()
         if not ps.isOp(")"):
+          var types: seq[TypeSpec]
+          var anyTyped = false
           while true:
-            discard ps.declare(ps.expectName().text)
+            let slot = ps.declare(ps.expectName().text)
             inc pr.nparams
+            var ty = TypeSpec(kind: tyAny, nullable: true)
+            if ps.isOp(":"):
+              ps.advance()
+              ty = ps.parseType()
+              anyTyped = true
+              ps.setSlotType(slot, ty)
+            types.add ty
             if ps.isOp(","): ps.advance() else: break
+          if anyTyped: pr.paramTypes = types
         ps.expectOp(")")
+      if ps.isOp(":"):
+        ps.advance()
+        pr.retType = ps.parseType()
+        pr.hasRet = true
       ps.endInstr()
       pr.body = ps.blockUntil(procEnd)
       pr.lastLine = ps.cur.line

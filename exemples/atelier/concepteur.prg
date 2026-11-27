@@ -85,8 +85,8 @@ procedure CONCEPTEUR_OUVRIR(formulaire)
     ui.alerte("Ouvrez d'abord un projet (Fichier > Ouvrir un projet…).", "information", "Concepteur de formulaires")
     retourner
   finsi
-  locale code = CODE_CONCEPTEUR()
-  si code = ""
+  locale codeform = CODE_CONCEPTEUR()
+  si codeform = ""
     ui.alerte("Ouvrez ou créez d'abord un fichier .prg du projet : il recevra les procédures des événements.", ;
               "information", "Concepteur de formulaires")
     retourner
@@ -103,11 +103,11 @@ procedure CONCEPTEUR_OUVRIR(formulaire)
     && le formulaire se souvient de son code
     locale associe = canevas:codeassocie()
     si associe <> "" et fichier.existe(fichier.joindre(dossier, associe))
-      code = fichier.joindre(dossier, associe)
+      codeform = fichier.joindre(dossier, associe)
     finsi
   finsi
-  concode = code
-  canevas:codeassocie(RELATIF(code))
+  concode = codeform
+  canevas:codeassocie(RELATIF(codeform))
   CONCEPTEUR_FENETRE()
   CON_ENREGISTRER()
   CON_ARBRE()
@@ -125,24 +125,24 @@ procedure CONCEPTEUR_FENETRE
   condlg.espacement = 0
   condlg.surfermeture = @CON_FERMETURE
   && barre d'outils : symboles, libellés en infobulle
-  locale outils = condlg:ajouter(ui.rangee())
-  outils.ancrage = "haut"
-  outils.marge = 2
-  outils.espacement = 1
-  CON_OUTIL(outils, "enregistrer", "Enregistrer", @CON_ENREGISTRER, "Régénère form_<nom>.prg")
-  CON_OUTIL(outils, "supprimer", "Supprimer", @CON_SUPPRIMER, "Supprime le contrôle sélectionné (Suppr)")
-  CON_OUTIL(outils, "monter", "Monter", @CON_MONTER, "Plus tôt dans l'ordre d'affichage")
-  CON_OUTIL(outils, "descendre", "Descendre", @CON_DESCENDRE, "Plus tard dans l'ordre d'affichage")
-  CON_OUTIL(outils, "sortir", "Sortir", @CON_SORTIR, "Sort le contrôle de son conteneur")
-  CON_OUTIL(outils, "formulaire", "Formulaire", @CON_FORMULAIRE, "Sélectionne le formulaire (propriétés de la fenêtre)")
-  CON_OUTIL(outils, "cabler", "Câbler le code", @CON_CABLER, ;
+  locale barreoutils = condlg:ajouter(ui.rangee())
+  barreoutils.ancrage = "haut"
+  barreoutils.marge = 2
+  barreoutils.espacement = 1
+  CON_OUTIL(barreoutils, "enregistrer", "Enregistrer", @CON_ENREGISTRER, "Régénère form_<nom>.prg")
+  CON_OUTIL(barreoutils, "supprimer", "Supprimer", @CON_SUPPRIMER, "Supprime le contrôle sélectionné (Suppr)")
+  CON_OUTIL(barreoutils, "monter", "Monter", @CON_MONTER, "Plus tôt dans l'ordre d'affichage")
+  CON_OUTIL(barreoutils, "descendre", "Descendre", @CON_DESCENDRE, "Plus tard dans l'ordre d'affichage")
+  CON_OUTIL(barreoutils, "sortir", "Sortir", @CON_SORTIR, "Sort le contrôle de son conteneur")
+  CON_OUTIL(barreoutils, "formulaire", "Formulaire", @CON_FORMULAIRE, "Sélectionne le formulaire (propriétés de la fenêtre)")
+  CON_OUTIL(barreoutils, "cabler", "Câbler le code", @CON_CABLER, ;
             "Ajoute au code le bloc des procédures et l'appel d'ouverture (programme principal)")
-  CON_OUTIL(outils, "personnalise", "Contrôle personnalisé…", @CON_PERSONNALISE, ;
+  CON_OUTIL(barreoutils, "personnalise", "Contrôle personnalisé…", @CON_PERSONNALISE, ;
             "Ajoute à la palette un contrôle créé par une fonction Lexis+ du projet")
-  CON_OUTIL(outils, "code", "Voir le code", @CON_VOIR_CODE, "Affiche le code édité dans l'atelier")
-  ESPACE(outils, nul)
-  locale bmasq = OUTIL_SYMBOLE(outils, "masquer", "Palette / Hiérarchie", "", @PALETTE_BASCULER)
-  locale bfen = OUTIL_SYMBOLE(outils, "fenetre", "Palette / Hiérarchie", "", @PALETTE_FENETRE)
+  CON_OUTIL(barreoutils, "code", "Voir le code", @CON_VOIR_CODE, "Affiche le code édité dans l'atelier")
+  ESPACE_BARRE(barreoutils, nul)
+  locale bmasq = OUTIL_SYMBOLE(barreoutils, "masquer", "Palette / Hiérarchie", "", @PALETTE_BASCULER)
+  locale bfen = OUTIL_SYMBOLE(barreoutils, "fenetre", "Palette / Hiérarchie", "", @PALETTE_FENETRE)
   && barre d'état
   conctl.etat = condlg:ajouter(ui.etiquette("Glisser depuis la palette · clic pour sélectionner · poignées pour " + ;
                                             "redimensionner · Suppr supprime · Échap sélectionne le parent"))
@@ -182,8 +182,8 @@ procedure CONCEPTEUR_FENETRE
   canevas:focus()
 retourner
 
-procedure CON_OUTIL(barre, icone, libelle, proc, aide)
-  OUTIL_SYMBOLE(barre, icone, libelle, aide, proc)
+procedure CON_OUTIL(barrecon, icone, libelle, proc, aide)
+  OUTIL_SYMBOLE(barrecon, icone, libelle, aide, proc)
 retourner
 
 procedure CON_FERMETURE(ev)
@@ -244,11 +244,11 @@ procedure CON_ENREGISTRER
   locale nom = canevas:nom()
   locale p = CHEMIN_FORMULAIRE(nom)
   locale nouveau = non fichier.existe(p)
-  locale code = canevas:code()
-  fichier.ecrire(p, code)
+  locale codeform = canevas:code()
+  fichier.ecrire(p, codeform)
   locale uid = ed:chercherdocument(p)
   si uid <> nul
-    ed:fixertexte(code, uid, vrai)
+    ed:fixertexte(codeform, uid, vrai)
   finsi
   condlg.titre = "Concepteur de formulaires - form_" + nom + ".prg - " + fichier.nom(concode)
   locale manquantes = CON_MANQUANTES()
@@ -660,12 +660,12 @@ retourner
 fonction CON_NOUVELLE_PROCEDURE(evenement, uid)
   locale el = canevas:element(uid)
   locale noeud = sisinon(el.racine, VAR_FORMULAIRE(canevas:nom()), el.nom)
-  locale base = majuscule(noeud + "_" + souschaine(evenement, 4))
+  locale nomproc = majuscule(noeud + "_" + souschaine(evenement, 4))
   locale existantes = CON_TOUTES_PROCEDURES()
-  locale h = base
+  locale h = nomproc
   locale k = 2
   tantque existantes[h] <> nul
-    h = base + k
+    h = nomproc + k
     k += 1
   fintantque
   locale doc = ed:ouvrir(concode)
@@ -708,15 +708,15 @@ retourner
 procedure CON_CABLER
   locale nom = canevas:nom()
   locale src = TEXTE_DE(concode)
-  locale code = ASSURER_BLOC(src, nom)
-  locale r = ASSURER_APPEL(code, nom)
+  locale codebloc = ASSURER_BLOC(src, nom)
+  locale r = ASSURER_APPEL(codebloc, nom)
   locale note = ""
   si r.ajoute
-    code = r.texte
+    codebloc = r.texte
     note = " ; appel " + PROC_OUVRIR(nom) + "() ajouté au programme principal"
   finsi
-  si code <> src
-    ECRIRE_CODE(code)
+  si codebloc <> src
+    ECRIRE_CODE(codebloc)
   finsi
   CON_ETAT(PROC_OUVRIR(nom) + "() ouvre le formulaire depuis " + fichier.nom(concode) + note)
 retourner
@@ -727,8 +727,8 @@ procedure CON_PERSONNALISE
     retourner
   finsi
   genre = rogner(genre)
-  locale base = ui.demander("Contrôle existant dont il dérive (bouton, etiquette, saisie, conteneur…) :", "bouton")
-  si base = nul
+  locale controlebase = ui.demander("Contrôle existant dont il dérive (bouton, etiquette, saisie, conteneur…) :", "bouton")
+  si controlebase = nul
     retourner
   finsi
   locale expr = ui.demander("Expression Lexis+ qui crée le contrôle ($libelle, $texte… sont remplacés " + ;
@@ -736,7 +736,7 @@ procedure CON_PERSONNALISE
   si expr = nul
     retourner
   finsi
-  locale msg = canevas:ajouterpersonnalise(dossier, genre, rogner(base), expr)
+  locale msg = canevas:ajouterpersonnalise(dossier, genre, rogner(controlebase), expr)
   si msg <> nul
     ui.alerte(msg, "stop", "Contrôle personnalisé")
     retourner
@@ -854,22 +854,22 @@ fonction ASSURER_APPEL(src, nom)
     finsi
   suivant
   && fin du programme principal : première procédure / fonction / bloc de formulaire
-  locale fin = #l + 1
+  locale finbloc = #l + 1
   pour i = 1 a #l
     si ENTETE_PROCEDURE(l[i]) <> nul ou commencepar(l[i], "&& ---- formulaire « ")
-      fin = i
+      finbloc = i
       sortir
     finsi
   suivant
   && avant un ui.executer() / interface.executer() déjà présent
-  pour i = 1 a fin - 1
+  pour i = 1 a finbloc - 1
     locale s = minuscule(SANS_COMMENTAIRE(l[i]))
     si "executer()" $ s et ("ui." $ s ou "interface." $ s)
       inserer(l, PROC_OUVRIR(nom) + "()", i)
       retourner {texte = joindre(l, car(10)), ajoute = vrai}
     finsi
   suivant
-  locale a = fin
+  locale a = finbloc
   tantque a > 1 et rogner(l[a - 1]) = ""
     a -= 1
   fintantque

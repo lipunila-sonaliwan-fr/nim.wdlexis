@@ -46,12 +46,24 @@ proc registerPackage*(p: PackageDef) =
   registeredPackages.add p
 
 proc packages*(): seq[PackageDef] =
+  # Copie de la liste (pour l'énumération par l'atelier) ; dans l'interpréteur,
+  # utiliser findPackage / packageCount qui ne copient rien.
   {.cast(gcsafe).}:
     result = registeredPackages
 
+proc findPackage(n: string): int =
+  # Indice du paquet de nom n (minuscules), -1 sinon ; sans copie de la liste
+  # (la copie, documentation comprise, coûtait ~100 µs à chaque binaire.xxx).
+  {.cast(gcsafe).}:
+    for i in 0 ..< registeredPackages.len:
+      if registeredPackages[i].name == n: return i
+  -1
+
+proc isPackageName*(name: string): bool = findPackage(name.toLowerAscii) >= 0
+
 proc docs*(section: string, items: openArray[string]): seq[ApiDoc] =
-  ## Paires « signature », « description ». Le nom et le propriétaire sont
-  ## déduits de la signature : f(...), pkg.f(...), obj:f(...).
+  # Paires « signature », « description ». Le nom et le propriétaire sont
+  # déduits de la signature : f(...), pkg.f(...), obj:f(...).
   var i = 0
   while i + 1 < items.len:
     let sig = items[i]
@@ -227,22 +239,27 @@ proc openPackage*(L: Interp, name: string): Value =
   let n = name.toLowerAscii
   let cached = L.loaded.rawGet(n)
   if cached.kind != vkNil: return cached
-  for p in packages():
-    if p.name == n:
-      result = p.open(L)
-      if result.kind == vkNil: result = boolV(true)
-      L.loaded.rawSet(n, result)
-      return
-  nilV
+  let i = findPackage(n)
+  if i < 0: return nilV
+  var opener: proc (L: Interp): Value {.nimcall.}
+  {.cast(gcsafe).}: opener = registeredPackages[i].open
+  result = opener(L)
+  if result.kind == vkNil: result = boolV(true)
+  L.loaded.rawSet(n, result)
 
 proc openGlobals*(L: Interp) =
   ## Installe les paquets déclarés globaux (fonctions intégrées, es, systeme...) ;
   ## les autres paquets s'ouvrent à la première utilisation de leur nom
   ## (fichier.lire(...)) ou par paquet("nom").
   L.autoload = proc (L: Interp, name: string): Value =
+    # binaire.xxx(...) : le paquet déjà ouvert est pris dans le cache L.loaded,
+    # sans parcourir ni copier la liste des paquets (coût caché supprimé : même
+    # coût qu'avec b = paquet("binaire") puis b.xxx(...)).
     let n = name.toLowerAscii
-    for p in packages():
-      if p.name == n and p.name != "base": return L.openPackage(n)
+    if n == "base": return nilV
+    let cached = L.loaded.rawGet(n)
+    if cached.kind != vkNil: return cached
+    if findPackage(n) >= 0: return L.openPackage(n)
     nilV
   for p in packages():
     if p.global:

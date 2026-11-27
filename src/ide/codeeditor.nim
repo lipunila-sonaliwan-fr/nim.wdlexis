@@ -116,6 +116,9 @@ type
     plainNumbers*: bool          # numéros de ligne simples (sinon : repères de l'atelier toutes les 10 lignes).
     paletteKeys*: bool           # F1, Ctrl+P, Ctrl+Maj+P, Ctrl+W, Ctrl+Maj+O signalés (éditeur à palette de commandes).
     hoverDot: int
+    hoverProvider*: proc (source, text: string, line, col: int): string {.closure, gcsafe.}
+                                 # infobulle du symbole sous la souris (atelier : service de langage)
+    hoverKey, hoverVal: string   # dernière infobulle calculée (cache)
     hideTabs*: bool              # sans barre d'onglets (cellule de carnet) : la molette passe au parent
     autoHeight*: bool            # hauteur = nombre de lignes (cellule de carnet)
     autoMin*, autoMax*: int      # bornes de autoHeight, en lignes (0 : aucune)
@@ -1576,10 +1579,30 @@ method onMouse*(ed: CodeEditor, e: MouseEvent) =
       doc.col = p.col
       ed.ensureCursorVisible()
       ed.notifyCursor()
-    elif ed.codeRect.containsPoint(e.x, e.y) and doc.diags.len > 0:   # diagnostic tooltip
+    elif ed.codeRect.containsPoint(e.x, e.y) and (doc.diags.len > 0 or ed.hoverProvider != nil):
+      # diagnostic, sinon infobulle du symbole (procédure, variable, fonction de paquet…)
       let p = ed.posFromPoint(e.x, e.y)
-      let i = diagnosticAt(doc, p.line, runeCol(doc.lines[p.line], p.col))
-      ed.tooltip = if i >= 0: $doc.diags[i].sev & " : " & doc.diags[i].msg else: ""
+      var tip = ""
+      if doc.diags.len > 0:
+        let i = diagnosticAt(doc, p.line, runeCol(doc.lines[p.line], p.col))
+        if i >= 0: tip = $doc.diags[i].sev & " : " & doc.diags[i].msg
+      if tip.len == 0 and ed.hoverProvider != nil and doc.kind == dkCode and not doc.isSql and
+         not doc.isMarkdown and not doc.isGeneric and not doc.isPlainText:
+        let s = doc.lines[p.line]
+        var a = min(p.col, s.len)
+        var z = a
+        while a > 0 and s[a - 1].isWordChar: dec a
+        while z < s.len and s[z].isWordChar: inc z
+        # pointeur au-delà de la fin du mot (posFromPoint arrondit) : pas d'infobulle
+        let px = ed.codeRect.x + 6 + float(runeCol(s, z)) * ed.charW - doc.scrollX
+        if z > a and e.x <= px + 2:
+          let key = $doc.uid & ":" & $doc.version & ":" & $p.line & ":" & $a
+          if key != ed.hoverKey:
+            ed.hoverKey = key
+            ed.hoverVal = ed.hoverProvider((if doc.path.len > 0: doc.path else: doc.title),
+                                           doc.lines.join("\n"), p.line, a)
+          tip = ed.hoverVal
+      ed.tooltip = tip
     else:
       ed.tooltip = ""
   of maRelease:
@@ -1685,7 +1708,7 @@ method onKey*(ed: CodeEditor, e: KeyEvent): bool =
     var z = doc.col
     while a > 0 and s[a - 1].isWordChar: dec a
     while z < s.len and s[z].isWordChar: inc z
-    if z > a: shortcut = "cmd:definition:" & s[a ..< z]
+    if z > a: shortcut = (if shift: "cmd:usages:" else: "cmd:definition:") & s[a ..< z]
   of KF9:
     if doc.line in doc.bps: doc.bps.excl doc.line else: doc.bps.incl doc.line
     shortcut = "bp:" & $doc.uid
@@ -1693,12 +1716,13 @@ method onKey*(ed: CodeEditor, e: KeyEvent): bool =
     if ctrlOnly:
       case kc
       of ord('s'): shortcut = (if shift: "cmd:saveas" else: "cmd:save")
-      of ord('f'): shortcut = "cmd:find"
+      of ord('f'): shortcut = (if shift: "cmd:format" else: "cmd:find")
       of ord('h'), ord('g'): shortcut = "cmd:findnext"
       of ord('l'): shortcut = "cmd:goto"
       of ord('r'): shortcut = "cmd:run"
       of ord('n'): shortcut = "cmd:new"
       of ord('o'): shortcut = "cmd:open"
+      of ord('t'): shortcut = "cmd:tests"
       of ord('k'): shortcut = "cmd:replace"
       # taille de police : Ctrl/Cmd + « + », « = » (AZERTY/QWERTY) ou pavé numérique ;
       # Ctrl/Cmd + « - » ; Ctrl/Cmd + 0 (« à » en AZERTY) pour revenir à la taille par défaut.
@@ -2333,6 +2357,13 @@ proc editorSetWelcome*(id: ControlId, lines: seq[string]) =
   ## Lignes affichées quand aucun onglet n'est ouvert (vide : accueil par défaut).
   withControl(id, CodeEditor, ed):
     ed.welcome = lines
+
+proc editorSetHoverProvider*(id: ControlId, p: proc (source, text: string, line, col: int): string {.closure, gcsafe.}) =
+  # Infobulles du code (survol) : p(source, texte du document, ligne, colonne en octets)
+  # -> texte ("" : aucune).
+  withControl(id, CodeEditor, ed):
+    ed.hoverProvider = p
+    ed.hoverKey = ""
 
 proc editorSetProjectNames*(id: ControlId, names: seq[string]) =
   withControl(id, CodeEditor, ed): ed.projectNames = names

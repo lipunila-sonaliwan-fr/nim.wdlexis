@@ -9,6 +9,8 @@ type
     minimap*: bool
     flagGlobals*: bool       # signaler les variables non déclarées dans les procédures.
     unknownCalls*: bool      # signaler les appels de procédures inconnues.
+    collisions*: bool        # signaler les collisions de noms (S / s, variable = procédure, paquet masqué…).
+    typeChecks*: bool        # contrôler les types déclarés (littéraux, arguments, résultats).
     lastProject*: string
     programArgs*: string     # arguments passés au programme (séparés par des espaces).
     mainFile*: string        # fichier lancé par Exécuter ("" = principal.prg, sinon le fichier actif).
@@ -23,7 +25,7 @@ const
   FontDeltaMax* = 12
 
 proc defaultSettings*(): Settings =
-  Settings(dark: true, minimap: true, flagGlobals: true, unknownCalls: true)
+  Settings(dark: true, minimap: true, flagGlobals: true, unknownCalls: true, collisions: true, typeChecks: true)
 
 proc settingsPath(): string = getConfigDir() / "wdlexis" / "reglages.json"
 
@@ -37,6 +39,8 @@ proc loadSettings*(): Settings =
     get(minimap, getBool)
     get(flagGlobals, getBool)
     get(unknownCalls, getBool)
+    get(collisions, getBool)
+    get(typeChecks, getBool)
     get(lastProject, getStr)
     get(programArgs, getStr)
     get(mainFile, getStr)

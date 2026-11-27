@@ -75,7 +75,7 @@ procedure ARBRE_REFERENCE
     suivant
     etat.libelle = "Référence : " + n + " résultat(s) dans " + #paquets + " paquet(s)"
     si n = 0
-      fiche.valeur = "### Référence" + car(10) + car(10) + "Aucun résultat pour « " + rogner(rechref.valeur) + " »."
+      ficheref.valeur = "### Référence" + car(10) + car(10) + "Aucun résultat pour « " + rogner(rechref.valeur) + " »."
     finsi
   finsi
 retourner
@@ -98,11 +98,11 @@ procedure REFERENCE(ev)
   finsi
   locale parts = decouper(ev.texte, ui.sep)
   si #parts = 1
-    fiche.valeur = FICHE_PAQUET(parts[1])
+    ficheref.valeur = FICHE_PAQUET(parts[1])
   sinon
     locale d = docs[parts[1] + ui.sep + parts[2]]
     si d <> nul
-      fiche.valeur = FICHE(d)
+      ficheref.valeur = FICHE(d)
     finsi
   finsi
 retourner
@@ -239,15 +239,15 @@ fonction PARAMETRES(sig)
   suivant
 retourner l
 
-fonction DISPONIBILITE(paquet)
-  si paquet = "base"
+fonction DISPONIBILITE(nompaquet)
+  si nompaquet = "base"
     retourner "fonction intégrée, toujours disponible."
   finsi
-  si paquet = "es" ou paquet = "systeme"
-    retourner "paquet " + MDCODE(paquet) + ", toujours disponible."
+  si nompaquet = "es" ou nompaquet = "systeme"
+    retourner "paquet " + MDCODE(nompaquet) + ", toujours disponible."
   finsi
-retourner "paquet " + MDCODE(paquet) + " : " + MDCODE(paquet + ".fonction(...)") + " ou " + ;
-          MDCODE("x = paquet(" + car(34) + paquet + car(34) + ")") + "."
+retourner "paquet " + MDCODE(nompaquet) + " : " + MDCODE(nompaquet + ".fonction(...)") + " ou " + ;
+          MDCODE("x = paquet(" + car(34) + nompaquet + car(34) + ")") + "."
 
 fonction FICHE(d)
   locale md = {}

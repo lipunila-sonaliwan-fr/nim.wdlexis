@@ -35,6 +35,7 @@ import ../wdgui
 import ../lexis/api
 import ../ide/compat
 import ../ide/[codeeditor, langdocs, gentok]
+from ../ide/langservice import Workspace, newWorkspace, setText, hover, plainHover, HoverInfo
 from std/sets import toHashSet, HashSet, incl
 from ../ide/designer import designImageBase, FormCanvas, PaletteView, newFormCanvas, newPaletteView, nodeByUid, pathOfNode,
   visibleProps, canvasSetProp, select, deleteSelected, moveSelected, moveOut, showNode
@@ -1499,6 +1500,25 @@ proc defineMethods() =
     editorCopyToClipboard(L.edOf(a, "pressepapiers"), L.checkStr(a, 2, "pressepapiers"))
   mfn "editeur", "taillepolice", proc (L: Interp, a: seq[Value]): seq[Value] =
     editorSetFontSize(L.edOf(a, "taillepolice"), L.checkNum(a, 2, "taillepolice"))
+  mfn "editeur", "infobulles", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # ed:infobulles([actif], [dossier]) : au survol d'un nom Lexis+, sa définition (procédure
+    # et commentaires, variable et type, fonction de paquet) ; dossier : projet analysé.
+    let id = L.edOf(a, "infobulles")
+    if not optBool(a, 2, true):
+      editorSetHoverProvider(id, nil)
+      return
+    let ws = newWorkspace(L.optStr(a, 3, "infobulles", ""))
+    var lk: Lock
+    initLock(lk)
+    editorSetHoverProvider(id, proc (source, text: string, line, col: int): string =
+      var h: HoverInfo
+      {.cast(gcsafe).}:
+        withLock lk:
+          try:
+            ws.setText(source, text)
+            h = ws.hover(source, line, col)
+          except CatchableError: discard
+      if h.found: plainHover(h.markdown) else: "")
   mfn "editeur", "minicarte", proc (L: Interp, a: seq[Value]): seq[Value] =
     editorSetOptions(L.edOf(a, "minicarte"), optBool(a, 2, true), false)
   mfn "editeur", "langage", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -2788,6 +2808,7 @@ const uiDocs = [
   "editeur:effacerpointsarret()", "Retire tous les points d'arrêt.",
   "editeur:pressepapiers(texte)", "Copie un texte dans le presse-papiers.",
   "editeur:taillepolice(taille)", "Taille de la police.", "editeur:minicarte([b])", "Affiche ou masque la minicarte.",
+  "editeur:infobulles([actif], [dossier])", "Infobulles du code Lexis+ au survol : signature et commentaires d'une procédure du projet (dossier), type et portée d'une variable, documentation d'une fonction ou d'un paquet.",
   "editeur:langage([langage], [uid])", "Langage d'un document : « sql » (coloration, complétion et commentaires SQL) ou « lexis » ; \"\" : d'après l'extension (.sql). Sans argument : langage du document actif.",
   "editeur:pastille(texte, [uid], [couleur])", "Pastille colorée après le titre de l'onglet d'un document (\"\" : aucune) ; couleur \"#RRGGBB\" (défaut : accent du thème).",
   "editeur:lecture([uid]) | editeur:lecture(b, [uid], [bords])", "Lecture seule d'un document ; bords = vrai : « cmd:edge:next » / « cmd:edge:prev » (surselection) quand on cherche à dépasser la fin ou le début (consultation par blocs).",

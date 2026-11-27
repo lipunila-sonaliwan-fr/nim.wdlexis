@@ -38,22 +38,22 @@ procedure VUE_PROJET
   vpfen.espacement = 0
   vpfen.surfermeture = @VP_FERMETURE
   && barre d'outils : symboles, libellés en infobulle
-  locale outils = vpfen:ajouter(ui.rangee())
-  outils.ancrage = "haut"
-  outils.marge = 2
-  outils.espacement = 1
-  OUTIL_SYMBOLE(outils, "actualiser", "Actualiser", "Relit les fichiers du projet", @VP_RELIRE)
-  OUTIL_SYMBOLE(outils, "ajuster", "Tout voir", "Ajuste le zoom à l'ensemble du projet", @VP_TOUT_VOIR)
-  OUTIL_SYMBOLE(outils, "zoommoins", "Zoom −", "Molette pour zoomer autour du pointeur", @VP_ZOOM_MOINS)
-  OUTIL_SYMBOLE(outils, "zoomplus", "Zoom +", "Molette pour zoomer autour du pointeur", @VP_ZOOM_PLUS)
-  OUTIL_SYMBOLE(outils, "k-link", "Appels", ;
+  locale barreoutils = vpfen:ajouter(ui.rangee())
+  barreoutils.ancrage = "haut"
+  barreoutils.marge = 2
+  barreoutils.espacement = 1
+  OUTIL_SYMBOLE(barreoutils, "actualiser", "Actualiser", "Relit les fichiers du projet", @VP_RELIRE)
+  OUTIL_SYMBOLE(barreoutils, "ajuster", "Tout voir", "Ajuste le zoom à l'ensemble du projet", @VP_TOUT_VOIR)
+  OUTIL_SYMBOLE(barreoutils, "zoommoins", "Zoom −", "Molette pour zoomer autour du pointeur", @VP_ZOOM_MOINS)
+  OUTIL_SYMBOLE(barreoutils, "zoomplus", "Zoom +", "Molette pour zoomer autour du pointeur", @VP_ZOOM_PLUS)
+  OUTIL_SYMBOLE(barreoutils, "k-link", "Appels", ;
                 "Affiche ou masque les liens d'appel (pointillés ; bleus : vers un autre fichier)", @VP_APPELS)
-  ESPACE(outils, 8)
-  OUTIL_SYMBOLE(outils, "code", "Ouvrir le code", ;
+  ESPACE_BARRE(barreoutils, 8)
+  OUTIL_SYMBOLE(barreoutils, "code", "Ouvrir le code", ;
                 "Ouvre dans l'atelier le fichier sélectionné, à la définition (ou double-clic)", @VP_CODE)
-  OUTIL_SYMBOLE(outils, "blueprint", "Ouvrir en blueprint", ;
+  OUTIL_SYMBOLE(barreoutils, "blueprint", "Ouvrir en blueprint", ;
                 "Ouvre le fichier sélectionné dans la fenêtre Blueprint", @VP_BLUEPRINT)
-  locale info = outils:ajouter(ui.etiquette("  une colonne par fichier · procédures dans l'ordre du source"))
+  locale info = barreoutils:ajouter(ui.etiquette("  une colonne par fichier · procédures dans l'ordre du source"))
   info.poids = 1
   info.couleur = "#8A8F98"
   && barre d'état
@@ -138,15 +138,15 @@ procedure VP_RELIRE
     suivant
     pour chaque s dans sources
       pour chaque nom dans s.appels
-        locale cible = VP_CIBLE(ou[nom], fichierde, f.relatif)
-        si cible <> "" et cible <> s.id
-          si appelants[cible] = nul
-            appelants[cible] = {}
+        locale entitecible = VP_CIBLE(ou[nom], fichierde, f.relatif)
+        si entitecible <> "" et entitecible <> s.id
+          si appelants[entitecible] = nul
+            appelants[entitecible] = {}
           finsi
-          inserer(appelants[cible], s.titre)
+          inserer(appelants[entitecible], s.titre)
           si vpappels
-            locale croise = fichierde[cible] <> f.relatif
-            locale l = {id = s.id + ">" + cible, de = s.id, a = cible, croise = croise}
+            locale croise = fichierde[entitecible] <> f.relatif
+            locale l = {id = s.id + ">" + entitecible, de = s.id, a = entitecible, croise = croise}
             inserer(vpliens, l)
             vpdia:lien{id = l.id, de = l.de, a = l.a, fleche = vrai, pointille = vrai, epaisseur = 1.4, ;
                        couleur = sisinon(croise, st.croise, st.lien)}

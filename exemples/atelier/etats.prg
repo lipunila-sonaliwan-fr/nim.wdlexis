@@ -90,23 +90,23 @@ procedure ETAT_FENETRE
   etdlg.espacement = 0
   etdlg.surfermeture = @ET_FERMETURE
   && barre d'outils : symboles, libellés en infobulle
-  locale outils = etdlg:ajouter(ui.rangee())
-  outils.ancrage = "haut"
-  outils.marge = 2
-  outils.espacement = 1
-  CON_OUTIL(outils, "enregistrer", "Enregistrer", @ET_ENREGISTRER, "Régénère etat_<nom>.prg")
-  CON_OUTIL(outils, "supprimer", "Supprimer", @ET_SUPPRIMER, "Supprime l'élément ou la zone sélectionné (Suppr)")
-  CON_OUTIL(outils, "monter", "Monter", @ET_MONTER, "Zone : plus haut dans l'état ; élément : dessiné plus tôt")
-  CON_OUTIL(outils, "descendre", "Descendre", @ET_DESCENDRE, "Zone : plus bas dans l'état ; élément : dessiné plus tard")
-  CON_OUTIL(outils, "plus", "Nouvelle zone", @ET_ZONE, "Ajoute une zone nommée après la zone sélectionnée")
-  CON_OUTIL(outils, "etat", "État", @ET_ETAT, "Sélectionne l'état (format, orientation, marges)")
-  CON_OUTIL(outils, "apercu", "Aperçu PDF", @ET_APERCU, "Génère le PDF avec chaque zone trois fois, variables affichées")
-  CON_OUTIL(outils, "code", "Insérer le code", @ET_CODE, "Insère dans l'éditeur le code Lexis+ qui remplit l'état")
-  CON_OUTIL(outils, "zoomplus", "Zoom +", @ET_ZOOM_PLUS, "Agrandit la page")
-  CON_OUTIL(outils, "zoommoins", "Zoom −", @ET_ZOOM_MOINS, "Réduit la page")
-  ESPACE(outils, nul)
-  locale bmasq = OUTIL_SYMBOLE(outils, "masquer", "Palette / Hiérarchie", "", @PALETTEETAT_BASCULER)
-  locale bfen = OUTIL_SYMBOLE(outils, "fenetre", "Palette / Hiérarchie", "", @PALETTEETAT_FENETRE)
+  locale barreoutils = etdlg:ajouter(ui.rangee())
+  barreoutils.ancrage = "haut"
+  barreoutils.marge = 2
+  barreoutils.espacement = 1
+  CON_OUTIL(barreoutils, "enregistrer", "Enregistrer", @ET_ENREGISTRER, "Régénère etat_<nom>.prg")
+  CON_OUTIL(barreoutils, "supprimer", "Supprimer", @ET_SUPPRIMER, "Supprime l'élément ou la zone sélectionné (Suppr)")
+  CON_OUTIL(barreoutils, "monter", "Monter", @ET_MONTER, "Zone : plus haut dans l'état ; élément : dessiné plus tôt")
+  CON_OUTIL(barreoutils, "descendre", "Descendre", @ET_DESCENDRE, "Zone : plus bas dans l'état ; élément : dessiné plus tard")
+  CON_OUTIL(barreoutils, "plus", "Nouvelle zone", @ET_ZONE, "Ajoute une zone nommée après la zone sélectionnée")
+  CON_OUTIL(barreoutils, "etat", "État", @ET_ETAT, "Sélectionne l'état (format, orientation, marges)")
+  CON_OUTIL(barreoutils, "apercu", "Aperçu PDF", @ET_APERCU, "Génère le PDF avec chaque zone trois fois, variables affichées")
+  CON_OUTIL(barreoutils, "code", "Insérer le code", @ET_CODE, "Insère dans l'éditeur le code Lexis+ qui remplit l'état")
+  CON_OUTIL(barreoutils, "zoomplus", "Zoom +", @ET_ZOOM_PLUS, "Agrandit la page")
+  CON_OUTIL(barreoutils, "zoommoins", "Zoom −", @ET_ZOOM_MOINS, "Réduit la page")
+  ESPACE_BARRE(barreoutils, nul)
+  locale bmasq = OUTIL_SYMBOLE(barreoutils, "masquer", "Palette / Hiérarchie", "", @PALETTEETAT_BASCULER)
+  locale bfen = OUTIL_SYMBOLE(barreoutils, "fenetre", "Palette / Hiérarchie", "", @PALETTEETAT_FENETRE)
   && barre d'état
   etctl.etat = etdlg:ajouter(ui.etiquette("Glisser depuis la palette · bord bas d'une zone : hauteur · " + ;
                                           "Suppr supprime · flèches : 0,5 mm (Maj : 5 mm)"))
@@ -179,11 +179,11 @@ procedure ET_ENREGISTRER
   locale nom = etcanevas:nom()
   locale p = CHEMIN_ETAT(nom)
   locale nouveau = non fichier.existe(p)
-  locale code = etcanevas:code()
-  fichier.ecrire(p, code)
+  locale codeetat = etcanevas:code()
+  fichier.ecrire(p, codeetat)
   locale uid = ed:chercherdocument(p)
   si uid <> nul
-    ed:fixertexte(code, uid, vrai)
+    ed:fixertexte(codeetat, uid, vrai)
   finsi
   etdlg.titre = "Éditeur d'états - etat_" + nom + ".prg"
   ET_ETAT_MESSAGE("Enregistré : etat_" + nom + ".prg  ·  rapport.debut(" + car(34) + nom + ".pdf" + car(34) + ")")

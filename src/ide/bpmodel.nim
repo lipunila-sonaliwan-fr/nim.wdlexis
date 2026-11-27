@@ -83,6 +83,7 @@ type
     line*: int             # ligne source (0-based), -1 pour un nœud créé dans le graphe.
     key*: string           # clé stable (conservation des positions après une nouvelle analyse).
     folded*: bool          # entrée : contenu plié (masqué dans la vue).
+    ret*: string           # entrée : type déclaré du résultat (« : logique »), vide sinon.
 
   Link* = object
     a*, ap*: int           # nœud et broche de sortie
@@ -624,10 +625,12 @@ proc callPins(n: Node, params: seq[ParamInfo], argCount: int) =
 
 proc setEntryParams*(g: Graph, n: Node, params: string) =
   # Paramètres d'une entrée : une sortie de données par paramètre (liens gardés par nom).
-  var names: seq[string]
+  var names, full: seq[string]
   for p in params.split(','):
     let s = p.strip
-    if s.len > 0: names.add s
+    if s.len > 0:
+      full.add s
+      names.add s.split(':')[0].strip      # « a : chaine » : broche « a », type gardé dans le texte.
   var gone: seq[int]
   for p in n.pins:
     if p.varOut:
@@ -644,7 +647,7 @@ proc setEntryParams*(g: Graph, n: Node, params: string) =
       let pid = n.addPin(s, pdOut, pkData)
       n.pins[n.pinIndex(pid)].varOut = true
       n.pins[n.pinIndex(pid)].varName = s
-  n.text = names.join(", ")
+  n.text = full.join(", ")
 
 proc setVarOuts*(g: Graph, n: Node, names: seq[string]) =
   # Sorties « nom de variable » d'un bloc (pour, pour chaque, capturer).
@@ -1788,19 +1791,36 @@ proc takeTrailingComments(sp: SP, sts: var seq[St]): seq[string] =
       result.add spaces(h.ind) & h.text
   sts.setLen(k)
 
-proc parseHeader(sp: SP, L: LLine): tuple[kind, name, params: string] =
+proc parseHeader(sp: SP, L: LLine): tuple[kind, name, params, ret: string] =
+  # procedure NOM[(a [: type], ...)] [: type] ; les types déclarés sont gardés tels quels.
   let t = L.toks
   if t.len < 2 or t[1].kind != btName:
     bpErr(L.first, "nom de procédure attendu ligne " & $(L.first + 1))
   result.kind = t[0].text
   result.name = sp.src[t[1].a ..< t[1].b]
-  if t.len > 2:
-    if not t[2].isOp("(") or not t[^1].isOp(")"):
+  var last = t.len - 1
+  # type du résultat : « : nom [?] » en fin d'en-tête
+  var r = last
+  if r >= 0 and t[r].isOp("?"): dec r
+  if r >= 3 and t[r].kind == btName and t[r - 1].isOp(":"):
+    result.ret = sp.src[t[r].a ..< t[last].b]
+    last = r - 2
+  if last > 1:
+    if not t[2].isOp("(") or not t[last].isOp(")"):
       bpErr(L.first, "paramètres mal formés ligne " & $(L.first + 1))
     var names: seq[string]
-    for k in 3 ..< t.len - 1:
-      if t[k].kind == btName: names.add sp.src[t[k].a ..< t[k].b]
+    var k = 3
+    while k < last:
+      if t[k].kind == btName:
+        var item = sp.src[t[k].a ..< t[k].b]
+        if k + 2 < last + 1 and t[k + 1].isOp(":") and t[k + 2].kind == btName:
+          var e = k + 2
+          if e + 1 < last and t[e + 1].isOp("?"): inc e
+          item.add " : " & sp.src[t[k + 2].a ..< t[e].b]
+          k = e
+        names.add item
       elif not t[k].isOp(","): bpErr(L.first, "paramètres mal formés ligne " & $(L.first + 1))
+      inc k
     result.params = names.join(", ")
 
 proc parseGraph*(text: string): Graph =
@@ -1816,7 +1836,9 @@ proc parseGraph*(text: string): Graph =
       if not L.isComment and L.word in ["procedure", "fonction"] and L.isKeywordUse:
         try:
           let h = sp.parseHeader(L)
-          b.procParams[h.name.toUpperAscii] = splitNames(h.params)
+          var ps: seq[string]
+          for x in splitNames(h.params): ps.add x.split(':')[0].strip
+          b.procParams[h.name.toUpperAscii] = ps
         except BpError: discard
     var mainSts = sp.parseBlock(["finprocedure", "finfonction"])
     if sp.i < sp.ll.len and sp.ll[sp.i].word in ["finprocedure", "finfonction"]:
@@ -1861,6 +1883,7 @@ proc parseGraph*(text: string): Graph =
       inc sp.i
       var body = sp.parseBlock(procWords)
       let e = g.makeNode(nkEntry, title = h.name, text = h.params, mode = h.kind)
+      e.ret = h.ret
       e.dirty = false
       e.key = "P:" & h.name.toUpperAscii
       e.line = L.first
@@ -2222,7 +2245,8 @@ proc generate*(g: Graph): string =
       let params = e.text.strip
       gen.emit(0, e.withTrailing((if e.mode.len > 0: e.mode else: "procedure") & " " &
                (if e.title.strip.len > 0: e.title.strip else: "SANS_NOM") &
-               (if params.len > 0: "(" & params & ")" else: "")))
+               (if params.len > 0: "(" & params & ")" else: (if e.ret.len > 0: "()" else: "")) &
+               (if e.ret.len > 0: " : " & e.ret else: "")))
     gen.genChain(e.id, e.execNext, 0, 2)
     if e.hasEnd: gen.emitRaw(0, e.endLine)
     elif e.orig.len == 0:

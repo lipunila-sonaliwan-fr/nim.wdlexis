@@ -74,6 +74,28 @@ proc rtError*(msg: string) {.noreturn.} =
   raiseValue(strV(msg))
 
 #
+# Types déclarés
+#
+
+proc typeShown(v: Value): string =
+  case v.kind
+  of vkInt: "entier"
+  of vkNum: "décimal"
+  of vkUser: (if v.u.tname.len > 0: v.u.tname else: typeName(v))
+  else: typeName(v)
+
+proc typeError*(what: string, t: TypeSpec, v: Value) {.noreturn.} =
+  rtError("type incorrect pour " & what & " : attendu " & $t & ", reçu " & typeShown(v) &
+          (if v.kind in {vkInt, vkNum, vkStr, vkBool}: " (" & (if v.kind == vkStr: "\"" & v.s & "\"" else: display(v)) & ")" else: ""))
+
+template checkSlotType(fr: Frame, slot: int, v: Value) =
+  # Variable locale déclarée avec un type : contrôle à chaque affectation.
+  if not fr.proto.isNil and slot < fr.proto.slotTypes.len:
+    let ty = fr.proto.slotTypes[slot]
+    if ty.kind != tyAny and not typeMatches(v, ty):
+      typeError("« " & fr.proto.slotNames[slot] & " »", ty, v)
+
+#
 # Interpréteur
 #
 
@@ -449,9 +471,21 @@ proc callLexis(L: Interp, fn: LFunc, args: seq[Value]): seq[Value] =
     fr.slots[i] = Cell(v: (if i < args.len: args[i] else: nilV))
   if p.usesArgs: fr.args = args
   c.frames.add fr
+  if not L.profCall.isNil: L.profCall(L, fr, true)
   try:
+    if p.paramTypes.len > 0:
+      for i in 0 ..< min(p.nparams, p.paramTypes.len):
+        let ty = p.paramTypes[i]
+        if ty.kind != tyAny and not typeMatches(fr.slots[i].v, ty):
+          typeError("le paramètre « " & p.slotNames[i] & " » de " & fn.name.toLowerAscii, ty, fr.slots[i].v)
     if L.execBlock(fr, p.body) == erReturn: result = @[fr.ret]
+    if p.hasRet:
+      let rv = if result.len > 0: result[0] else: nilV
+      if not typeMatches(rv, p.retType):
+        fr.line = p.lastLine
+        typeError("le résultat de " & fn.name.toLowerAscii, p.retType, rv)
   finally:
+    if not L.profCall.isNil: L.profCall(L, fr, false)
     discard c.frames.pop()
 
 proc call*(L: Interp, f: Value, args: seq[Value]): seq[Value] =
@@ -554,10 +588,15 @@ proc eval(L: Interp, fr: Frame, e: Expr): Value =
 proc assign(L: Interp, fr: Frame, target: Expr, v: Value) =
   case target.kind
   of ekLocal:
+    checkSlotType(fr, target.slot, v)
     if fr.slots[target.slot].isNil: fr.slots[target.slot] = Cell(v: v)
     else: fr.slots[target.slot].v = v
   of ekName:
     if target.gname == "SESSION": rtError("la table SESSION ne peut pas être remplacée")
+    if L.globalTypes.len > 0:
+      let ty = L.globalTypes.getOrDefault(target.gname, TypeSpec(kind: tyAny))
+      if ty.kind != tyAny and not typeMatches(v, ty):
+        typeError("la globale « " & target.gname.toLowerAscii & " »", ty, v)
     L.globals.rawSet(target.gname, v)
   of ekIndex: L.setIndex(L.eval(fr, target.obj), L.eval(fr, target.key), v)
   else: rtError("cible d'affectation invalide")
@@ -685,10 +724,14 @@ proc execZone(L: Interp, fr: Frame, s: Stmt): ExecResult =
 proc execStmt(L: Interp, fr: Frame, s: Stmt): ExecResult =
   fr.line = s.line
   if not L.dbg.isNil and L.dbg.active: L.debugLine(fr, s)
+  if not L.profLine.isNil: L.profLine(L, fr, s.line)
   if L.stopRequested(): raise newException(LexisStop, "exécution arrêtée")
   case s.kind
   of skLocal:
     let v = if s.e.len > 0: L.eval(fr, s.e[0]) else: nilV
+    if s.typed and s.e.len > 0:        # sans valeur initiale : nul toléré jusqu'à la 1re affectation
+      if s.ty.kind != tyAny and not typeMatches(v, s.ty):
+        typeError("« " & fr.proto.slotNames[s.slots[0]] & " »", s.ty, v)
     fr.slots[s.slots[0]] = Cell(v: v)
   of skAssign:
     L.assign(fr, s.e[0], L.eval(fr, s.e[1]))
@@ -820,7 +863,13 @@ proc execStmt(L: Interp, fr: Frame, s: Stmt): ExecResult =
     for i, slot in s.slots:
       fr.setLocal(slot, (if i < fr.args.len: fr.args[i] else: nilV))
   of skGlobal:
-    if s.e.len > 0: L.globals.rawSet(s.name, L.eval(fr, s.e[0]))
+    if s.typed:
+      L.globalTypes[s.name] = s.ty
+      if s.e.len > 0:
+        let v = L.eval(fr, s.e[0])
+        if not typeMatches(v, s.ty): typeError("la globale « " & s.name.toLowerAscii & " »", s.ty, v)
+        L.globals.rawSet(s.name, v)
+    elif s.e.len > 0: L.globals.rawSet(s.name, L.eval(fr, s.e[0]))
   of skFree:
     for t in s.e:
       if t.kind == ekName and t.gname == "SESSION": rtError("la table SESSION ne peut pas être supprimée")
@@ -934,6 +983,14 @@ proc load*(L: Interp, src, source: string): Value =
   # Compile du code (et enregistre ses procédures) ; lève SyntaxError.
   L.registerProgram(parseChunk(src, source), true)
 
+proc isTestSource*(rel: string): bool =
+  ## Fichier de tests unitaires (paquet test) : test_*.prg, *_test.prg, *.test.prg ou
+  ## dossier tests/ ; non chargé avec le programme (seulement par le lanceur de tests).
+  let r = rel.replace('\\', '/').toLowerAscii
+  let n = r.extractFilename
+  n.endsWith(".prg") and (n.startsWith("test_") or n.endsWith("_test.prg") or n.endsWith(".test.prg") or
+                          r.startsWith("tests/") or "/tests/" in r)
+
 proc projectFiles*(mainPath: string): seq[string] =
   # Fichiers .prg du dossier du programme (sous-dossiers compris, sauf cachés).
   # Application générée : les sources embarquées remplacent le disque, mais seulement
@@ -952,7 +1009,8 @@ proc projectFiles*(mainPath: string): seq[string] =
   for f in walkDirRec(dir):
     let rel = relativePath(f, dir).replace('\\', '/')
     if rel.startsWith(".") or "/." in rel: continue
-    if f.toLowerAscii.endsWith(".prg") and normalizedPath(absolutePath(f)) != normalizedPath(absolutePath(mainPath)):
+    if f.toLowerAscii.endsWith(".prg") and normalizedPath(absolutePath(f)) != normalizedPath(absolutePath(mainPath)) and
+       not (isTestSource(rel) and not isTestSource(relativePath(mainPath, dir).replace('\\', '/'))):
       result.add f
   result.sort()
 

@@ -25,9 +25,9 @@ propre dossier).
 
 | Atelier natif | Ici |
 | --- | --- |
-| Menus Fichier, Édition, Recherche, Exécuter, Conception, Affichage, Aide | mêmes menus, mêmes libellés (`menus.prg`) |
+| Menus Fichier, Édition, Recherche, Exécuter, Git, Conception, Affichage, Aide | mêmes menus, mêmes libellés (`menus.prg`) |
 | Barre d'outils, barre d'état, position du curseur | oui |
-| Deux fenêtres : outils à gauche (refermable, *Affichage > Fenêtre Projet / Structure / Référence*), documents à droite | oui (`ui.fenetre{x=, y=}`) |
+| Deux fenêtres : outils à gauche (refermable, *Affichage > Projet - Structure - ... : afficher / masquer* ou *fenêtre dédiée*), documents à droite | oui (`ui.fenetre{x=, y=}`) |
 | Page Projet (arbre des fichiers) | oui |
 | Page Structure en arbre : procédures, fonctions (et leurs locales), globales | oui (`lexis.structure`) ; un clic centre aussi la fenêtre Blueprint sur le nœud quand elle montre ce fichier |
 | Page Référence : recherche, paquets par ordre alphabétique, fiche Markdown sous un séparateur horizontal, double-clic pour insérer | oui ; les fiches sont générées en Lexis+ (`reference.prg`) ; dans la fenêtre Blueprint, la palette des entités propose les mêmes fonctions |
@@ -35,13 +35,19 @@ propre dossier).
 | Pastille de couleur par onglet (rouge code, orange formulaire, jaune état) et son clic | oui : la nature et l'action du clic sont décidées en Lexis+ (`edition.prg`) |
 | Fenêtre Blueprint (comme les fenêtres Concepteur) : barre d'outils, fichiers ouverts, palette des entités à masquer, afficher ou détacher dans sa propre fenêtre, graphe éditable, détails, plier / déplier, liens d'appel, icône fichier (double-clic : l'autre fichier en blueprint) | fenêtre native `ui.blueprint` ; ouverture, fermeture, synchronisation (`vb:suivre`) et signaux en Lexis+ |
 | Vue projet (Conception, premier élément) : une colonne par fichier, procédures et fonctions dans l'ordre du source, liens d'appel ; clic : appelées / appelants ; double-clic : le code | oui (`vueprojet.prg`) : analyse `lexis.graphe`, dessin `ui.diagramme`, mêmes dispositions et couleurs |
-| Problèmes pendant la frappe, soulignés, clic pour aller à la ligne | oui (`lexis.verifier`) |
+| Problèmes pendant la frappe, soulignés, clic pour aller à la ligne ; collisions de noms et types déclarés (*Affichage > Signaler les collisions de noms*, *Contrôler les types déclarés*) | oui (`lexis.verifier`, options `collisions` et `types`) |
+| Infobulles au survol d'un nom : procédure (signature, commentaires, fichier), variable (type, portée), fonction de paquet | oui (`ed:infobulles(vrai, dossier)`) |
+| Aller à la définition (F12, Ctrl+clic : procédures, locales, globales, paramètres), usages (Maj+F12, page Usages) | oui (`lexis.definition`, `lexis.usages`, `outils.prg`) |
+| Formater le document (Ctrl+Maj+F), conventions du projet (`.lexisformat`) | oui (`lexis.formater`, `lexis.conventions`) |
+| Tests unitaires (Ctrl+T, page Tests, double-clic : test ou échec) | oui (`test.lancer`, `outils.prg`) |
+| Profiler le programme (page Profil : procédures et lignes, mémoire) | oui (`lexis.executer{surprofil = …}`) |
+| Menu Git : statut, comparaison, annotations, historique, fusion, conflits, validation | oui (`systeme.capturer("git …")`, `outils.prg`) |
 | Vérifier les fichiers ouverts | oui |
 | Exécuter, console avec saisie, erreur → ligne fautive | oui (`lexis.executer`) |
 | Débogueur : F5, F9, F10, F11, Maj+F11, Pause, Arrêter | oui (`surpause`, `x:pas()`…) |
-| Variables, Pile d'appels (clic : variables du cadre) | oui |
-| Rechercher, Remplacer, F3 / Ctrl+H, Aller à la ligne, F12 définition | oui (`ui.rechercher`, `ed:chercher`…) |
-| Police, minicarte, thème sombre / clair, options d'analyse | oui, conservés dans `~/.wdlexis-atelier.json` |
+| Variables, Pile d'appels (clic : variables du cadre) ; en pause, tables consultables et modifiables (▸, Remonter, Ajouter, Supprimer ; littéraux `nul`, `{}`, changement de type) | oui (`x:table`, `x:modifiertable`, `x:supprimerentree`, `x:modifier`) |
+| Rechercher, Remplacer, F3 / Ctrl+H, Aller à la ligne | oui (`ui.rechercher`, `ed:chercher`…) |
+| Police, minicarte, thème sombre / clair, options d'analyse (dont collisions et types) | oui, conservés dans `~/.wdlexis-atelier.json` |
 | Session (fichiers ouverts), arguments, fichier principal | oui, dans `.wdlexis/atelier.json` du projet |
 | Fichier > Exporter le projet (archive)… / Importer un projet (archive)… : `.zip` ou `.tar.gz`, dossier de tête au nom du projet, sans fichiers cachés ni `distribution/` (réglages de génération gardés) ; l'import refuse d'écraser un projet existant puis ouvre le projet | oui (`projet.prg`, paquet `archive`) ; natif : `ide/projarchive.nim` |
 | Générer l'application, icône avec aperçu et cadrage (glisser le cadre, molette ou coin : taille) | boîte en Lexis+ (`ui.cadrage`), compilation par l'outil `wdlexisgen` (`--icone=`, `--cadrage=`) ; mêmes réglages (`.wdlexis/application.ini`) |
@@ -52,14 +58,17 @@ propre dossier).
 
 | Partie | Où |
 | --- | --- |
-| Toute l'interface, les menus, la logique d'atelier | les 11 fichiers `.prg` (environ 4 400 lignes) |
+| Toute l'interface, les menus, la logique d'atelier | les 12 fichiers `.prg` (environ 5 300 lignes) |
 | Éditeur de code | natif : `ui.editeur` (`ide/codeeditor.nim`) |
 | Fenêtre Blueprint : modèle code ↔ graphe, canevas, palette des entités (DockPane), détails | natif : `ui.blueprint` (`ide/bpmodel.nim`, `ide/blueprint.nim`, `ide/dockpane.nim`) |
 | Pastilles : nature des documents, clic, ouverture et fermeture des vues, Structure et fenêtre Blueprint | `edition.prg`, `projet.prg` |
 | Vue projet : analyse du projet | natif : `lexis.graphe` (`ide/lexislint.nim`) |
 | Vue projet : fenêtre, colonnes, liens, mise en évidence, ouverture du code | `vueprojet.prg` |
 | Cadrage de l'icône (aperçu, cadre) | natif : `ui.cadrage` (`ide/cropview.nim`) ; la boîte est dans `generation.prg` |
-| Analyse du langage | natif : `lexis.verifier`, `lexis.structure` (`ide/lexislint.nim`) |
+| Analyse du langage | natif : `lexis.verifier`, `lexis.structure` (`ide/lexislint.nim`, `ide/lexisanalyse.nim`) |
+| Service de langage : définition, usages, infobulles ; formateur | natif : `lexis.definition`, `lexis.usages`, `lexis.infobulle`, `lexis.formater`, `ed:infobulles` (`ide/langservice.nim`, `ide/formateur.nim`) |
+| Pages Usages, Tests, Profil, Git ; navigation dans les tables en pause | `outils.prg`, `execution.prg` |
+| Lanceur de tests, profileur | natif : paquet `test` (`paquets/pkg_test.nim`), `lexis/profiler.nim` |
 | Exécution et débogage dans un interpréteur séparé | natif : `lexis.executer` (`paquets/pkg_lexis.nim`) |
 | Compilation de l'application | outil `wdlexisgen` (chaîne Zig) |
 | Concepteur : canevas, palette, modèle, génération de `form_<nom>.prg` | natif : `ui.concepteur`, `ui.palette` (`ide/designer.nim`, `ide/formmodel.nim`) |

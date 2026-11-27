@@ -29,15 +29,19 @@ from std/unicode import runeLen
 import ../lexis/[api, zones]
 from ../lexis/lexer import SyntaxError
 from ../lexis/parser import Program, parseChunk
-import ../ide/[lexislang, lexislint, langdocs]
+import ../ide/[lexislang, lexislint, langdocs, langservice, formateur, inspecteur]
+from ../ide/lexisanalyse import OccKind
+import ../lexis/profiler
+import pkg_profileur          # reportV : rapport du profileur en table Lexis+
 from pkg_systeme import LexisExit
 import pkg_interface    # openWindows, closeAllWindows : fenêtres du programme exécuté.
 
 type
-  EvKind = enum ekOut, ekAsk, ekEnd, ekPause
+  EvKind = enum ekOut, ekAsk, ekEnd, ekPause, ekProfile
 
   VarData = object
     name, value, kind, scope: string
+    expandable: bool               # table : contenu consultable (x:table)
 
   FrameData = object
     name, source: string
@@ -57,6 +61,7 @@ type
     source: string
     line: int
     pause: PauseData
+    profile: Profiler
 
   LExec* = ref object of LUser
     path: string
@@ -71,8 +76,8 @@ type
     running, waiting, stopping, ended: bool
     ownerClosed: bool              # l'appelant s'est terminé : plus aucun appel vers lui.
     endEv: ExecEvent
-    hOut, hAsk, hEnd, hPause: Value
-    debug, stepFirst, paused: bool
+    hOut, hAsk, hEnd, hPause, hProfile: Value
+    debug, stepFirst, paused, profile: bool
     breakpoints: seq[(string, seq[int])]    # posés avant le lancement.
     dbg: Debugger
     pauseCtx: Ctx                  # pile arrêtée (débogueur en pause) : modification des variables.
@@ -85,7 +90,8 @@ var execMethods {.threadvar.}: LTable
 #
 
 proc lintOpts(o: LTable): LintOptions =
-  LintOptions(flagGlobals: optField(o, "globales", true), unknownCalls: optField(o, "appelsinconnus", true))
+  LintOptions(flagGlobals: optField(o, "globales", true), unknownCalls: optField(o, "appelsinconnus", true),
+              skipCollisions: not optField(o, "collisions", true), skipTypes: not optField(o, "types", true))
 
 proc sevName(s: Severity): string =
   case s
@@ -98,13 +104,50 @@ proc verify(source, name, project: string, opts: LintOptions): seq[Value] =
   let (toks, _) = lexAll(lines)
   let (_, local) = collectSymbols(lines, toks)
   var known = local
-  if project.len > 0: known = indexProject(project).knownNamesFor(local)
-  for d in lint(lines, toks, known, opts, name):
+  var idx = initProjectIndex()
+  if project.len > 0:
+    idx = indexProject(project)
+    known = idx.knownNamesFor(local)
+  let full = if project.len > 0 and not name.isAbsolute: project / name else: name
+  for d in lint(lines, toks, known, opts, full, idx):
     # colonnes en caractères (1-based) pour Lexis+.
     let l = if d.line < lines.len: lines[d.line] else: ""
     let col = l[0 ..< min(d.col, l.len)].runeLen + 1
     result.add record({"ligne": intV(d.line + 1), "colonne": intV(col), "longueur": intV(d.len),
                        "genre": strV(sevName(d.sev)), "message": strV(d.msg)})
+
+proc byteColOf(line: string, charCol: int): int =
+  # colonne en caractères (1-based) -> octets (0-based)
+  var n = 1
+  var i = 0
+  while i < line.len and n < charCol:
+    let c = ord(line[i])
+    i += (if c < 0x80: 1 elif c < 0xE0: 2 elif c < 0xF0: 3 else: 4)
+    inc n
+  min(i, line.len)
+
+proc servicePos(L: Interp, a: seq[Value], fname: string): (Workspace, string, int, int) =
+  # lexis.definition / usages / infobulle (source, ligne, colonne, [{nom=, projet=}])
+  let src = L.checkStr(a, 1, fname)
+  let line = int(L.checkInt(a, 2, fname)) - 1
+  let col = int(L.checkInt(a, 3, fname))
+  let o = if arg(a, 4).kind == vkTable: a[3].t else: nil
+  let project = optField(o, "projet", "")
+  let name = optField(o, "nom", "document.prg")
+  let path = if name.isAbsolute or project.len == 0: name else: project / name
+  let ws = newWorkspace(project)
+  ws.setText(path, src)
+  let lines = src.replace("\r\n", "\n").split('\n')
+  let lt = if line >= 0 and line < lines.len: lines[line] else: ""
+  (ws, norm(path), line, byteColOf(lt, col))
+
+proc locV(ws: Workspace, r: RefLoc): Value =
+  let lines = ws.textOf(r.file).split('\n')
+  let lt = if r.line < lines.len: lines[r.line] else: ""
+  let col = lt[0 ..< min(r.col, lt.len)].runeLen + 1
+  record({"chemin": strV(r.file), "ligne": intV(r.line + 1), "colonne": intV(col), "longueur": intV(r.len),
+          "genre": strV(if r.decl: "déclaration" else: $r.kind), "declaration": boolV(r.decl),
+          "code": strV(lt.strip)})
 
 proc structureOf(source: string): seq[Value] =
   let lines = source.replace("\r\n", "\n").split('\n')
@@ -179,7 +222,8 @@ proc frameVars(L: Interp, f: Frame): seq[VarData] =
   for i, c in f.slots:
     if not c.isNil and i < f.proto.slotNames.len:
       result.add VarData(name: f.proto.slotNames[i], value: L.short(c.v), kind: kindOf(c.v),
-                         scope: (if i < f.proto.nparams: "paramètre" else: "locale"))
+                         scope: (if i < f.proto.nparams: "paramètre" else: "locale"),
+                         expandable: c.v.kind == vkTable)
 
 proc snapshot(L: Interp, c: Ctx, builtin: HashSet[string]): PauseData =
   for i in countdown(c.frames.high, 0):
@@ -192,7 +236,8 @@ proc snapshot(L: Interp, c: Ctx, builtin: HashSet[string]): PauseData =
     result.line = result.frames[0].line
   for k, v in L.globals.pairs:
     if k.kind == vkStr and k.s notin builtin:
-      result.globals.add VarData(name: k.s.toLowerAscii, value: L.short(v), kind: kindOf(v), scope: "globale")
+      result.globals.add VarData(name: k.s.toLowerAscii, value: L.short(v), kind: kindOf(v), scope: "globale",
+                                 expandable: v.kind == vkTable)
   let z = L.currentZoneInfo()
   if z.len > 0:
     result.globals.add VarData(name: "zone", value: z, kind: "zone", scope: "base")
@@ -202,7 +247,7 @@ proc varsV(vs: seq[VarData]): Value =
   let t = newLTable(vs.len)
   for v in vs:
     t.arr.add record({"nom": strV(v.name), "valeur": strV(v.value), "genre": strV(v.kind),
-                      "portee": strV(v.scope)})
+                      "portee": strV(v.scope), "table": boolV(v.expandable)})
   tableV(t)
 
 proc pauseV(p: PauseData): Value =
@@ -258,6 +303,7 @@ proc runChild(x: LExec) {.thread.} =
     var ev = ExecEvent(kind: ekEnd, ok: true)
     L.enter()
     curCtx = Ctx()
+    if x.profile: discard L.startProfiler()
     try:
       var vargs: seq[Value]
       for a in x.args: vargs.add strV(a)
@@ -279,6 +325,9 @@ proc runChild(x: LExec) {.thread.} =
       ev = ExecEvent(kind: ekEnd, ok: false, text: "lecture impossible : " & x.path)
     except Exception as e:
       ev = ExecEvent(kind: ekEnd, ok: false, text: "erreur interne : " & e.msg)
+    if x.profile:
+      let p = L.stopProfiler()
+      if not p.isNil: x.push(ExecEvent(kind: ekProfile, profile: p))
     try: L.closeAllWindows()
     except Exception: discard
     try: L.shutdown()
@@ -326,6 +375,8 @@ proc dispatch(x: LExec) {.thread.} =
             withLock x.lock: x.pending.add e.text
         of ekAsk: x.deliver(x.hAsk, @[strV(e.text)])
         of ekPause: x.deliver(x.hPause, @[pauseV(e.pause)])
+        of ekProfile:
+          if x.hProfile.kind != vkNil: x.deliver(x.hProfile, @[reportV(e.profile)])
         of ekEnd:
           withLock x.lock:
             x.endEv = e
@@ -400,6 +451,8 @@ proc startExec(L: Interp, path: string, o: LTable): Value =
   x.hAsk = L.handlerOf(o, "surdemande")
   x.hEnd = L.handlerOf(o, "surfin")
   x.hPause = L.handlerOf(o, "surpause")
+  x.hProfile = L.handlerOf(o, "surprofil")
+  x.profile = optField(o, "profil", false) or x.hProfile.kind != vkNil
   x.debug = optField(o, "deboguer", false) or x.hPause.kind != vkNil
   x.stepFirst = optField(o, "pasapas", false)
   if not o.isNil: x.breakpoints = L.breakpointsOf(o.rawGet(cle("pointsarret")))
@@ -494,25 +547,7 @@ proc openLexis(L: Interp): Value =
       c = x.pauseCtx
       child = x.child
     if c.isNil or child.isNil or not x.paused: rtError("le programme n'est pas en pause")
-    proc parseLike(old: Value): (bool, Value, string) =
-      let t = text.strip
-      case old.kind
-      of vkStr:
-        var s = text
-        if s.len >= 2 and s[0] == '"' and s[^1] == '"': s = s[1 .. ^2].replace("\\n", "\n")
-        (true, strV(s), "")
-      of vkInt:
-        try: (true, intV(parseBiggestInt(t)), "")
-        except ValueError: (false, old, "entier attendu : « " & t & " »")
-      of vkNum:
-        try: (true, numV(parseFloat(t.replace(',', '.'))), "")
-        except ValueError: (false, old, "nombre décimal attendu : « " & t & " »")
-      of vkBool:
-        case t.toLowerAscii
-        of "vrai", "true", "1", "oui": (true, boolV(true), "")
-        of "faux", "false", "0", "non": (true, boolV(false), "")
-        else: (false, old, "vrai ou faux attendu")
-      else: (false, old, "seules les chaînes, les entiers, les décimaux et les logiques se modifient")
+    proc parseLike(old: Value): (bool, Value, string) = parseValue(old, text)
     if scope == "globale":
       for k, v in child.globals.pairs:
         if k.kind == vkStr and cmpIgnoreCase(k.s, name) == 0:
@@ -535,6 +570,47 @@ proc openLexis(L: Interp): Value =
         rtError("variable introuvable : " & name)
       inc n
     rtError("cadre de pile introuvable")
+  proc pausedRoot(L: Interp, a: seq[Value], fname: string): (Interp, Value, seq[string]) =
+    # (interpréteur du programme, variable de départ, chemin de clefs) pour x:table…
+    let x = L.checkExec(a, fname)
+    let name = L.checkStr(a, 2, fname)
+    let frameIdx = (if arg(a, 3).kind == vkNil: 1 else: int(L.checkInt(a, 3, fname))) - 1
+    let scope = L.optStr(a, 4, fname, "")
+    var path: seq[string]
+    let pv = arg(a, 5)
+    if pv.kind == vkTable:
+      for i in 1 .. pv.t.rawLen: path.add L.tostr(pv.t.rawGet(intV(i)))
+    var c: Ctx
+    var child: Interp
+    withLock x.lock:
+      c = x.pauseCtx
+      child = x.child
+    if c.isNil or child.isNil or not x.paused: rtError("le programme n'est pas en pause")
+    let (ok, root) = child.rootValue(c, frameIdx, name, scope)
+    if not ok: rtError("variable introuvable : " & name)
+    (child, root, path)
+  em.fn "table", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # x:table(nom, [cadre], [portee], [chemin]) : en pause, entrées de la table (variable
+    # puis clefs codées du chemin) : {nom, valeur, genre, clef, table}.
+    let (child, root, path) = L.pausedRoot(a, "table")
+    let (ok, es, msg) = child.tableEntries(root, path)
+    if not ok: rtError(msg)
+    var items: seq[Value]
+    for e in es:
+      items.add record({"nom": strV(e.name), "valeur": strV(e.value), "genre": strV(e.kind),
+                        "clef": strV(e.key), "table": boolV(e.expandable)})
+    @[listV(items)]
+  em.fn "modifiertable", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # x:modifiertable(nom, cadre, portee, chemin, clef, valeur) : rend la valeur affichée.
+    let (child, root, path) = L.pausedRoot(a, "modifiertable")
+    let (ok, shown) = child.setEntry(root, path, L.checkStr(a, 6, "modifiertable"), L.tostr(arg(a, 7)))
+    if not ok: rtError(shown)
+    @[strV(shown)]
+  em.fn "supprimerentree", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # x:supprimerentree(nom, cadre, portee, chemin, clef)
+    let (child, root, path) = L.pausedRoot(a, "supprimerentree")
+    let (ok, msg) = child.setEntry(root, path, L.checkStr(a, 6, "supprimerentree"), "", remove = true)
+    if not ok: rtError(msg)
   em.fn "enpause", proc (L: Interp, a: seq[Value]): seq[Value] =
     let x = L.checkExec(a, "enpause")
     var r = false
@@ -581,6 +657,37 @@ proc openLexis(L: Interp): Value =
     let src = L.checkStr(a, 1, "verifier")
     let o = if arg(a, 2).kind == vkTable: a[1].t else: nil
     @[listV(verify(src, optField(o, "nom", "fichier"), optField(o, "projet", ""), lintOpts(o)))]
+  m.fn "definition", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let (ws, path, line, col) = L.servicePos(a, "definition")
+    var items: seq[Value]
+    for r in ws.definition(path, line, col): items.add ws.locV(r)
+    @[listV(items)]
+  m.fn "usages", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let (ws, path, line, col) = L.servicePos(a, "usages")
+    var items: seq[Value]
+    for r in ws.references(path, line, col, true): items.add ws.locV(r)
+    @[listV(items)]
+  m.fn "infobulle", proc (L: Interp, a: seq[Value]): seq[Value] =
+    let (ws, path, line, col) = L.servicePos(a, "infobulle")
+    let h = ws.hover(path, line, col)
+    if not h.found or h.markdown.len == 0: return @[nilV]
+    @[strV(plainHover(h.markdown))]
+  m.fn "formater", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # lexis.formater(source, [dossier]) : conventions du .lexisformat du dossier (ou parent).
+    let src = L.checkStr(a, 1, "formater")
+    let dir = L.optStr(a, 2, "formater", "")
+    let r = formatText(src, if dir.len > 0: loadFormatOptions(dir) else: defaultFormat())
+    @[record({"texte": strV(r.text), "modifie": boolV(r.changed), "ok": boolV(r.safe),
+              "message": strV(r.message)})]
+  m.fn "conventions", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # lexis.conventions([dossier]) : {fichier, texte} du .lexisformat en vigueur (fichier
+    # vide : conventions par défaut, texte prêt à enregistrer).
+    let dir = L.optStr(a, 1, "conventions", "")
+    let f = if dir.len > 0: findFormatFile(dir) else: ""
+    if f.len > 0:
+      try: return @[record({"fichier": strV(f), "texte": strV(readFile(f))})]
+      except IOError, OSError: discard
+    @[record({"fichier": strV(""), "texte": strV(formatOptionsText(defaultFormat()))})]
   m.fn "structure", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[listV(structureOf(L.checkStr(a, 1, "structure")))]
   m.fn "graphe", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -636,13 +743,18 @@ proc openLexis(L: Interp): Value =
 const lexisDocs = [
   "lexis.charger(chemin)", "Charge les procédures et fonctions d'un fichier .prg dans le programme en cours (extensions, greffons) ; renvoie la liste de leurs noms. Le fichier ne doit contenir que des procédures ; recharger le même fichier remplace ses procédures.",
   "lexis.procedure(nom)", "Référence d'une procédure ou d'une fonction par son nom (nul si elle n'existe pas) : appeler(ref, ...).",
-  "lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=}])", "Analyse un texte Lexis+ comme l'atelier (syntaxe, variables non déclarées, appels inconnus) ; renvoie la liste des problèmes {ligne, colonne, longueur, genre, message}. genre : erreur, avertissement, info ; projet : dossier dont les procédures sont connues.",
+  "lexis.verifier(source, [{nom=, projet=, globales=, appelsinconnus=, collisions=, types=}])", "Analyse un texte Lexis+ comme l'atelier (syntaxe, variables non déclarées, appels inconnus, collisions de noms : même variable écrite S et s, variable qui porte le nom d'une procédure, d'un paquet ou d'une fonction intégrée, locale qui masque une globale, procédure définie deux fois ; types déclarés : littéraux incompatibles, arguments manquants, types inconnus) ; renvoie la liste des problèmes {ligne, colonne, longueur, genre, message}. genre : erreur, avertissement, info ; projet : dossier dont les procédures sont connues.",
   "lexis.graphe(dossier)", "Graphe du projet (vue projet de l'atelier) : {dossier, fichiers}, fichiers .prg triés par chemin (dossiers cachés exclus), chacun {chemin, relatif, lignes, appels, entites} ; entites : {nom (majuscules), affichage (nom(paramètres)), genre (procedure ou fonction), ligne, derniere, appels} ; appels : procédures du projet appelées (ou référencées par @NOM), celles du code de premier niveau pour le fichier.",
+  "lexis.definition(source, ligne, colonne, [{nom=, projet=}])", "Définition du symbole à cette position (procédure, variable locale ou globale, paramètre), dans le texte (nom : son chemin) et les fichiers du projet : liste de {chemin, ligne, colonne, longueur, genre, declaration, code}.",
+  "lexis.usages(source, ligne, colonne, [{nom=, projet=}])", "Usages du symbole à cette position dans le texte et le projet (déclarations, appels, lectures, affectations, références @NOM) : liste de {chemin, ligne, colonne, longueur, genre, declaration, code}.",
+  "lexis.infobulle(source, ligne, colonne, [{nom=, projet=}])", "Texte d'infobulle du nom à cette position (signature et commentaires d'une procédure, type et portée d'une variable, documentation d'une fonction ou d'un paquet) ; nul sinon.",
+  "lexis.formater(source, [dossier])", "Formate un texte Lexis+ selon les conventions du fichier .lexisformat du dossier (ou d'un parent ; par défaut sinon) : {texte, modifie, ok, message} ; ok faux : résultat refusé, texte d'origine rendu.",
+  "lexis.conventions([dossier])", "Conventions de formatage en vigueur : {fichier, texte} ; fichier vide : conventions par défaut (texte prêt à enregistrer sous .lexisformat).",
   "lexis.structure(source)", "Procédures, fonctions et variables globales définies dans un texte : liste de {nom, genre, ligne, colonne}.",
   "lexis.documentation([paquet])", "Documentation des fonctions intégrées et des paquets : liste de {paquet, signature, nom, proprietaire, methode, description}.",
   "lexis.paquets()", "Paquets disponibles : liste de {nom, description, global}.",
   "lexis.motscles()", "Mots-clés du langage.",
-  "lexis.executer(chemin, [{arguments=, sursortie=, surdemande=, surfin=, deboguer=, pasapas=, pointsarret=, surpause=}])", "Exécute un programme .prg dans un interpréteur séparé, sans bloquer l'appelant ; renvoie l'exécution. sursortie : reçoit le texte écrit ; surdemande : reçoit l'invite d'une saisie ; surfin : reçoit {ok, message, source, ligne}. deboguer : active le débogueur ; pasapas : pause sur la première instruction ; pointsarret : {{source=, lignes={…}}} ; surpause : reçoit {source, ligne, pile, globales}.",
+  "lexis.executer(chemin, [{arguments=, sursortie=, surdemande=, surfin=, deboguer=, pasapas=, pointsarret=, surpause=, profil=, surprofil=}])", "Exécute un programme .prg dans un interpréteur séparé, sans bloquer l'appelant ; renvoie l'exécution. sursortie : reçoit le texte écrit ; surdemande : reçoit l'invite d'une saisie ; surfin : reçoit {ok, message, source, ligne}. deboguer : active le débogueur ; pasapas : pause sur la première instruction ; pointsarret : {{source=, lignes={…}}} ; surpause : reçoit {source, ligne, pile, globales} (variables {nom, valeur, genre, portee, table}). profil, surprofil : mesure le programme ; surprofil reçoit le rapport du profileur (avant surfin).",
   "lexis.outil(nom)", "Chemin d'un outil livré à côté du runtime (wdlexisgen…) ; nul s'il est absent.",
   "x:envoyer(texte)", "Fournit une ligne à la saisie en attente du programme exécuté.",
   "x:lire()", "Sortie accumulée depuis la dernière lecture (sans sursortie).",
@@ -657,7 +769,11 @@ const lexisDocs = [
   "x:sortir()", "Termine la procédure en cours puis s'arrête.",
   "x:pause()", "Interrompt le programme à la prochaine instruction.",
   "x:enpause()", "Vrai si le programme est en pause.",
-  "x:pointsarret(source, lignes)", "Remplace les points d'arrêt d'un fichier pendant l'exécution."]
+  "x:pointsarret(source, lignes)", "Remplace les points d'arrêt d'un fichier pendant l'exécution.",
+  "x:modifier(nom, valeur, [cadre], [portee])", "En pause : change une variable (même type, ou littéral : 12, 1.5, \"texte\", vrai, faux, nul, {}) ; rend la valeur affichée.",
+  "x:table(nom, [cadre], [portee], [chemin])", "En pause : entrées de la table (variable puis clefs du chemin, codées comme le champ clef) : {nom, valeur, genre, clef, table}.",
+  "x:modifiertable(nom, cadre, portee, chemin, clef, valeur)", "En pause : modifie ou ajoute une entrée (clef codée, ou saisie : entier, nom, \"texte exact\") ; rend la valeur affichée.",
+  "x:supprimerentree(nom, cadre, portee, chemin, clef)", "En pause : supprime une entrée de la table."]
 
 registerPackage PackageDef(name: "lexis", open: openLexis,
   description: "Le langage depuis Lexis+ : analyse, documentation et exécution de programmes",

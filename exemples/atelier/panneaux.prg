@@ -174,7 +174,7 @@ fonction OUTIL_SYMBOLE(barre_, icone, libelle, bulle, proc)
   finsi
 retourner b
 
-procedure ESPACE(barre_, largeur)
+procedure ESPACE_BARRE(barre_, largeur)
   locale s = barre_:ajouter(ui.etiquette(""))
   si largeur = nul
     s.poids = 1

@@ -33,7 +33,7 @@ import lexis/api
 from lexis/lexer import SyntaxError
 from lexis/fonctions import toJsonNode, fromJsonNode
 
-const WdlxVersion* = "2.0.1"
+const WdlxVersion* = "2.1.1"
 
 proc wdlx_bundle_data(): ptr UncheckedArray[uint8] {.importc, cdecl.}
 proc wdlx_bundle_size(): csize_t {.importc, cdecl.}

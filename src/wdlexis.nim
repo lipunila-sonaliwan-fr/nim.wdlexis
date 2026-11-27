@@ -3,7 +3,7 @@
   __      ____| | | _____  _(_)___   _
   \ \ /\ / / _` | |/ _ \ \/ / / __|_| |_
    \ V  V / (_| | |  __/>  <| \__ \_   _|
-    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 2.0.1,
+    \_/\_/ \__,_|_|\___/_/\_\_|___/ |_|   [S]tudio 2.1.1,
       Développez naturellement vos applications métier.
 
   wdlexis+ - atelier pour le langage Lexis+, construit sur wdgui.
@@ -49,6 +49,11 @@ import ide/dockpane
 from ide/etats import isReportFile
 import lexis/api
 import paquets/tous
+import std/osproc
+import ide/[langservice, formateur]
+from ide/lexisanalyse import OccKind
+import lexis/profiler
+import paquets/pkg_test
 
 const
   AppName = "wdlexis+"
@@ -120,8 +125,10 @@ type
     pause: PauseInfo
     paused: bool
     varFrame: int                                   # cadre affiché dans la page Variables
-    varRows: seq[tuple[name, value, kind, scope: string]]
+    varRows: seq[VarInfo]
     varSel: int                                     # ligne choisie pour la modification (-1 : aucune)
+    varPath: seq[tuple[label, key: string]]         # table consultée : variable puis clefs (vide : variables)
+    varRoot: VarInfo                                # variable de départ de la table consultée
     consoleBuf: string
 
 var
@@ -135,7 +142,7 @@ var
     tblProb, edOut, edIn, btnSend, btnCopy, btnClear, tblVars, lstStack, lblStatus, lblPos,
     btnOpen, btnNew, btnSave, btnCheck, btnRun, btnDebug, btnStepIn, btnStepOver,
     btnStepOut, btnCont, btnPause, btnStop, btnPaneL, btnWinL, btnPaneB, btnWinB,
-    btnDup, btnRen, btnDel, edVar, lblVar, btnVarSet: ControlId
+    btnDup, btnRen, btnDel, edVar, lblVar, btnVarSet, btnVarUp, btnVarAdd, btnVarDel: ControlId
   gLock: Lock
   st: AppState
   lintGen: Atomic[int]
@@ -258,7 +265,12 @@ proc refreshRunButtons() =
 # Projet
 #
 
+proc resetWorkspace()
+proc wsUpdate(path, text: string)
+proc showProfile(p: Profiler)
+
 proc reindex() =
+  resetWorkspace()
   let idx = indexProject(root())
   var names: seq[string]
   for n in idx.names: names.add n
@@ -440,6 +452,7 @@ proc refreshOutline(syms: seq[Symbol], uid: int) =
 proc lintDoc(uid0: int) =
   let uid = codeOf(uid0)
   if uid < 0: return
+  if editorLanguage(edId, uid) == "texte": return   # comparaison, annotations… : pas d'analyse
   if editorKind(edId, uid) == dkText and editorInfo(edId, uid).path.len > 0 and
      not editorInfo(edId, uid).path.toLowerAscii.endsWith(".prg"):
     return                       # texte, Markdown, SQL… : pas d'analyse Lexis+.
@@ -453,9 +466,14 @@ proc lintDoc(uid0: int) =
   withState:
     known = knownNamesFor(st.index, localNames)
     o = st.settings
+  var idx: ProjectIndex
+  withState: idx = st.index
+  let src = editorSourceName(edId, uid)
+  wsUpdate(src, snap.lines.join("\n"))
   let diags = lint(snap.lines, toks, known,
-                   LintOptions(flagGlobals: o.flagGlobals, unknownCalls: o.unknownCalls),
-                   editorSourceName(edId, uid))
+                   LintOptions(flagGlobals: o.flagGlobals, unknownCalls: o.unknownCalls,
+                               skipCollisions: not o.collisions, skipTypes: not o.typeChecks),
+                   src, idx)
   editorSetDiagnostics(edId, uid, snap.version, diags)
   withState:
     st.diagByUid[uid] = (title: info.title, path: info.path, diags: diags)
@@ -721,72 +739,198 @@ proc allBreakpoints(): seq[(string, seq[int])] =
     for l in editorBreakpoints(edId, d.uid): lines.add l + 1
     result.add (editorSourceName(edId, d.uid), lines)
 
-proc showPause(info: PauseInfo, frameIdx: int) =
+proc renderVars(rows: seq[VarInfo]) =
   tableDeleteAll(tblVars)
-  var rows: seq[tuple[name, value, kind, scope: string]]
-  if frameIdx < info.frames.len:
-    for v in info.frames[frameIdx].vars: rows.add (v.name, v.value, v.kind, v.scope)
-  for v in info.globals: rows.add (v.name, v.value, v.kind, v.scope)
-  for r in rows: discard tableAddLine(tblVars, r.name, r.value, r.kind, r.scope)
+  for r in rows:
+    discard tableAddLine(tblVars, (if r.expandable: "▸ " else: "  ") & r.name, r.value, r.kind, r.scope)
+  var crumbs: seq[string]
   withState:
-    st.varFrame = frameIdx
     st.varRows = rows
     st.varSel = -1
-  lblVar.caption = "Choisir une variable (chaîne, entier, décimal, booléen) pour modifier sa valeur :"
+    for p in st.varPath: crumbs.add p.label
+  if crumbs.len > 0:
+    lblVar.caption = "Table " & crumbs.join(" › ") & " : choisir une entrée pour la modifier (double-clic sur ▸ : ouvrir)"
+    btnVarUp.state = csActive
+    btnVarAdd.state = csActive
+  else:
+    lblVar.caption = "Choisir une variable pour la modifier ; double-clic sur une table (▸) : voir son contenu"
+    btnVarUp.state = csGrayed
+    btnVarAdd.state = csGrayed
+  btnVarDel.state = csGrayed
   edVar.value = ""
   edVar.state = csGrayed
   btnVarSet.state = csGrayed
 
-proc editableKind(kind: string): bool = kind in ["chaine", "entier", "décimal", "logique"]
+proc showPause(info: PauseInfo, frameIdx: int) =
+  var rows: seq[VarInfo]
+  if frameIdx < info.frames.len:
+    for v in info.frames[frameIdx].vars: rows.add v
+  for v in info.globals: rows.add v
+  withState:
+    st.varFrame = frameIdx
+    st.varPath.setLen(0)
+  renderVars(rows)
 
-proc selectVariable(i: int) =
-  # Ligne i (0-based) de la page Variables : la valeur passe dans le champ de modification.
-  var row: tuple[name, value, kind, scope: string]
+proc varKeys(): seq[string] =
+  withState:
+    for p in st.varPath: result.add p.key
+
+proc refreshTableView(): bool =
+  # Contenu de la table ouverte (chemin courant) ; faux si elle n'existe plus.
+  var root: VarInfo
+  var frame = 0
+  var depth = 0
+  withState:
+    root = st.varRoot
+    frame = st.varFrame
+    depth = st.varPath.len
+  if depth == 0: return false
+  let (ok, rows, msg) = inspectTable(frame, root.name, root.scope, varKeys()[1 .. ^1])
+  if not ok:
+    status("Table : " & msg)
+    return false
+  renderVars(rows)
+  true
+
+proc openTable(i: int) =
+  var row: VarInfo
   var paused = false
   withState:
     paused = st.paused
+    if i >= 0 and i < st.varRows.len: row = st.varRows[i]
+  if row.name.len == 0 or not row.expandable: return
+  if not paused:
+    status("Le contenu des tables se consulte en pause (point d'arrêt, pas à pas)")
+    return
+  withState:
+    if st.varPath.len == 0:
+      st.varRoot = row
+      st.varPath.add (label: row.name, key: "")
+    else:
+      st.varPath.add (label: row.name, key: row.key)
+  if not refreshTableView():
+    withState: discard st.varPath.pop()
+
+proc varUp() =
+  var depth = 0
+  var info: PauseInfo
+  var frame = 0
+  withState:
+    if st.varPath.len > 0: discard st.varPath.pop()
+    depth = st.varPath.len
+    info = st.pause
+    frame = st.varFrame
+  if depth == 0: showPause(info, frame)
+  elif not refreshTableView(): showPause(info, frame)
+
+proc editableKind(kind: string): bool = kind in ["chaine", "entier", "décimal", "logique", "nul"]
+
+proc selectVariable(i: int) =
+  # Ligne i (0-based) de la page Variables : la valeur passe dans le champ de modification.
+  var row: VarInfo
+  var paused = false
+  var inTable = false
+  withState:
+    paused = st.paused
+    inTable = st.varPath.len > 0
     if i >= 0 and i < st.varRows.len:
       row = st.varRows[i]
       st.varSel = i
   if row.name.len == 0: return
-  if not paused or not editableKind(row.kind):
-    lblVar.caption = row.name & " (" & row.kind & ") : modifiable seulement en pause, pour les chaînes, " &
-                     "entiers, décimaux et booléens"
+  btnVarDel.state = (if paused and inTable: csActive else: csGrayed)
+  if not paused:
+    lblVar.caption = row.name & " (" & row.kind & ") : modifiable seulement en pause"
     edVar.state = csGrayed
     btnVarSet.state = csGrayed
     return
-  var v = row.value
+  var v = if editableKind(row.kind): row.value else: ""
   if row.kind == "chaine" and v.len >= 2 and v[0] == '"' and v[^1] == '"': v = v[1 .. ^2]
-  lblVar.caption = row.name & " (" & row.kind & ", " & row.scope & ") ="
+  lblVar.caption = row.name & " (" & row.kind & ", " & row.scope & ") = " &
+                   (if row.expandable: "  [table : double-clic pour l'ouvrir, ou nouvelle valeur]" else: "")
   edVar.state = csActive
   btnVarSet.state = csActive
   edVar.value = v
 
 proc applyVariable() =
-  # Nouvelle valeur de la variable choisie, appliquée au programme arrêté.
-  var row: tuple[name, value, kind, scope: string]
+  # Nouvelle valeur de la variable (ou de l'entrée de table) choisie, programme arrêté.
+  # Même type que l'ancienne valeur, ou littéral : 12, 1.5, "texte", vrai, faux, nul, {}.
+  var row: VarInfo
   var frame = 0
   var i = -1
+  var depth = 0
+  var root: VarInfo
   withState:
     i = st.varSel
     frame = st.varFrame
+    depth = st.varPath.len
+    root = st.varRoot
     if i >= 0 and i < st.varRows.len: row = st.varRows[i]
   if row.name.len == 0: return
-  let (ok, shown) = setVariable(frame, row.name, row.scope, edVar.value)
+  var ok: bool
+  var shown: string
+  if depth == 0:
+    (ok, shown) = setVariable(frame, row.name, row.scope, edVar.value)
+  else:
+    (ok, shown) = setTableEntry(frame, root.name, root.scope, varKeys()[1 .. ^1], row.key, edVar.value)
   if not ok:
     status("Modification refusée : " & shown)
     return
-  withState:
-    if i < st.varRows.len: st.varRows[i].value = shown
-    # l'instantané de pause suit (changement de cadre dans la pile d'appels).
-    if row.scope == "globale":
-      for g in st.pause.globals.mitems:
-        if cmpIgnoreCase(g.name, row.name) == 0: g.value = shown
-    elif frame < st.pause.frames.len:
-      for v in st.pause.frames[frame].vars.mitems:
-        if cmpIgnoreCase(v.name, row.name) == 0: v.value = shown
-  tableSetCell(tblVars, i + 1, 2, shown)
+  if depth == 0:
+    withState:
+      if i < st.varRows.len: st.varRows[i].value = shown
+      # l'instantané de pause suit (changement de cadre dans la pile d'appels).
+      if row.scope == "globale":
+        for g in st.pause.globals.mitems:
+          if cmpIgnoreCase(g.name, row.name) == 0: g.value = shown
+      elif frame < st.pause.frames.len:
+        for v in st.pause.frames[frame].vars.mitems:
+          if cmpIgnoreCase(v.name, row.name) == 0: v.value = shown
+    tableSetCell(tblVars, i + 1, 2, shown)
+  else:
+    discard refreshTableView()
   status(row.name & " = " & shown & " (valeur modifiée ; F5 continuer, F10 / F11 pas à pas)")
+
+proc addTableEntry() =
+  var depth = 0
+  var root: VarInfo
+  var frame = 0
+  withState:
+    depth = st.varPath.len
+    root = st.varRoot
+    frame = st.varFrame
+  if depth == 0: return
+  var k = ""
+  if not promptOk(iconQuestion, "Clef de la nouvelle entrée (nombre, nom, ou \"texte exact\") :", k): return
+  k = k.strip
+  if k.len == 0: return
+  var v = ""
+  if not promptOk(iconQuestion, "Valeur (12, 1.5, \"texte\", vrai, faux, {}) :", v): return
+  var key = ""
+  try: key = "i:" & $parseBiggestInt(k)
+  except ValueError:
+    key = if k.len >= 2 and k[0] == '"' and k[^1] == '"': "s:" & k[1 .. ^2] else: "s:" & upper(k)
+  let (ok, shown) = setTableEntry(frame, root.name, root.scope, varKeys()[1 .. ^1], key, v)
+  if not ok: status("Ajout refusé : " & shown)
+  else:
+    discard refreshTableView()
+    status("Entrée ajoutée : " & k & " = " & shown)
+
+proc removeTableEntry() =
+  var row: VarInfo
+  var depth = 0
+  var root: VarInfo
+  var frame = 0
+  withState:
+    depth = st.varPath.len
+    root = st.varRoot
+    frame = st.varFrame
+    if st.varSel >= 0 and st.varSel < st.varRows.len: row = st.varRows[st.varSel]
+  if depth == 0 or row.key.len == 0: return
+  let (ok, msg) = setTableEntry(frame, root.name, root.scope, varKeys()[1 .. ^1], row.key, "", remove = true)
+  if not ok: status("Suppression refusée : " & msg)
+  else:
+    discard refreshTableView()
+    status("Entrée supprimée : " & row.name)
 
 proc onPaused(info: PauseInfo) =
   if not running.load() or stopAsked.load(): return   # arrêt en cours : pas de pause.
@@ -847,7 +991,7 @@ proc sendInput() =
       inQueue.addLast s
       signal(inCond)
 
-proc runProgramFrom(debug, stepFirst: bool) =
+proc runProgramFrom(debug, stepFirst: bool, profile = false) =
   # réservation atomique : deux déclenchements rapprochés ne lancent qu'une exécution.
   if running.exchange(true):
     status("Un programme est déjà en cours.")
@@ -915,7 +1059,10 @@ proc runProgramFrom(debug, stepFirst: bool) =
           refreshProblems()
           gotoFile(source, line - 1, 0)
       updateTitle()
-  runProgram(path, args, debug, stepFirst, hooks)
+  hooks.profiled = proc (p: Profiler) =
+    {.cast(gcsafe).}: showProfile(p)
+  if profile: consoleAppend("[profileur actif : résultats dans la page Profil à la fin]\n")
+  runProgram(path, args, debug, stepFirst, hooks, profile)
 
 proc doStop() =
   if not running.load(): return
@@ -1633,6 +1780,8 @@ proc deleteSelected() =
   reindex()
   status("Supprimé : " & relPath(p))
 
+include wdlexis_outils
+
 proc openProjectGraph()
 
 proc onMenu(path: string) =
@@ -1658,10 +1807,10 @@ proc onMenu(path: string) =
     if uid >= 0: closeDoc(uid)
   of "Vue projet…": openProjectGraph()
   of "Vue blueprint du fichier courant": openBlueprint(activeUid())
-  of "Projet / Structure / Référence : afficher ou masquer": paneL.toggle()
-  of "Projet / Structure / Référence : fenêtre dédiée": paneL.detach()
-  of "Problèmes / Console / Variables / Pile : afficher ou masquer": paneB.toggle()
-  of "Problèmes / Console / Variables / Pile : fenêtre dédiée": paneB.detach()
+  of "Projet - Structure - ... : afficher / masquer": paneL.toggle()
+  of "Projet - Structure - ... : fenêtre dédiée": paneL.detach()
+  of "Problèmes - Console - ... : afficher / masquer": paneB.toggle()
+  of "Problèmes - Console - ... : fenêtre dédiée": paneB.detach()
   of "Dupliquer le fichier…": duplicateSelected()
   of "Renommer le fichier…": renameSelected()
   of "Supprimer le fichier…": deleteSelected()
@@ -1689,7 +1838,34 @@ proc onMenu(path: string) =
   of "Remplacer…": doFind(true)
   of "Occurrence suivante": findAgain(false)
   of "Aller à la ligne…": gotoLine()
-  of "Aller à la définition": gotoDefinition(editorWordAtCursor(edId))
+  of "Aller à la définition (F12)": gotoDefinitionAtCursor(editorWordAtCursor(edId))
+  of "Lister les usages (Maj+F12)": listUsages()
+  of "Formater le document (Ctrl+Maj+F)": formatDocument()
+  of "Conventions de formatage du projet…": editFormatConventions()
+  of "Lancer les tests (Ctrl+T)": runTests(false)
+  of "Lancer les tests du fichier courant": runTests(true)
+  of "Profiler le programme": runProgramFrom(false, false, profile = true)
+  of "Statut du dépôt": gitStatus()
+  of "Comparer le fichier avec la dernière validation": gitDiff(false)
+  of "Comparer le projet avec la dernière validation": gitDiff(true)
+  of "Annotations du fichier (blame)": gitBlame()
+  of "Historique du fichier": gitHistory()
+  of "Fusionner une branche…": gitMerge()
+  of "Conflits : garder la version locale": resolveConflicts("local")
+  of "Conflits : garder la version fusionnée": resolveConflicts("fusion")
+  of "Conflits : garder les deux": resolveConflicts("deux")
+  of "Abandonner la fusion": gitAbortMerge()
+  of "Valider (commit)…": gitCommit()
+  of "Signaler les collisions de noms":
+    var o = opts()
+    o.collisions = not o.collisions
+    setOpts(o)
+    lintAllOpen()
+  of "Contrôler les types déclarés":
+    var o = opts()
+    o.typeChecks = not o.typeChecks
+    setOpts(o)
+    lintAllOpen()
   of "Vérifier les fichiers ouverts":
     reindex()
     lintAllOpen()
@@ -1738,7 +1914,7 @@ proc onMenu(path: string) =
       generationDialog(root(), opts().mainFile, theme(gWin))
       fillProjectTree()
       status("Prêt")
-  of "Minicarte":
+  of "Minicarte afficher / masquer":
     var o = opts()
     o.minimap = not o.minimap
     setOpts(o)
@@ -1769,7 +1945,7 @@ proc onMenu(path: string) =
     var names: seq[string]
     for p in packages(): names.add p.name
     alert(iconInformation,
-      "wdlexis+ [S]tudio 2.0.1\nAtelier du langage Lexis+\n" &
+      "wdlexis+ [S]tudio 2.1.1\nAtelier du langage Lexis+\n" &
       "Développez naturellement vos applications métier\n\n" &
       "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" &
       "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" &
@@ -1786,25 +1962,35 @@ proc buildMenu(m: ControlId) =
                   "Supprimer le fichier…", "-", "Exporter le projet (archive)…", "Importer un projet (archive)…",
                   "-", "Quitter"]),
     ("Édition", @["Annuler", "Rétablir", "Couper", "Copier", "Coller", "Tout sélectionner",
-                  "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter"]),
+                  "Dupliquer la ligne", "Commenter / décommenter", "Indenter", "Désindenter", "-",
+                  "Formater le document (Ctrl+Maj+F)", "Conventions de formatage du projet…"]),
     ("Recherche", @["Rechercher…", "Remplacer…", "Occurrence suivante", "Aller à la ligne…",
-                    "Aller à la définition"]),
+                    "Aller à la définition (F12)", "Lister les usages (Maj+F12)"]),
     ("Exécuter", @["Exécuter (Ctrl+R)", "Déboguer / Continuer (F5)", "Pas à pas (F11)",
                    "Pas principal (F10)", "Sortir de la procédure (Maj+F11)", "Pause",
                    "Arrêter (Maj+F5)", "Basculer le point d'arrêt (F9)",
                    "Supprimer tous les points d'arrêt", "Vérifier les fichiers ouverts",
-                   "Arguments et fichier principal…", "Générer l'application…"]),
+                   "Arguments et fichier principal…", "-", "Lancer les tests (Ctrl+T)",
+                   "Lancer les tests du fichier courant", "Profiler le programme", "-",
+                   "Générer l'application…"]),
+    ("Git", @["Statut du dépôt", "Comparer le fichier avec la dernière validation",
+              "Comparer le projet avec la dernière validation", "Annotations du fichier (blame)",
+              "Historique du fichier", "-", "Fusionner une branche…", "Conflits : garder la version locale",
+              "Conflits : garder la version fusionnée", "Conflits : garder les deux", "Abandonner la fusion",
+              "-", "Valider (commit)…"]),
     ("Conception", @["Vue projet…", "Vue blueprint du fichier courant", "-",
                      "Nouveau formulaire pour le fichier courant…", "Ouvrir un formulaire…",
                      "Concepteur de formulaires", "-", "Nouvel état…", "Ouvrir un état…"]),
-    ("Affichage", @["Projet / Structure / Référence : afficher ou masquer",
-                    "Projet / Structure / Référence : fenêtre dédiée",
-                    "Problèmes / Console / Variables / Pile : afficher ou masquer",
-                    "Problèmes / Console / Variables / Pile : fenêtre dédiée", "-",
-                    "Copier la console", "Effacer la console", "Agrandir la police (Ctrl++)",
-                    "Réduire la police (Ctrl+-)", "Taille de police par défaut (Ctrl+0)",
-                    "Minicarte", "Thème sombre / clair", "Signaler les variables globales implicites",
-                    "Signaler les procédures inconnues"]),
+    ("Affichage", @["Agrandir la police (Ctrl++)", "Réduire la police (Ctrl+-)",
+                    "Taille de police par défaut (Ctrl+0)", "Minicarte afficher / masquer",
+                    "Thème sombre / clair", "-",
+                    "Signaler les variables globales implicites", "Signaler les procédures inconnues",
+                    "Signaler les collisions de noms", "Contrôler les types déclarés", "-",
+                    "Copier la console", "Effacer la console", "-",
+                    "Problèmes - Console - ... : afficher / masquer",
+                    "Problèmes - Console - ... : fenêtre dédiée",
+                    "Projet - Structure - ... : afficher / masquer",
+                    "Projet - Structure - ... : fenêtre dédiée"]),
     ("Aide", @["Raccourcis clavier", "Référence des fonctions et paquets", "À propos"])]
   for (top, items) in menus:
     for it in items: menuAdd(m, top & TreeSep & it)
@@ -1858,7 +2044,10 @@ proc onEditorSignal(text: string) =
       try: closeDoc(parseInt(arg)) except ValueError: discard
     of "dot":
       try: onDot(parseInt(arg)) except ValueError: discard
-    of "definition": gotoDefinition(arg)
+    of "definition": gotoDefinitionAtCursor(arg)
+    of "usages": listUsages()
+    of "format": formatDocument()
+    of "tests": runTests(false)
     else: discard
 
 proc onBlueprintCode(srcUid: int) {.nimcall, gcsafe.} =
@@ -1976,6 +2165,12 @@ proc handleEvent(ev: var Event) =
               bpRebuildDetails()
       elif ev.id == tblVars:
         selectVariable(ev.index - 1)
+      elif ev.id == tblUsages:
+        {.cast(gcsafe).}:
+          if ev.index >= 1 and ev.index <= usageRows.len: gotoLoc(usageRows[ev.index - 1])
+      elif ev.id == tblTests: selTests.store(ev.index - 1)
+      elif ev.id == tblProf: selProf.store(ev.index - 1)
+      elif ev.id == tblProfLines: selProfLines.store(ev.index - 1)
       elif ev.id == lstStack:
         var info: PauseInfo
         withState: info = st.pause
@@ -2003,9 +2198,18 @@ proc handleEvent(ev: var Event) =
             editorFlush(edId)
           else: gotoFile(row.path, row.line, 0)
     of evDoubleClick:
+      # (le double-clic d'une table ne porte pas la ligne : celle de la dernière sélection)
       if ev.id == tblVars:
-        selectVariable(ev.index - 1)
-        if edVar.state == csActive: setFocus(edVar)
+        var expandable = false
+        var i = -1
+        withState:
+          i = st.varSel
+          if i >= 0 and i < st.varRows.len: expandable = st.varRows[i].expandable
+        if expandable: openTable(i)
+        elif edVar.state == csActive: setFocus(edVar)
+      elif ev.id == tblTests: gotoTest(selTests.load())
+      elif ev.id == tblProf: gotoProfileRow(false, selProf.load())
+      elif ev.id == tblProfLines: gotoProfileRow(true, selProfLines.load())
       elif ev.id == trProj:
         let r = root()
         let parts = trProj.value.split(TreeSep)
@@ -2037,6 +2241,9 @@ proc handleEvent(ev: var Event) =
       elif ev.id == btnRen: renameSelected()
       elif ev.id == btnDel: deleteSelected()
       elif ev.id == btnVarSet: applyVariable()
+      elif ev.id == btnVarUp: varUp()
+      elif ev.id == btnVarAdd: addTableEntry()
+      elif ev.id == btnVarDel: removeTableEntry()
       elif ev.id == btnOpen: onMenu("Fichier" & TreeSep & "Ouvrir un projet…")
       elif ev.id == btnNew: newFileInProject()
       elif ev.id == btnSave: discard save(activeUid())
@@ -2242,9 +2449,18 @@ proc buildUi() =
   ev.weight = 1
   ev.state = csGrayed
   edVar = ev.id
-  let bv = varRow.iconTool("verifier", "Appliquer", "affecte la nouvelle valeur à la variable (Entrée)")
+  let bv = varRow.iconTool("verifier", "Appliquer", "affecte la nouvelle valeur (Entrée) : même type, ou 12, 1.5, \"texte\", vrai, faux, nul, {}")
   bv.state = csGrayed
   btnVarSet = bv.id
+  let bup = varRow.iconTool("monter", "Remonter", "revenir à la table parente, puis aux variables")
+  bup.state = csGrayed
+  btnVarUp = bup.id
+  let badd = varRow.iconTool("plus", "Ajouter", "ajouter une entrée à la table ouverte")
+  badd.state = csGrayed
+  btnVarAdd = badd.id
+  let bdel = varRow.iconTool("supprimer", "Supprimer", "supprimer l'entrée choisie de la table ouverte")
+  bdel.state = csGrayed
+  btnVarDel = bdel.id
   let tv = pgVars.addChild(newTable(multiSelection = false))
   tv.dock = dkCenter
   tblVars = tv.id
@@ -2257,6 +2473,57 @@ proc buildUi() =
   let lsk = pgStack.addChild(newListBox())
   lsk.weight = 1
   lstStack = lsk.id
+
+  let pgUse = bottom.addPage("Usages", lkVertical)
+  let tu = pgUse.addChild(newTable(multiSelection = false))
+  tu.weight = 1
+  tblUsages = tu.id
+  tableAddColumn(tblUsages, "Fichier", 160)
+  tableAddColumn(tblUsages, "Ligne", 60, alRight)
+  tableAddColumn(tblUsages, "Col", 50, alRight)
+  tableAddColumn(tblUsages, "Genre", 120)
+  tableAddColumn(tblUsages, "Code", 620)
+
+  let pgTests = bottom.addPage("Tests", lkVertical)
+  let lt = pgTests.addChild(newLabel("Exécuter › Lancer les tests (Ctrl+T) : fichiers test_*.prg, *_test.prg ou dossier tests/"))
+  lblTests = lt.id
+  let tt = pgTests.addChild(newTable(multiSelection = false))
+  tt.weight = 1
+  tblTests = tt.id
+  tableAddColumn(tblTests, "Résultat", 90)
+  tableAddColumn(tblTests, "Test", 200)
+  tableAddColumn(tblTests, "Fichier", 160)
+  tableAddColumn(tblTests, "ms", 70, alRight)
+  tableAddColumn(tblTests, "Assertions", 80, alRight)
+  tableAddColumn(tblTests, "Message", 560)
+
+  let pgProf = bottom.addPage("Profil", lkVertical)
+  let lp2 = pgProf.addChild(newLabel("Exécuter › Profiler le programme : temps par procédure et par ligne, mémoire"))
+  lblProf = lp2.id
+  # procédures à gauche, lignes à droite (séparateur déplaçable)
+  let spProf = pgProf.addChild(newSplitter(vertical = true, position = 0.55))
+  spProf.weight = 1
+  spProf.thickness = 4
+  let tpf = spProf.addChild(newTable(multiSelection = false))
+  tblProf = tpf.id
+  tableAddColumn(tblProf, "Procédure", 200)
+  tableAddColumn(tblProf, "Appels", 70, alRight)
+  tableAddColumn(tblProf, "Total ms", 90, alRight)
+  tableAddColumn(tblProf, "Propre ms", 90, alRight)
+  tableAddColumn(tblProf, "% propre", 70, alRight)
+  tableAddColumn(tblProf, "Tables", 70, alRight)
+  tableAddColumn(tblProf, "Source", 260)
+  let tpl = spProf.addChild(newTable(multiSelection = false))
+  tblProfLines = tpl.id
+  tableAddColumn(tblProfLines, "ms", 90, alRight)
+  tableAddColumn(tblProfLines, "Passages", 80, alRight)
+  tableAddColumn(tblProfLines, "Ligne", 180)
+  tableAddColumn(tblProfLines, "Code", 560)
+
+  let pgGit = bottom.addPage("Git", lkBorder)
+  let eg = pgGit.addChild(newEdit("", multiline = true, placeholder = "Menu Git : statut, comparaison, annotations, historique, fusion, validation"))
+  eg.dock = dkCenter
+  edGit = eg.id
 
   # ensembles de pages : masquer / afficher (<< >>) et fenêtre dédiée, comme Atlas SQL.
   {.cast(gcsafe).}:
@@ -2281,6 +2548,7 @@ proc buildUi() =
   bpOpenEntity = onBlueprintOpenEntity
   pvOpenCode = onProjectViewCode
   pvOpenBlueprint = onProjectViewBlueprint
+  editorSetHoverProvider(edId, hoverProvider)
   editorSetOptions(edId, s.minimap, s.dark)
   editorSetFontSize(edId, EditorBaseFont + float(s.fontDelta))
   fillApiTree()

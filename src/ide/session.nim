@@ -10,13 +10,16 @@
 # de l'IDE ; la session reste active tant qu'elles sont ouvertes.
 
 import std/[locks, strutils, tables, sets, os, algorithm, atomics]
-import ../lexis/[api, fonctions, zones]
+import ../lexis/[api, fonctions, zones, profiler]
+import inspecteur
 import ../paquets/tous
 from ../lexis/lexer import SyntaxError
 
 type
   VarInfo* = object
     name*, value*, kind*, scope*: string
+    key*: string                 # entrée de table : clef codée (s:texte, i:3, n:1.5, b:vrai)
+    expandable*: bool            # table (contenu consultable)
 
   FrameInfo* = object
     name*, source*: string
@@ -36,6 +39,7 @@ type
     finished*: proc (ok: bool, msg, source: string, line: int) {.closure, gcsafe.}
     sourceProvider*: proc (path: string): (bool, string) {.closure, gcsafe.}
     breakpoints*: proc (): seq[(string, seq[int])] {.closure, gcsafe.}
+    profiled*: proc (p: Profiler) {.closure, gcsafe.}   # profil de l'exécution (Exécuter › Profiler)
 
 var sLock: Lock
 var current: Interp
@@ -88,7 +92,8 @@ proc frameVars(L: Interp, f: Frame): seq[VarInfo] =
   for i, c in f.slots:
     if not c.isNil and i < f.proto.slotNames.len:
       result.add VarInfo(name: f.proto.slotNames[i], value: L.short(c.v), kind: kindOf(c.v),
-                         scope: (if i < f.proto.nparams: "paramètre" else: "locale"))
+                         scope: (if i < f.proto.nparams: "paramètre" else: "locale"),
+                         expandable: c.v.kind == vkTable)
 
 proc snapshot(L: Interp, c: Ctx, builtin: HashSet[string]): PauseInfo =
   for i in countdown(c.frames.high, 0):
@@ -101,7 +106,8 @@ proc snapshot(L: Interp, c: Ctx, builtin: HashSet[string]): PauseInfo =
     result.line = result.frames[0].line
   for k, v in L.globals.pairs:
     if k.kind == vkStr and k.s notin builtin:
-      result.globals.add VarInfo(name: k.s.toLowerAscii, value: L.short(v), kind: kindOf(v), scope: "globale")
+      result.globals.add VarInfo(name: k.s.toLowerAscii, value: L.short(v), kind: kindOf(v), scope: "globale",
+                                 expandable: v.kind == vkTable)
   let z = L.currentZoneInfo()
   if z.len > 0:
     result.globals.add VarInfo(name: "zone", value: z, kind: "zone", scope: "base")
@@ -111,26 +117,36 @@ proc snapshot(L: Interp, c: Ctx, builtin: HashSet[string]): PauseInfo =
 # Commandes
 #
 
-proc parseLike(old: Value, text: string): (bool, Value, string) =
-  # Nouvelle valeur du même type que l'ancienne (chaîne, entier ; aussi décimal et booléen).
-  let t = text.strip
-  case old.kind
-  of vkStr:
-    var s = text
-    if s.len >= 2 and s[0] == '"' and s[^1] == '"': s = s[1 .. ^2].replace("\\n", "\n")
-    (true, strV(s), "")
-  of vkInt:
-    try: (true, intV(parseBiggestInt(t)), "")
-    except ValueError: (false, old, "entier attendu : « " & t & " »")
-  of vkNum:
-    try: (true, numV(parseFloat(t.replace(',', '.'))), "")
-    except ValueError: (false, old, "nombre décimal attendu : « " & t & " »")
-  of vkBool:
-    case t.toLowerAscii
-    of "vrai", "true", "1", "oui": (true, boolV(true), "")
-    of "faux", "false", "0", "non": (true, boolV(false), "")
-    else: (false, old, "vrai ou faux attendu")
-  else: (false, old, "seules les chaînes, les entiers, les décimaux et les booléens se modifient ici")
+proc pausedState(): (Interp, Ctx) =
+  {.cast(gcsafe).}:
+    withLock sLock:
+      result = (current, pausedCtx)
+
+proc inspectTable*(frameIdx: int, name, scope: string, path: seq[string]): (bool, seq[VarInfo], string) =
+  ## Contenu d'une table du programme arrêté : variable (name, scope, cadre) puis
+  ## clefs successives (path, clefs codées). Entrées : partie liste puis clefs triées.
+  {.cast(gcsafe).}:
+    let (L, c) = pausedState()
+    if L.isNil or c.isNil: return (false, @[], "le programme n'est pas en pause")
+    let (ok, root) = L.rootValue(c, frameIdx, name, scope)
+    if not ok: return (false, @[], "variable introuvable : " & name)
+    let (ok2, es, msg) = L.tableEntries(root, path)
+    if not ok2: return (false, @[], msg)
+    var rows: seq[VarInfo]
+    for e in es:
+      rows.add VarInfo(name: e.name, value: e.value, kind: e.kind, scope: "clef", key: e.key,
+                       expandable: e.expandable)
+    (true, rows, "")
+
+proc setTableEntry*(frameIdx: int, name, scope: string, path: seq[string], key, text: string,
+                    remove = false): (bool, string) =
+  ## Modifie (ou supprime) l'entrée `key` de la table désignée par la variable et le chemin.
+  {.cast(gcsafe).}:
+    let (L, c) = pausedState()
+    if L.isNil or c.isNil: return (false, "le programme n'est pas en pause")
+    let (ok, root) = L.rootValue(c, frameIdx, name, scope)
+    if not ok: return (false, "variable introuvable : " & name)
+    L.setEntry(root, path, key, text, remove)
 
 proc setVariable*(frameIdx: int, name, scope, text: string): (bool, string) =
   # Modifie une variable du programme arrêté (débogueur en pause). frameIdx : cadre de
@@ -146,7 +162,7 @@ proc setVariable*(frameIdx: int, name, scope, text: string): (bool, string) =
     if scope == "globale":
       for k, v in L.globals.pairs:
         if k.kind == vkStr and cmpIgnoreCase(k.s, name) == 0:
-          let (ok, nv, msg) = parseLike(v, text)
+          let (ok, nv, msg) = parseValue(v, text)
           if not ok: return (false, msg)
           L.globals.rawSet(k, nv)
           return (true, L.short(nv))
@@ -158,7 +174,7 @@ proc setVariable*(frameIdx: int, name, scope, text: string): (bool, string) =
       if n == frameIdx:
         for j, cell in f.slots:
           if not cell.isNil and j < f.proto.slotNames.len and cmpIgnoreCase(f.proto.slotNames[j], name) == 0:
-            let (ok, nv, msg) = parseLike(cell.v, text)
+            let (ok, nv, msg) = parseValue(cell.v, text)
             if not ok: return (false, msg)
             cell.v = nv
             return (true, L.short(nv))
@@ -216,7 +232,7 @@ proc locate(msg: string): (string, int) =
   (msg[0 ..< i + 4], n)
 
 proc runProgram*(path: string, args: seq[string], debug: bool, stepFirst: bool,
-                 hooks: SessionHooks) =
+                 hooks: SessionHooks, profile = false) =
   # Exécute `path` (bloquant). debug = débogueur actif ; stepFirst = pause
   # sur la première instruction.
   {.cast(gcsafe).}:
@@ -250,6 +266,7 @@ proc runProgram*(path: string, args: seq[string], debug: bool, stepFirst: bool,
     var line = 0
     L.enter()
     curCtx = Ctx()
+    if profile: discard L.startProfiler()
     try:
       var vargs: seq[Value]
       for a in args: vargs.add strV(a)
@@ -284,6 +301,11 @@ proc runProgram*(path: string, args: seq[string], debug: bool, stepFirst: bool,
       # appelé et l'atelier restait « en cours » avec les boutons figés.
       ok = false
       msg = "erreur interne : " & e.msg
+    if profile:
+      let p = L.stopProfiler()
+      if not p.isNil and not hooks.profiled.isNil:
+        try: hooks.profiled(p)
+        except Exception: discard
     # La fin est TOUJOURS signalée à l'atelier, même si le nettoyage échoue.
     try: L.closeAllWindows()
     except Exception: discard

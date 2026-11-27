@@ -109,12 +109,12 @@ procedure GENERER_DIALOGUE
   genctl.etat = gendlg:ajouter(ui.etiquette(""))
   && icône enregistrée (chemin relatif au projet ou absolu) et son cadrage
   si s.icone <> ""
-    locale pi = fichier.joindre(dossier, s.icone)      && relatif au projet…
-    si non fichier.estfichier(pi)
-      pi = s.icone                                    && … ou absolu
+    locale iconeabs = fichier.joindre(dossier, s.icone)      && relatif au projet…
+    si non fichier.estfichier(iconeabs)
+      iconeabs = s.icone                                    && … ou absolu
     finsi
-    si fichier.estfichier(pi)
-      GEN_CHARGER_ICONE(pi, s.cadrage)
+    si fichier.estfichier(iconeabs)
+      GEN_CHARGER_ICONE(iconeabs, s.cadrage)
     finsi
   finsi
   GEN_ETAT_ICONE()
@@ -144,8 +144,8 @@ fonction GEN_CHOIX()
 retourner r
 
 procedure GEN_ICONE
-  locale depart = sisinon(genctl.cheminicone <> "", fichier.dossier(genctl.cheminicone), dossier)
-  locale p = ui.ouvrirfichier{titre = "Image de l'icône", dossier = depart, ;
+  locale dossierdepart = sisinon(genctl.cheminicone <> "", fichier.dossier(genctl.cheminicone), dossier)
+  locale p = ui.ouvrirfichier{titre = "Image de l'icône", dossier = dossierdepart, ;
                               filtre = "Images|*.png;*.jpg;*.jpeg;*.gif"}      && formats lus par ui.cadrage
   si p <> nul et gendlg <> nul
     si GEN_CHARGER_ICONE(p, nul)
