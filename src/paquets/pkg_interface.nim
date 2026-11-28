@@ -1199,6 +1199,18 @@ proc defineMethods() =
     @[L.register(UiCtl(rawId: colId, family: "colonnegrille"))]
   mfn "grille", "ajouterligne", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[anyV(gridAddLine(L.self(a, "ajouterligne").id, L.strs(a, 2, "ajouterligne")))]
+  mfn "grille", "remplacerlignes", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # remplacerlignes({{cellule, ...}, ...}) : toutes les lignes en un appel
+    let t = arg(a, 2)
+    if t.kind != vkTable: rtError("remplacerlignes : liste de lignes attendue")
+    var lines: seq[seq[string]]
+    for r in t.t.arr:
+      var cells: seq[string]
+      if r.kind == vkTable:
+        for c in r.t.arr: cells.add L.tostr(c)
+      else: cells.add L.tostr(r)
+      lines.add cells
+    @[intV(gridSetLines(L.self(a, "remplacerlignes").id, lines))]
   mfn "grille", "insererligne", proc (L: Interp, a: seq[Value]): seq[Value] =
     gridInsertLine(L.self(a, "insererligne").id, int(L.checkInt(a, 2, "insererligne")), L.strs(a, 3, "insererligne"))
   mfn "grille", "modifierligne", proc (L: Interp, a: seq[Value]): seq[Value] =
@@ -2779,7 +2791,7 @@ const uiDocs = [
   "graphe:libellecategorie(i, texte)", "Libellé de catégorie.",
   "graphe:libelleserie(i, texte)", "Libellé de série.", "graphe:fixergenre(genre)", "Genre de graphe.",
   "grille:ajoutercolonne{nom=, titre=, genre=, largeur=, choix=, decimales=}", "Ajoute une colonne (genre : texte, nombre, date, image, bouton, combo, case) ; renvoie la colonne.",
-  "grille:ajouterligne(cellule, ...)", "Ajoute une ligne.", "grille:cellule(ligne, colonne)", "Valeur d'une cellule (colonne = nom ou index).",
+  "grille:ajouterligne(cellule, ...)", "Ajoute une ligne.", "grille:remplacerlignes(lignes)", "Remplace toutes les lignes en un appel ({{cellule, ...}, ...}) ; renvoie le nombre de lignes.", "grille:cellule(ligne, colonne)", "Valeur d'une cellule (colonne = nom ou index).",
   "grille:fixercellule(ligne, colonne, valeur)", "Modifie une cellule.", "grille:nombre()", "Nombre de lignes.",
   "grille:trier(colonne, [croissant])", "Trie.", "grille:chercher(colonne, valeur, [exact], [debut])", "Cherche une ligne.",
   "grille:fixerpied(colonne, genre)", "Pied de colonne : somme, moyenne, min, max, nombre.",

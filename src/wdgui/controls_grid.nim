@@ -1222,6 +1222,15 @@ proc gridAddLine*(id: ControlId, values: varargs[string]): int =
   let v = @values
   withControl(id, Grid, g): result = g.addLine(v)
 
+proc gridSetLines*(id: ControlId, lines: seq[seq[string]]): int =
+  ## Remplace toutes les lignes en un seul appel (une seule prise du verrou de l'interface,
+  ## au lieu d'un appel par ligne) ; renvoie le nombre de lignes.
+  withControl(id, Grid, g):
+    g.cancelEdit()
+    g.clearRows()
+    for v in lines: discard g.addLine(v)
+    result = g.rows.len
+
 proc gridInsertLine*(id: ControlId, row: int, values: varargs[string]) =
   let v = @values
   withControl(id, Grid, g):

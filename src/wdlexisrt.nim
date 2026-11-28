@@ -21,7 +21,7 @@ from lexis/lexer import SyntaxError
 from lexis/parser import parseChunk
 
 proc usage() =
-  echo "wdlexis+ [RT] 2.1.2 - runtime du langage Lexis+"
+  echo "wdlexis+ [RT] 2.1.3 - runtime du langage Lexis+"
   echo "Tous droits réservés 2026 - Jean-Marc QUÉRÉ, sonaliwan.fr"
   echo "  wdlexisrt programme.prg [arguments...]"
   echo "  wdlexisrt --verifier fichier.prg...        syntaxe, collisions de noms, types déclarés"

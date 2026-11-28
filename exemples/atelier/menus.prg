@@ -228,7 +228,7 @@ procedure MENU(ev)
   cas choix = "Référence des fonctions et paquets"
     AFFICHER_OUTILS(3)
   cas choix = "À propos"
-    ui.alerte("wdlexis+ [S]tudio 2.1.2\nAtelier du langage Lexis+\n" +
+    ui.alerte("wdlexis+ [S]tudio 2.1.3\nAtelier du langage Lexis+\n" +
               "Développez naturellement vos applications métier\n\n" +
               "Tous droits réservés 2026 - Jean-Marc QUÉRÉ\n" +
               "⛶ https://sonaliwan.fr  ✉ metalab (at) sonaliwan.fr\n" +

@@ -181,7 +181,7 @@ proc handle(s: var Server, msg: JsonNode) =
           "documentSymbolProvider": true,
           "workspaceSymbolProvider": true,
           "documentFormattingProvider": true},
-        "serverInfo": {"name": "wdlexis-lsp", "version": "2.1.2"}})
+        "serverInfo": {"name": "wdlexis-lsp", "version": "2.1.3"}})
     of "initialized", "$/cancelRequest", "$/setTrace", "workspace/didChangeConfiguration",
        "workspace/didChangeWatchedFiles":
       discard

@@ -54,6 +54,7 @@ type
     lastAction*: string
     lastIds*: seq[string]
     needFit*: bool
+    pendingTop*: float       # galerie : ordonnée (scène) à amener en haut après l'ajustement ; NaN = aucune
     fitWidth*: bool                        # galerie : ajuster à la largeur
     stickyTool*: bool                      # l'outil reste actif après une création
     editText*: string                      # forme texte en cours de saisie
@@ -96,7 +97,7 @@ const
 proc newVectorCanvas*(mode = vmEdit): VectorCanvas =
   result = VectorCanvas(scene: newScene(1280, 720), zoom: 1, tool: vtSelect, mode: mode, gridSize: 10,
                         snapObjects: true, newFill: "#4f7cff", newStroke: "none", newFont: "Poppins",
-                        newStrokeWidth: 2, newFontSize: 32, needFit: true, nodeIdx: -1)
+                        newStrokeWidth: 2, newFontSize: 32, needFit: true, nodeIdx: -1, pendingTop: NaN)
   result.focusable = mode == vmEdit
   initControl(result)
 
@@ -410,6 +411,12 @@ proc caretPos(c: VectorCanvas, s: VShape): (float, float, float) =
 method draw*(c: VectorCanvas, d: Drawing, t: Theme) =
   let r = c.rect
   if c.needFit: c.fit
+  # positionnement demandé (toile:montrer) : appliqué après l'ajustement, qui remettait la
+  # vue en haut (la consultation revenait toujours à la page 1)
+  if c.pendingTop == c.pendingTop and c.rect.h > 0 and not c.needFit:
+    c.panY = 12 - c.pendingTop * c.zoom
+    c.pendingTop = NaN
+    c.clampGalleryPan
   let bgCol = if c.mode == vmView: Color(r: 12, g: 12, b: 14, a: 255)
               elif c.mode in {vmGallery, vmBoard}: t.windowBg
               else: Color(r: max(0, t.windowBg.r.int - 10).uint8, g: max(0, t.windowBg.g.int - 10).uint8,

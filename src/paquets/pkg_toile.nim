@@ -98,8 +98,13 @@ proc defineToileMethods() =
         c.needFit = false
     @[intV(pages.len)]
   mfn "toile", "montrer", proc (L: Interp, a: seq[Value]): seq[Value] =
-    # montrer(groupe | id) : fait défiler la vue jusqu'au groupe (page-N) ou à la forme.
+    # montrer(groupe | id, [decalage]) : fait défiler la vue jusqu'au groupe (page-N) ou à la
+    # forme ; avec decalage (unités de la scène), amène toujours en haut de la vue le point
+    # situé à decalage sous le haut de la forme. Appliqué au prochain dessin si la vue n'est
+    # pas encore dimensionnée ou doit être ajustée (onglet tout juste affiché, scène rechargée).
     let id = L.checkStr(a, 2, "montrer")
+    let avecDecalage = a.len >= 3 and a[2].kind != vkNil
+    let dy = if avecDecalage: L.checkNum(a, 3, "montrer") else: 0.0
     L.withToile(a, "montrer", c):
       var x0 = Inf
       var y0 = Inf
@@ -108,11 +113,15 @@ proc defineToileMethods() =
         if s.group == id or s.id == id:
           let b = s.bounds
           x0 = min(x0, b.x); y0 = min(y0, b.y); y1 = max(y1, b.y + b.h)
-      if y0 != Inf and c.rect.h > 0:
-        let top = c.panY + y0 * c.zoom
-        let bot = c.panY + y1 * c.zoom
-        if top < 0 or bot > c.rect.h:
-          c.panY = 12 - y0 * c.zoom
+      if y0 != Inf:
+        if avecDecalage or c.needFit or c.rect.h <= 0:
+          c.pendingTop = y0 + dy
+        else:
+          let top = c.panY + y0 * c.zoom
+          let bot = c.panY + y1 * c.zoom
+          if top < 0 or bot > c.rect.h:
+            c.panY = 12 - y0 * c.zoom
+        markDirty(c)
   mfn "toile", "chargersvg", proc (L: Interp, a: seq[Value]): seq[Value] =
     # chargersvg(code [, dossier]) : remplace la scène ; le dossier résout les images relatives.
     let code = L.checkStr(a, 2, "chargersvg")
