@@ -359,7 +359,26 @@ var
   rChan: Channel[JobEvent]
   rLock: Lock
   rProcs: seq[Process]
+  rSpawnLock: Lock    # création des processus une à la fois (voir worker)
 initLock(rLock)
+initLock(rSpawnLock)
+
+proc spawnJob(j: Job): Process =
+  ## Lance une commande de compilation. La création est sérialisée : sur macOS, startProcess
+  ## (posix_spawn) appelé en même temps depuis plusieurs fils échouait de temps en temps
+  ## avec « Bad file descriptor » (les tubes créés et fermés par un fil pendant que l'autre
+  ## préparait son lancement). L'exécution, elle, reste parallèle. Par prudence, un échec de
+  ## lancement est retenté deux fois.
+  var attempt = 0
+  while true:
+    try:
+      withLock rSpawnLock:
+        result = startProcess(j.exe, args = j.args, options = {poStdErrToStdOut})
+      return
+    except OSError as e:
+      inc attempt
+      if attempt >= 3: raise e
+      sleep(50 * attempt)
 
 proc worker(slot: int) {.thread.} =
   {.cast(gcsafe).}:
@@ -371,7 +390,7 @@ proc worker(slot: int) {.thread.} =
       var code = -1
       var output = ""
       try:
-        let p = startProcess(j.exe, args = j.args, options = {poStdErrToStdOut})
+        let p = spawnJob(j)
         withLock rLock: rProcs[slot] = p
         output = p.outputStream.readAll()
         code = p.waitForExit()
