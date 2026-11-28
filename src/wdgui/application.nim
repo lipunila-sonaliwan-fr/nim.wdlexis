@@ -76,6 +76,12 @@ proc worker(ev: Event) {.thread.} =
       except CatchableError as ex:
         stderr.writeLine("wdgui: Exception dans le gestionnaire d'événements: ", ex.msg)
       if e.propagationStopped: break
+    # fermeture : le gestionnaire (surfermeture) a fini, la fenêtre peut être détruite
+    if e.kind == evWindowClose:
+      guarded:
+        let f = control(e.window)
+        if f != nil and f of Window: Window(f).closeWaiting = false
+      wakeUI()
 
 proc reap(activeThreads: var seq[ptr Thread[Event]], waitAll: bool) =
   var i = 0
@@ -337,8 +343,14 @@ proc handleEvent(e: var SDL_Event) =
   let mods = SDL_GetModState()
   case typ
   of SDL_EVENT_QUIT:
+    # Cmd+Q, fin de session : comme la case de fermeture, le gestionnaire de fermeture de
+    # chaque fenêtre est appelé (enregistrement) avant sa destruction.
     for f in allWindows:
-      if f.opened and not f.manualClose: f.closeRequested = true
+      if f.opened and not f.manualClose and not f.closeRequested:
+        f.closeWaiting = true
+        f.closeWaitSince = SDL_GetTicks()
+        emit(f, evWindowClose)
+        f.closeRequested = true
   of SDL_EVENT_WINDOW_SHOWN .. SDL_EVENT_WINDOW_CLOSE_REQUESTED:
     let we = cast[ptr SDL_WindowEvent](addr e)
     let f = windowFromSdl(we.windowID)
@@ -347,6 +359,12 @@ proc handleEvent(e: var SDL_Event) =
     case typ
     of SDL_EVENT_WINDOW_CLOSE_REQUESTED:
       if blocked(f, true): return
+      if not f.manualClose:
+        # la destruction attend la fin du gestionnaire de fermeture : il travaille encore sur
+        # les contrôles de la fenêtre (enregistrement, réglages) ; sinon il s'exécutait sur une
+        # fenêtre détruite, voire après SDL_Quit (plantage à la sortie, macOS)
+        f.closeWaiting = true
+        f.closeWaitSince = SDL_GetTicks()
       emit(f, evWindowClose)
       if not f.manualClose: f.closeRequested = true
     of SDL_EVENT_WINDOW_RESIZED:
@@ -560,7 +578,13 @@ proc uiLoop() {.thread.} =
       guarded:
         var openCount = 0
         for f in allWindows:
-          if f.closeRequested and not f.closed: destroyWindow(f)
+          if f.closeRequested and not f.closed:
+            # attente du gestionnaire de fermeture (10 s au plus)
+            if f.closeWaiting and SDL_GetTicks() - f.closeWaitSince < 10_000'u64:
+              if f.opened: inc openCount
+              continue
+            f.closeWaiting = false
+            destroyWindow(f)
           elif not f.closed and f.sdlWin == nil: realize(f)
           if f.opened and f.stateRequested: applyStateRequest(f)
           if f.opened: inc openCount

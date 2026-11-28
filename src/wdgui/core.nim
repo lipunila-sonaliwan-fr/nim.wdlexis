@@ -130,6 +130,8 @@ type
     pressedOn*: array[MouseButton, Control]
     opened*, closed*, closeRequested*, dirty*: bool
     manualClose*: bool        # if true, the close box emits the event without closing (call closeWindow).
+    closeWaiting*: bool       # close requested: destruction waits for the close handler (surfermeture)
+    closeWaitSince*: uint64   # SDL ticks when the wait began (safety timeout)
     mouseMoveEvents*: bool    # emit evMouseMove on every move (costly: disabled by default).
     focusByMouse*: bool       # vrai pendant le changement de focus causé par un clic.
     sdlTextInputActive*: bool

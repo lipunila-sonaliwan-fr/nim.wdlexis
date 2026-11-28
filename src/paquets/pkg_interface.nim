@@ -2209,6 +2209,7 @@ type
     thr: ptr Thread[UiTimer]
 
 var timerMethods: LTable
+var allTimers {.global.}: seq[UiTimer]     # sous uiLock : arrêtées à la fin de la boucle d'interface
 
 proc timerAlive(t: UiTimer): bool =
   {.cast(gcsafe).}:
@@ -2279,6 +2280,14 @@ proc newTimer(L: Interp, ms: int, h: Value, repeat: bool): Value =
   let t = UiTimer(owner: L, handler: h, period: max(10, ms), repeat: repeat)
   initLock(t.lock)
   t.thr = createShared(Thread[UiTimer])
+  {.cast(gcsafe).}:
+    withLock uiLock:
+      var k = 0
+      while k < allTimers.len:
+        var dead = false
+        withLock allTimers[k].lock: dead = allTimers[k].stopped
+        if dead: allTimers.del(k) else: inc k
+      allTimers.add t
   createThread(t.thr[], timerMain, t)
   L.closers.add proc () =
     {.cast(gcsafe).}:
@@ -2595,6 +2604,13 @@ proc openInterface(L: Interp): Value =
     elif not st.loopRunning:
       st.loopRunning = true
       L.blocking: runApplication()
+      # fenêtres fermées : plus de minuterie (une minuterie qui touchait l'interface après
+      # SDL_Quit faisait planter la sortie du programme)
+      {.cast(gcsafe).}:
+        withLock uiLock:
+          for t in allTimers:
+            if t.owner == L:
+              withLock t.lock: t.stopped = true
     L.checkStop()
   m.fn "quitter", proc (L: Interp, a: seq[Value]): seq[Value] =
     if L.hosted: L.closeAllWindows() else: quitApplication()

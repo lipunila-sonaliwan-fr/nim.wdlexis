@@ -17,8 +17,9 @@ APP="$ROOT/wdlexis+.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$EXE" "$APP/Contents/MacOS/wdlexis+"
-ln -s "$ROOT/macOS" "$APP/Contents/Resources/macOS"
-ln -s "$ROOT/ttf" "$APP/Contents/Resources/ttf"
+cd "$APP/Contents/Resources"
+for d in macOS ttf; do cp -RL "$d" "$d.tmp" && rm "$d" && mv "$d.tmp" "$d"; done
+cd -
 # icône .icns à partir de src/ressources/wdlexis.png (outils macOS sips / iconutil)
 ICON=""
 if [ -f src/ressources/wdlexis.png ] && command -v iconutil >/dev/null; then

@@ -1999,6 +1999,7 @@ Fonctions intégrées de Lexis+
 | `rognerd(s)` | Retire les espaces à droite (RTRIM). |
 | `longueur(s)` | Nombre de caractères (ou d'éléments d'une liste). |
 | `souschaine(s, debut, [n])` | Extrait n caractères à partir de debut (SUBSTR) ; positions à partir de 1. |
+| `caracteres(s)` | Liste des caractères de s (un élément par caractère UTF-8), en un seul parcours. |
 | `gauche(s, n)` | Les n premiers caractères. |
 | `droite(s, n)` | Les n derniers caractères. |
 | `position(sous, s)` | Position de sous dans s, 0 si absente (AT). |

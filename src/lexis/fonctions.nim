@@ -14,6 +14,16 @@ import api, zones, crypto, sqlsession
 # Outils
 #
 
+
+proc graphemeLenSafe(s: string, i: int): int {.inline.} =
+  ## Longueur en octets du caractère UTF-8 commençant à i (1 si l'octet est invalide).
+  let c = ord(s[i])
+  if c < 0x80: 1
+  elif c shr 5 == 0b110: 2
+  elif c shr 4 == 0b1110: 3
+  elif c shr 3 == 0b11110: 4
+  else: 1
+
 proc tostrArg(L: Interp, a: seq[Value], i: int): string = L.tostr(arg(a, i))
 
 proc numOf(L: Interp, a: seq[Value], i: int, fname: string): Value =
@@ -130,10 +140,36 @@ proc openBase(L: Interp): Value =
     let v = arg(a, 1)
     if v.kind == vkTable: intV(v.t.rawLen) else: intV(L.tostr(v).runeLen)
   def "souschaine":
-    let r = L.tostrArg(a, 1).toRunes
+    # parcours des octets jusqu'au début demandé (sans convertir toute la chaîne en runes :
+    # un parcours caractère par caractère restait quadratique sur les longs textes)
+    let s = L.tostrArg(a, 1)
     let d = max(1, int(L.checkInt(a, 2, "souschaine")))
-    let n = int(L.optInt(a, 3, "souschaine", r.len))
-    if d > r.len or n <= 0: strV("") else: strV($r[d - 1 ..< min(r.len, d - 1 + n)])
+    let n = if a.len >= 3 and arg(a, 3).kind != vkNil: int(L.checkInt(a, 3, "souschaine")) else: high(int)
+    if n <= 0: strV("")
+    else:
+      var i = 0
+      var k = 1
+      while k < d and i < s.len:
+        i += max(1, graphemeLenSafe(s, i))
+        inc k
+      if i >= s.len: strV("")
+      else:
+        var j = i
+        var c = 0
+        while c < n and j < s.len:
+          j += max(1, graphemeLenSafe(s, j))
+          inc c
+        strV(s[i ..< min(j, s.len)])
+  def "caracteres":
+    # liste des caractères d'une chaîne (un parcours, au lieu de souschaine(s, i, 1) répété)
+    let t = newLTable()
+    let s = L.tostrArg(a, 1)
+    var i = 0
+    while i < s.len:
+      let l = max(1, graphemeLenSafe(s, i))
+      t.arr.add strV(s[i ..< min(i + l, s.len)])
+      i += l
+    tableV(t)
   def "gauche":
     let r = L.tostrArg(a, 1).toRunes
     strV($r[0 ..< clamp(int(L.checkInt(a, 2, "gauche")), 0, r.len)])
@@ -436,6 +472,7 @@ registerPackage PackageDef(name: "base", global: true, open: openBase,
     "rognerd(s)", "Retire les espaces à droite (RTRIM).",
     "longueur(s)", "Nombre de caractères (ou d'éléments d'une liste).",
     "souschaine(s, debut, [n])", "Extrait n caractères à partir de debut (SUBSTR) ; positions à partir de 1.",
+    "caracteres(s)", "Liste des caractères de s (un élément par caractère UTF-8), en un seul parcours.",
     "gauche(s, n)", "Les n premiers caractères.",
     "droite(s, n)", "Les n derniers caractères.",
     "position(sous, s)", "Position de sous dans s, 0 si absente (AT).",

@@ -428,9 +428,30 @@ proc findFont(file: string): string =
     if fileExists(d / file): return d / file
   ""
 
+var fontFileLock: Lock
+initLock(fontFileLock)
+var fontFileCache {.global.}: Table[string, tuple[path: string, synthBold, synthItalic: bool]]
+
+proc fontFileUncached(family: string, bold, italic: bool): tuple[path: string, synthBold, synthItalic: bool]
+
 proc fontFile*(family: string, bold, italic: bool): tuple[path: string, synthBold, synthItalic: bool] =
   ## Fichier de police d'une famille (Poppins, Lora, Mono, Sans) ; gras et italique
-  ## simulés quand la variante manque.
+  ## simulés quand la variante manque. Résultat mis en cache (la recherche sur disque
+  ## coûtait plusieurs accès au système de fichiers par texte mesuré ou dessiné).
+  var nd = 0
+  {.cast(gcsafe).}:
+    nd = fontDirs.len
+  let key = family & "|" & $bold & "|" & $italic & "|" & $nd
+  {.cast(gcsafe).}:
+    withLock fontFileLock:
+      if fontFileCache.hasKey(key): return fontFileCache[key]
+  result = fontFileUncached(family, bold, italic)
+  {.cast(gcsafe).}:
+    withLock fontFileLock:
+      if fontFileCache.len > 256: fontFileCache.clear()
+      fontFileCache[key] = result
+
+proc fontFileUncached(family: string, bold, italic: bool): tuple[path: string, synthBold, synthItalic: bool] =
   let f = family.toLowerAscii
   var cands: seq[(string, bool, bool)]
   if "lora" in f or "serif" == f or "serif" in f and "sans" notin f or "georgia" in f or "times" in f:
@@ -866,6 +887,62 @@ proc stampOf(path: string): int64 =
   try: getLastModificationTime(path).toUnix * 1000 + int64(getFileSize(path) mod 1000)
   except CatchableError: -1
 
+var sizeCache {.global.}: Table[string, tuple[stamp: int64, w, h: int]]
+
+proc imageSize*(path: string): tuple[w, h: int] =
+  ## Dimensions d'une image PNG, JPEG, GIF ou BMP lues dans l'en-tête, sans décoder les
+  ## pixels (mise en page de documents illustrés) ; (0, 0) si le format n'est pas reconnu.
+  let st = stampOf(path)
+  if st < 0: return (0, 0)
+  {.cast(gcsafe).}:
+    withLock imgLock:
+      if sizeCache.hasKey(path) and sizeCache[path].stamp == st:
+        return (sizeCache[path].w, sizeCache[path].h)
+  var f: File
+  if not open(f, path, fmRead): return (0, 0)
+  defer: close(f)
+  proc rd(f: File, pos, n: int): string =
+    result = newString(n)
+    f.setFilePos(pos)
+    let got = f.readBuffer(addr result[0], n)
+    result.setLen(max(0, got))
+  let h = rd(f, 0, 32)
+  proc be16(s: string, i: int): int = (ord(s[i]) shl 8) or ord(s[i+1])
+  proc be32(s: string, i: int): int = (ord(s[i]) shl 24) or (ord(s[i+1]) shl 16) or (ord(s[i+2]) shl 8) or ord(s[i+3])
+  proc le16(s: string, i: int): int = ord(s[i]) or (ord(s[i+1]) shl 8)
+  proc le32(s: string, i: int): int = ord(s[i]) or (ord(s[i+1]) shl 8) or (ord(s[i+2]) shl 16) or (ord(s[i+3]) shl 24)
+  if h.len >= 24 and h[0 .. 7] == "\x89PNG\r\n\x1a\n":
+    result = (be32(h, 16), be32(h, 20))
+  elif h.len >= 10 and (h[0 .. 5] == "GIF87a" or h[0 .. 5] == "GIF89a"):
+    result = (le16(h, 6), le16(h, 8))
+  elif h.len >= 26 and h[0 .. 1] == "BM":
+    result = (le32(h, 18), abs(int32(le32(h, 22))).int)
+  elif h.len >= 4 and ord(h[0]) == 0xFF and ord(h[1]) == 0xD8:
+    # JPEG : parcours des segments jusqu'au marqueur SOFn
+    var pos = 2
+    let size = int(getFileSize(f))
+    while pos + 9 < size:
+      let m = rd(f, pos, 10)
+      if m.len < 10 or ord(m[0]) != 0xFF: break
+      let mk = ord(m[1])
+      if mk == 0xFF:
+        inc pos
+        continue
+      if mk in {0xD8, 0x01} or mk in 0xD0 .. 0xD7:
+        pos += 2
+        continue
+      let segLen = be16(m, 2)
+      if mk in 0xC0 .. 0xCF and mk notin {0xC4, 0xC8, 0xCC}:
+        result = (be16(m, 7), be16(m, 5))
+        break
+      if segLen < 2: break
+      pos += 2 + segLen
+  if result.w > 0 and result.h > 0:
+    {.cast(gcsafe).}:
+      withLock imgLock:
+        if sizeCache.len > 4096: sizeCache.clear()
+        sizeCache[path] = (st, result.w, result.h)
+
 proc decodeBmp*(data: string): RgbaImage =
   ## BMP 24 ou 32 bits non compressé.
   if data.len < 54 or data[0 .. 1] != "BM": raise newException(ValueError, "BMP illisible")
@@ -916,7 +993,10 @@ proc loadRgba*(path: string): RgbaImage =
     return
   {.cast(gcsafe).}:
     withLock imgLock:
-      if imgCache.len > 64: imgCache.clear()
+      # budget mémoire (photos de plusieurs mégapixels : 4 octets par pixel décodé)
+      var total = result.px.len
+      for v in imgCache.values: total += v.img.px.len
+      if imgCache.len > 64 or total > 384 * 1024 * 1024: imgCache.clear()
       imgCache[path] = (st, result)
 
 #
@@ -1100,9 +1180,27 @@ proc renderShape*(sc: VScene, s: VShape, r: var Raster, m: Affine, depth = 0) =
         if s.arrowEnd: r.fillPolys(@[arrowPoly(a[^1], a[^2], sz)], p)
         if s.arrowStart: r.fillPolys(@[arrowPoly(a[0], a[1], sz)], p)
 
+proc onRaster(s: VShape, r: Raster, m: Affine): bool =
+  ## Vrai si la forme peut toucher le raster (boîte transformée, marges du trait, de
+  ## l'ombre et des jambages) : les formes hors champ ne sont ni rastérisées ni décodées.
+  let b = s.bounds
+  var mg = max(0.0, s.strokeWidth) + 2
+  if s.shadow: mg += 30
+  if s.kind == vkText: mg += s.fontSize * 0.6
+  if s.arrowStart or s.arrowEnd: mg += 12 + s.strokeWidth * 3
+  var x0 = Inf
+  var y0 = Inf
+  var x1 = -Inf
+  var y1 = -Inf
+  for (px, py) in [(b.x - mg, b.y - mg), (b.x + b.w + mg, b.y - mg), (b.x + b.w + mg, b.y + b.h + mg), (b.x - mg, b.y + b.h + mg)]:
+    let q = m.apply(px, py)
+    x0 = min(x0, q.x); y0 = min(y0, q.y); x1 = max(x1, q.x); y1 = max(y1, q.y)
+  not (x1 < 0 or y1 < 0 or x0 > r.w.float or y0 > r.h.float)
+
 proc renderScene*(sc: VScene, r: var Raster, m: Affine, skip: HashSet[string] = initHashSet[string](),
                   depth = 0) =
-  ## Dessine les formes visibles (ordre des calques, puis ordre des formes).
+  ## Dessine les formes visibles (ordre des calques, puis ordre des formes) ; les formes
+  ## entièrement hors du raster sont ignorées (grandes scènes : galeries de pages).
   var bg: Gradient
   if sc.background.len > 0:
     let bbox = (x: 0.0, y: 0.0, w: sc.width, h: sc.height)
@@ -1120,10 +1218,11 @@ proc renderScene*(sc: VScene, r: var Raster, m: Affine, skip: HashSet[string] = 
       let k = sc.layerOf(s.layer)
       let lk = if k < 0: 0 else: k
       if lk != li: continue
+      if not s.onRaster(r, m): continue
       renderShape(sc, s, r, m, depth)
   if sc.layers.len == 0:
     for s in sc.shapes:
-      if s.id notin skip and not s.hidden: renderShape(sc, s, r, m, depth)
+      if s.id notin skip and not s.hidden and s.onRaster(r, m): renderShape(sc, s, r, m, depth)
 
 proc renderToRgba*(sc: VScene, w, h: int, bg = VColor()): seq[uint8] =
   ## Rendu de toute la scène dans w×h pixels (mise à l'échelle sans déformation, centrée).
@@ -1677,6 +1776,7 @@ proc parseSvgScene*(code: string, base = ""): VScene =
   sc.height = h
   sc.layers = @[]
   var groupSeq = 0
+  var usedIds = initHashSet[string]()
   proc applyAttrs(st: var StyleState, at: Table[string, string]) =
     let m = styleMap(at)
     if m.hasKey("color") and m["color"].toLowerAscii notin ["inherit", "currentcolor"]: st.color = m["color"]
@@ -1730,7 +1830,9 @@ proc parseSvgScene*(code: string, base = ""): VScene =
     if nd.attrs.hasKey("data-verrou"): s.locked = true
     if nd.attrs.hasKey("marker-end") or nd.attrs.hasKey("data-fleche-fin"): s.arrowEnd = true
     if nd.attrs.hasKey("marker-start") or nd.attrs.hasKey("data-fleche-debut"): s.arrowStart = true
-    if sc.findShape(s.id) != nil: s.id = newId()
+    # identifiants uniques : ensemble (une recherche linéaire par forme rendait la lecture quadratique)
+    if s.id in usedIds: s.id = newId()
+    usedIds.incl s.id
     sc.shapes.add s
   proc boxed(s: VShape, x, y, w, h: float, m: Affine): VShape =
     ## Boîte (x, y, w, h) transformée par m : translation et échelle appliquées, rotation

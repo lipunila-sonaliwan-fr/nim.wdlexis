@@ -69,7 +69,7 @@ profilchoix = {0, 0}    && page Profil : dernières lignes choisies (procédures
 && Une fenêtre compacte : menu et barre de symboles collés en haut, état collé en bas ;
 && à gauche Projet / Structure / Référence, en bas Problèmes / Console / Variables /
 && Pile d'appels (chaque ensemble se masque << >> ou s'ouvre dans une fenêtre dédiée).
-fen = ui.fenetre{titre = "wdlexis+ [S]tudio 2.0.1", largeur = 1500, hauteur = 900, disposition = "bordure", ;
+fen = ui.fenetre{titre = "wdlexis+ [S]tudio 2.1.2", largeur = 1500, hauteur = 900, disposition = "bordure", ;
                  sombre = reglages.sombre, densite = "compacte", x = 40, y = 40}
 fen.marge = 0
 fen.espacement = 0

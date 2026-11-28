@@ -18,7 +18,9 @@
 # * Rendu : la scène est rastérisée par vscene dans une texture mise en cache ; pendant un
 #   glisser, la sélection est rendue à part (déplacement sans nouveau rendu).
 # * Événements : evSelection (texte : identifiants séparés par des virgules ; en galerie et
-#   plateau : le groupe), evChange (texte : action ; lastAction et lastIds en détail),
+#   plateau : le groupe ; en galerie, une forme verrouillée est du décor : ni survol ni
+#   sélection, le glisser fait défiler ; une forme hors groupe portant des données
+#   (data-composant) est une zone active : son clic émet ses données), evChange (texte : action ; lastAction et lastIds en détail),
 #   evDoubleClick (texte : identifiant ou groupe).
 
 import std/[math, strutils, tables, sets, algorithm, sequtils, os]
@@ -121,7 +123,8 @@ proc fit*(c: VectorCanvas) =
   if r.w < 10 or r.h < 10 or c.scene.width <= 0 or c.scene.height <= 0: return
   let m = if c.mode == vmView: 0.0 elif c.mode in {vmGallery, vmBoard}: 8.0 else: 32.0
   if c.fitWidth or c.mode in {vmGallery, vmBoard}:
-    c.zoom = max(0.05, (r.w - 2 * m) / c.scene.width)
+    let bar = if c.mode == vmGallery: ScrollBarSize + 2 else: 0.0
+    c.zoom = max(0.05, (r.w - 2 * m - bar) / c.scene.width)
     c.panX = m
     c.panY = m
   else:
@@ -137,6 +140,26 @@ proc setZoomAt*(c: VectorCanvas, z: float, sx, sy: float) =
   c.zoom = nz
   c.panX = sx - c.rect.x - p.x * nz
   c.panY = sy - c.rect.y - p.y * nz
+
+proc galleryBar(c: VectorCanvas): bool =
+  ## Galerie (pages l'une sous l'autre) : ascenseur vertical au bord droit.
+  c.mode == vmGallery
+
+proc clampGalleryPan(c: VectorCanvas) =
+  if c.mode in {vmGallery, vmBoard}:
+    let maxPan = 8.0
+    let minPan = min(8.0, c.rect.h - c.scene.height * c.zoom - 8)
+    c.panY = clamp(c.panY, minPan, maxPan)
+    if c.mode == vmGallery:
+      let right = if c.galleryBar: ScrollBarSize + 2 else: 0.0
+      c.panX = c.panX.clamp(min(8.0, c.rect.w - right - c.scene.width * c.zoom - 8), 8)
+
+method scrollTrackTo*(c: VectorCanvas, vertical: bool, pos: float) =
+  ## Ascenseur de la galerie : pos = décalage du haut de la vue dans le contenu (pixels).
+  if vertical and c.galleryBar:
+    c.panY = 8 - pos
+    c.clampGalleryPan
+    markDirty(c)
 
 proc invalidate*(c: VectorCanvas) =
   inc c.scene.version
@@ -560,6 +583,9 @@ method draw*(c: VectorCanvas, d: Drawing, t: Theme) =
     let tw = d.textWidth(label) + 14
     d.fillRoundRect(rect(r.x + r.w - tw - 8, r.y + r.h - 26, tw, 20), 6, Color(r: 15, g: 23, b: 42, a: 150))
     d.text(r.x + r.w - tw - 1, r.y + r.h - 26 + (20 - d.textHeight) / 2, label, Color(r: 255, g: 255, b: 255, a: 230))
+  # ascenseur vertical de la galerie (contenu : la planche et ses marges de 8 px)
+  if c.galleryBar:
+    c.drawScrollBar(d, t, vBarArea(r), c.scene.height * c.zoom + 16, r.h, 8 - c.panY)
   d.popClip()
 
 #
@@ -986,11 +1012,18 @@ method onMouse*(c: VectorCanvas, e: MouseEvent) =
       return
     of vmGallery, vmBoard:
       let s = c.shapeAt(e.x, e.y, true)
-      if s == nil:
+      if s == nil or (c.mode == vmGallery and s.locked):
+        # fond ou décor verrouillé (page d'un document) : glisser fait défiler
+        if s != nil: emit(c, evSelection, text = "")
         c.setSelection(@[])
         c.drag = vdPan
         c.origPanX = c.panX
         c.origPanY = c.panY
+        return
+      if c.mode == vmGallery and s.group.len == 0 and s.data.len > 0:
+        # zone active d'un document (lien) : ses données, sans sélection
+        emit(c, evSelection, text = s.data)
+        if e.clicks >= 2: emit(c, evDoubleClick, text = s.data)
         return
       let ids = c.selectableIds(s)
       if ids != c.selection:
@@ -1175,7 +1208,8 @@ method onMouse*(c: VectorCanvas, e: MouseEvent) =
     case c.drag
     of vdNone:
       let s = c.shapeAt(e.x, e.y, c.mode != vmEdit)
-      let hid = if s == nil: "" else: s.id
+      # galerie : une forme verrouillée est du décor (pas de survol)
+      let hid = if s == nil or (c.mode == vmGallery and s.locked): "" else: s.id
       if hid != c.hoverId:
         c.hoverId = hid
         markDirty(c)
@@ -1183,7 +1217,9 @@ method onMouse*(c: VectorCanvas, e: MouseEvent) =
     of vdPan:
       c.panX = c.origPanX + (lx - c.startX)
       c.panY = c.origPanY + (ly - c.startY)
-      if c.mode in {vmGallery, vmBoard}: c.panX = c.origPanX
+      if c.mode in {vmGallery, vmBoard}:
+        c.panX = c.origPanX
+        c.clampGalleryPan
       markDirty(c)
     of vdMove:
       if not c.moved or c.origShapes.len == 0: return
@@ -1439,11 +1475,7 @@ method onWheel*(c: VectorCanvas, dx, dy: float): bool =
   else:
     c.panY += dy * 40
     c.panX += dx * 40
-  if c.mode in {vmGallery, vmBoard}:
-    let maxPan = 8.0
-    let minPan = min(8.0, c.rect.h - c.scene.height * c.zoom - 8)
-    c.panY = clamp(c.panY, minPan, maxPan)
-    if c.mode == vmGallery: c.panX = c.panX.clamp(min(8.0, c.rect.w - c.scene.width * c.zoom - 8), 8)
+  c.clampGalleryPan
   markDirty(c)
   true
 

@@ -668,10 +668,13 @@ proc shapeOps(p: PdfWriter, sc: VScene, s: VShape, page: var PageRec, pageIdx: i
             inner.add colorOps(c, false) & arrows & "f\nQ\n"
   if rot != Identity: body.add "q\n" & cmOps(rot) & inner & "Q\n"
   else: body.add inner
-  if body.len == 0: return ""
-  # balisage
   let info = s.roleOf
-  if p.opts.tagged and depth == 0:
+  # une zone de lien invisible (sans fond ni contour) garde son annotation
+  if body.len == 0 and (not p.opts.links or info.link.len == 0 or depth != 0): return ""
+  # balisage
+  if body.len == 0:
+    result = ""
+  elif p.opts.tagged and depth == 0:
     if info.role.len == 0 or info.role == "Artifact":
       result = "/Artifact BMC\n" & body & "EMC\n"
     else:

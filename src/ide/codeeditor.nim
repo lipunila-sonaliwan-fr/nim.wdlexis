@@ -1658,7 +1658,11 @@ method onText*(ed: CodeEditor, s: string) =
   if ed.comp.active:
     if last.isWordChar: ed.refilter()
     else: ed.comp.active = false
-  if last == '.': trigger = "complete"
+  if doc.isMarkdown:
+    # Markdown : complétion des liens « [[… » seulement
+    let ln = doc.lines[doc.line]
+    if last == '[' and doc.col >= 2 and ln[doc.col - 2] == '[': trigger = "complete"
+  elif last == '.': trigger = "complete"
   elif last == '(' or last == ',': trigger = "signature"
   elif last.isWordChar and not ed.comp.active and doc.col - doc.wordStart >= 3: trigger = "complete"
   ed.notifyChange(trigger)
@@ -1967,7 +1971,9 @@ proc openCompletion(ed: CodeEditor) =
       if k > 0: addItem(n[0 ..< k], n[k + 1 .. ^1], 6) else: addItem(n, "", 6)
     for n in d.identsOf(): addItem(n, "document", 6)
   elif d.isMarkdown:
-    # Markdown : noms fournis par le programme (ed:noms) : « libellé<TAB>détail ».
+    # Markdown : noms fournis par le programme (ed:noms) : « libellé<TAB>détail », proposés
+    # seulement dans un lien « [[… » (pas de complétion dans la prose).
+    if a < 2 or line[a - 1] != '[' or line[a - 2] != '[': return
     for n in ed.projectNames:
       let k = n.find('\t')
       if k > 0: addItem(n[0 ..< k], n[k + 1 .. ^1], 6) else: addItem(n, "", 6)

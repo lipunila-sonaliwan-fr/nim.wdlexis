@@ -11,7 +11,8 @@
 #   (déplacement), glisser le fond (panoramique), molette (zoom autour du pointeur),
 #   glisser depuis la pastille d'un bord (en mode modifiable) : création d'un lien.
 #   Clavier : Suppr signale une demande de suppression, Échap désélectionne.
-# * Événements : evSelection (texte : id du nœud, « lien:<id> » ou ""), evChange
+# * Événements : evSelection (texte : id du nœud, « lien:<id> » ou ""), evDoubleClick
+#   (texte : id du nœud), evChange
 #   (texte : « deplace », « lien » ou « supprimer » ; détail dans lastAction).
 # * Disposition automatique en couches (sources à gauche ou en haut), nœuds isolés
 #   rangés en grille ; « ajuster » cadre l'ensemble.
@@ -560,6 +561,11 @@ method onMouse*(c: DiagramCanvas, e: MouseEvent) =
     if n != nil:
       let row = n.rowAt(ly)
       if n.id != c.selected or row != c.selRow or c.selLink.len > 0: c.select(n.id, row)
+      if e.clicks >= 2:
+        # double-clic sur un nœud : ouvrir (texte : id du nœud)
+        emit(c, evDoubleClick, text = n.id)
+        markDirty(c)
+        return
       # au premier plan
       let k = c.nodes.find(n)
       if k >= 0 and k != c.nodes.high:

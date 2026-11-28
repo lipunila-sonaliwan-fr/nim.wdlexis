@@ -170,7 +170,14 @@ proc openPublication(L: Interp): Value =
         let e = sg.rawGet(intV(i))
         if e.kind == vkTable:
           po.outlines.add PdfOutline(level: optField(e.t, "niveau", 1), title: optField(e.t, "titre", ""),
-                                     page: optField(e.t, "page", i), y: 0)
+                                     page: optField(e.t, "page", i), y: optField(e.t, "y", 0.0))
+    if o != nil and field(o, "ancres").kind == vkTable:
+      # ancres = {{id=, page=, y=}} : cibles des liens internes « #id » (data-composant="lien=#id")
+      let an = field(o, "ancres").t
+      for i in 1 .. an.rawLen:
+        let e = an.rawGet(intV(i))
+        if e.kind == vkTable:
+          po.anchors[optField(e.t, "id", "")] = (page: optField(e.t, "page", 1), y: optField(e.t, "y", 0.0))
     let w = newPdfWriter(po)
     for s in scenes: w.addScene(s)
     try: w.save(path)
@@ -205,9 +212,16 @@ proc openPublication(L: Interp): Value =
   m.fn "ancre", proc (L: Interp, a: seq[Value]): seq[Value] =
     @[strV(slugify(L.checkStr(a, 1, "ancre")))]
   m.fn "mesurer", proc (L: Interp, a: seq[Value]): seq[Value] =
-    # mesurer(texte, [police], [taille], [gras]) : largeur du texte (points).
+    # mesurer(texte, [police], [taille], [gras], [italique]) : largeur du texte (points).
     let s = L.checkStr(a, 1, "mesurer")
-    @[numV(measureText(L.optStr(a, 2, "mesurer", "Poppins"), L.optNum(a, 3, "mesurer", 12), optBool(a, 4, false), false, s))]
+    @[numV(measureText(L.optStr(a, 2, "mesurer", "Poppins"), L.optNum(a, 3, "mesurer", 12), optBool(a, 4, false),
+                       optBool(a, 5, false), s))]
+  m.fn "metriques", proc (L: Interp, a: seq[Value]): seq[Value] =
+    # metriques([police], [taille], [gras], [italique]) : {ascendante, hauteur} de la police
+    # (points) : place de la ligne de base dans une ligne de texte.
+    let fm = fontMetrics(L.optStr(a, 1, "metriques", "Poppins"), L.optNum(a, 2, "metriques", 12), optBool(a, 3, false),
+                         optBool(a, 4, false))
+    @[record({"ascendante": numV(fm.ascent), "hauteur": numV(fm.height)})]
   m.fn "png", proc (L: Interp, a: seq[Value]): seq[Value] =
     # png(svg, chemin, [largeur]) : rendu d'un SVG en PNG (miniatures, export).
     let code = L.checkStr(a, 1, "png")
@@ -238,6 +252,10 @@ proc openPublication(L: Interp): Value =
       let sc = loadSvgScene(p)
       if sc == nil: return @[nilV]
       return @[record({"largeur": numV(sc.width), "hauteur": numV(sc.height)})]
+    # en-tête seulement (sans décoder les pixels) ; décodage complet en dernier recours
+    let (iw, ih) = imageSize(p)
+    if iw > 0 and ih > 0:
+      return @[record({"largeur": numV(iw.float), "hauteur": numV(ih.float)})]
     let img = loadRgba(p)
     if img.w <= 0: return @[nilV]
     @[record({"largeur": numV(img.w.float), "hauteur": numV(img.h.float)})]
@@ -280,13 +298,14 @@ registerPackage PackageDef(name: "publication", open: openPublication,
   docs: docs("publication", [
     "publication.paginer(markdown[, gabarit])", "Met en page : {pages = {svg...}, titres = {{niveau, texte, id, page}}, nbpages, largeur, hauteur, duree (ms)}.",
     "publication.pdf(chemin, markdown[, gabarit])", "PDF vectoriel (texte réel, polices incorporées, signets, liens, sommaire, index, renvois, balisage d'accessibilité). qualite : standard, hd, ecran, impression (repères de coupe).",
-    "publication.pdfsvg(chemin, pages[, options])", "PDF d'une suite de SVG (diapositives, planches) : pages = liste de codes SVG ou de chemins ; signets = {{titre=, page=}}.",
+    "publication.pdfsvg(chemin, pages[, options])", "PDF d'une suite de SVG (diapositives, planches) : pages = liste de codes SVG ou de chemins ; signets = {{titre=, page=, niveau=, y=}} ; ancres = {{id=, page=, y=}} (cibles des liens « #id » : data-composant=\"lien=#id\") ; liens externes : data-composant=\"lien=https://…\".",
     "publication.symbolessvg(svg[, options])", "Planche de symboles : un SVG autonome par <symbol> ({{id, titre, svg, largeur, hauteur}}) ; options couleur (remplace currentColor) et taille (plus grand côté, 256 par défaut).",
     "publication.html(markdown[, prefixe])", "Fragment HTML (ancres, tableaux, encadrés, figures ; prefixe ajouté aux chemins d'images).",
     "publication.titres(markdown)", "Plan du document : {{niveau, texte, id}}.",
     "publication.textebrut(markdown)", "Texte sans balisage.",
     "publication.ancre(texte)", "Ancre d'un titre (minuscules sans accents, tirets).",
-    "publication.mesurer(texte[, police, taille, gras])", "Largeur d'un texte en points.",
+    "publication.mesurer(texte[, police, taille, gras, italique])", "Largeur d'un texte en points.",
+    "publication.metriques([police, taille, gras, italique])", "Métriques de la police : {ascendante, hauteur} en points (ligne de base).",
     "publication.png(svg, chemin[, largeur, dossier])", "Rendu PNG d'un SVG (miniatures).",
     "publication.importer(source, destination[, {page=, largeur=}])", "Convertit PNG, JPEG, GIF, BMP, WEBP (SDL3_image) ou une page de PDF en PNG ; {chemin, largeur, hauteur}.",
     "publication.pagespdf(chemin)", "Nombre de pages d'un PDF.",

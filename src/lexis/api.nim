@@ -21,6 +21,15 @@
 import std/[strutils, tables]
 import core, interp
 
+# Linux (glibc) : les gestionnaires d'événements et les minuteries s'exécutent sur plusieurs
+# fils ; chaque fil reçoit sa propre zone (« arena ») de malloc et la mémoire libérée par l'un
+# n'est pas réutilisée par les autres : l'empreinte croissait de ~120 Mo par grande mise en
+# page (aperçus de documents). Deux zones suffisent.
+when defined(linux) and defined(useMalloc) and not defined(android):
+  proc c_mallopt(param, value: cint): cint {.importc: "mallopt", header: "<malloc.h>".}
+  discard c_mallopt(-8, 2)          # M_ARENA_MAX
+
+
 export core, interp
 
 type
@@ -46,14 +55,14 @@ proc registerPackage*(p: PackageDef) =
   registeredPackages.add p
 
 proc packages*(): seq[PackageDef] =
-  # Copie de la liste (pour l'énumération par l'atelier) ; dans l'interpréteur,
-  # utiliser findPackage / packageCount qui ne copient rien.
+  ## Copie de la liste (pour l'énumération par l'atelier) ; dans l'interpréteur,
+  ## utiliser findPackage / packageCount qui ne copient rien.
   {.cast(gcsafe).}:
     result = registeredPackages
 
 proc findPackage(n: string): int =
-  # Indice du paquet de nom n (minuscules), -1 sinon ; sans copie de la liste
-  # (la copie, documentation comprise, coûtait ~100 µs à chaque binaire.xxx).
+  ## Indice du paquet de nom n (minuscules), -1 sinon ; sans copie de la liste
+  ## (la copie, documentation comprise, coûtait ~100 µs à chaque binaire.xxx).
   {.cast(gcsafe).}:
     for i in 0 ..< registeredPackages.len:
       if registeredPackages[i].name == n: return i
@@ -62,8 +71,8 @@ proc findPackage(n: string): int =
 proc isPackageName*(name: string): bool = findPackage(name.toLowerAscii) >= 0
 
 proc docs*(section: string, items: openArray[string]): seq[ApiDoc] =
-  # Paires « signature », « description ». Le nom et le propriétaire sont
-  # déduits de la signature : f(...), pkg.f(...), obj:f(...).
+  ## Paires « signature », « description ». Le nom et le propriétaire sont
+  ## déduits de la signature : f(...), pkg.f(...), obj:f(...).
   var i = 0
   while i + 1 < items.len:
     let sig = items[i]
